@@ -114,6 +114,13 @@ function withinVault(p: string): boolean {
   return !!vaultRoot && (p === vaultRoot || p.startsWith(vaultRoot + sep))
 }
 
+// file:read / file:save serve note files (inside the vault) AND the settings
+// file (in userData). Anything else is rejected, so a crafted path from the
+// renderer can't read/overwrite arbitrary files.
+function isAccessibleFile(p: string): boolean {
+  return withinVault(p) || p === settingsFilePath()
+}
+
 /** Absolute paths of every markdown file under `dir` (recursively, skip dotdirs). */
 async function markdownUnder(dir: string): Promise<string[]> {
   const out: string[] = []
@@ -318,12 +325,16 @@ function registerIpc(): void {
     return true
   })
 
-  ipcMain.handle('file:read', (_e, path: string) => fs.readFile(path, 'utf8'))
+  ipcMain.handle('file:read', (_e, path: string) => {
+    if (!isAccessibleFile(path)) throw new Error('Access denied: path outside the vault')
+    return fs.readFile(path, 'utf8')
+  })
 
   ipcMain.handle('file:save', async (_e, path: string, content: string) => {
+    if (!isAccessibleFile(path)) throw new Error('Access denied: path outside the vault')
     atomicWrite(path, content)
     // Re-index synchronously from the bytes we just wrote (no fs round-trip).
-    if (index && vaultRoot && path.startsWith(vaultRoot)) {
+    if (index && withinVault(path)) {
       const { mtimeMs } = await fs.stat(path)
       index.indexFile(path, content, Math.floor(mtimeMs))
     }
@@ -332,6 +343,10 @@ function registerIpc(): void {
   // Synchronous save used on window close (beforeunload can't await async IPC).
   ipcMain.on('file:save-now', (e, path: string, content: string) => {
     try {
+      if (!isAccessibleFile(path)) {
+        e.returnValue = false
+        return
+      }
       atomicWrite(path, content)
       if (index && withinVault(path)) index.indexFile(path, content, 0)
     } catch {

@@ -1,0 +1,5 @@
+# The "Sponsor" button on the repo + each release reads from this file.
+# Replace the placeholder with your Buy Me a Coffee username (the slug in your
+# https://www.buymeacoffee.com/<username> URL). You can also add github: [user]
+# once GitHub Sponsors is enabled, or ko_fi:, custom: [url], etc.
+buy_me_a_coffee: your-bmc-username

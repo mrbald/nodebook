@@ -165,13 +165,16 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [settingsOpen, configSaver, noteSaver])
 
-  // Synchronously flush on window close so nothing is lost.
+  // Synchronously flush on window close so nothing is lost. Closing is the
+  // terminal action, so we flush a dirty buffer regardless of the
+  // autosave-on-switch setting (that setting governs saves during normal work,
+  // not the last-chance flush on quit — no editor should drop your buffer).
   useEffect(() => {
     const onBeforeUnload = (): void => {
-      if (settingsOpen && settingsPath && configSaver.dirty && configSaver.onSwitchEnabled()) {
+      if (settingsOpen && settingsPath && configSaver.dirty) {
         const c = configSaver.getContent()
         if (c != null) window.nodebook.saveFileNow(settingsPath, c)
-      } else if (active && noteSaver.dirty && noteSaver.onSwitchEnabled()) {
+      } else if (active && noteSaver.dirty) {
         const c = noteSaver.getContent()
         if (c != null) window.nodebook.saveFileNow(active.path, c)
       }

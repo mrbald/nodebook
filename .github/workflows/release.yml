@@ -25,6 +25,16 @@ jobs:
       # Native better-sqlite3 must compile on each OS — no cross-compile, which
       # is exactly why this is a per-OS matrix.
       - run: npm ci
+      # Don't ship a build stamped with the wrong version.
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG=${GITHUB_REF_NAME#v}
+          test "$PKG" = "$TAG" || { echo "::error::tag $GITHUB_REF_NAME != package.json $PKG"; exit 1; }
+      # Gate the release on the same checks CI runs (the e2e is Linux-only).
+      - name: Typecheck & unit tests
+        run: npm run typecheck && npm test
       - name: Build & publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

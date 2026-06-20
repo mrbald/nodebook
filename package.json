@@ -1,10 +1,10 @@
 {
   "name": "nodebook",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A source-mode markdown notebook with a knowledge index.",
   "main": "./out/main/index.js",
-  "author": "",
-  "license": "MIT",
+  "author": "Vlad Lysyy <lysyy@me.com>",
+  "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
