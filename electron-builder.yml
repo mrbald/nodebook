@@ -1,0 +1,42 @@
+appId: com.nodebook.app
+productName: Nodebook
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintrc,.prettierrc,tsconfig.*.json,tsconfig.json}'
+  - '!{.github,e2e,playwright.config.ts,vitest.config.*}'
+# Native addons (better-sqlite3) must live outside the asar so their .node
+# binaries can be dlopen'd at runtime.
+asarUnpack:
+  - '**/*.node'
+mac:
+  category: public.app-category.productivity
+  # Signing is applied only when a cert is provided via CSC_LINK (see
+  # .github/workflows/release.yml); without it the build is unsigned.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarization: flip to `true` once the APPLE_* secrets are added, so the
+  # first unsigned release doesn't fail on a missing Apple credential.
+  notarize: false
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+win:
+  target:
+    - nsis
+    - portable
+linux:
+  category: Utility
+  target:
+    - AppImage
+    - deb
+# Publish to GitHub Releases for the pushed tag (needs GH_TOKEN in CI).
+publish:
+  provider: github

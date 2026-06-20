@@ -1,0 +1,130 @@
+import { app } from 'electron'
+import { join } from 'path'
+import { existsSync, writeFileSync, readFileSync } from 'fs'
+import { parse as parseToml } from 'smol-toml'
+import type { Settings } from '../shared/types'
+
+/**
+ * App-level settings, stored as hand-editable TOML at
+ * `<userData>/settings.toml`. Parsing is split into a pure `parseSettings`
+ * (golden-tested, no fs/electron) and a thin fs wrapper. Unknown keys are
+ * ignored; missing or malformed values fall back to defaults, so a broken file
+ * never crashes the app — it just reverts a value.
+ */
+
+export const DEFAULTS: Settings = {
+  editor: { fontSize: 15, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
+  theme: { followSystem: true, dark: 'dark', light: 'light', name: 'dark' }
+}
+
+const MODES = ['code', 'live', 'reading'] as const
+
+export const DEFAULT_TOML = `# Nodebook settings — every option with its default. Edit and save; changes
+# apply live (⌘S to save now). "Reset to defaults" restores this file verbatim.
+
+[editor]
+# Editor font size, in pixels.
+fontSize = 15
+# Autosave after you stop typing for this many ms. 0 = off (save with ⌘S).
+autosaveDelayMs = 0
+# Also autosave when you switch notes or close the window.
+autosaveOnSwitch = true
+# View mode a note opens in: "code" (raw + highlight), "live" (hybrid), or
+# "reading" (styled, read-only).
+defaultMode = "live"
+
+[theme]
+# Themes color the whole app and the editor together.
+# Available: dark, light, one-dark, dracula, nord, solarized-light
+
+# Follow the OS light/dark appearance. When on, "dark" and "light" pick the
+# theme for each mode; when off, "name" is always used.
+followSystem = true
+dark = "dark"
+light = "light"
+name = "dark"
+`
+
+/** Pure: TOML text → validated Settings, defaults filling any gap. */
+export function parseSettings(raw: string): Settings {
+  let data: Record<string, unknown> = {}
+  try {
+    data = parseToml(raw) as Record<string, unknown>
+  } catch {
+    return { editor: { ...DEFAULTS.editor }, theme: { ...DEFAULTS.theme } }
+  }
+  const editor = (data.editor ?? {}) as Record<string, unknown>
+  const theme = (data.theme ?? {}) as Record<string, unknown>
+  const fontSize = Number(editor.fontSize)
+  const delay = Number(editor.autosaveDelayMs)
+  const mode = MODES.includes(editor.defaultMode as (typeof MODES)[number])
+    ? (editor.defaultMode as (typeof MODES)[number])
+    : DEFAULTS.editor.defaultMode
+  // Theme names pass through as any non-empty string; the renderer resolves
+  // unknown names to the default, so main needn't know the theme registry.
+  const str = (v: unknown, fallback: string): string =>
+    typeof v === 'string' && v ? v : fallback
+  return {
+    editor: {
+      fontSize: Number.isFinite(fontSize) ? fontSize : DEFAULTS.editor.fontSize,
+      autosaveDelayMs:
+        Number.isFinite(delay) && delay >= 0 ? delay : DEFAULTS.editor.autosaveDelayMs,
+      autosaveOnSwitch:
+        typeof editor.autosaveOnSwitch === 'boolean'
+          ? editor.autosaveOnSwitch
+          : DEFAULTS.editor.autosaveOnSwitch,
+      defaultMode: mode
+    },
+    theme: {
+      followSystem:
+        typeof theme.followSystem === 'boolean'
+          ? theme.followSystem
+          : DEFAULTS.theme.followSystem,
+      dark: str(theme.dark, DEFAULTS.theme.dark),
+      light: str(theme.light, DEFAULTS.theme.light),
+      name: str(theme.name, DEFAULTS.theme.name)
+    }
+  }
+}
+
+export type ThemeMode = 'system' | 'dark' | 'light'
+
+/**
+ * Pure: apply a quick theme choice to TOML text, editing the existing keys in
+ * place so the user's comments survive. `system` → followSystem=true (keeps the
+ * dark/light picks); `dark`/`light` → followSystem=false + name set. Missing
+ * keys/section are created.
+ */
+export function setThemeMode(raw: string, mode: ThemeMode): string {
+  const setKey = (text: string, key: string, value: string): string => {
+    const re = new RegExp(`^(\\s*${key}\\s*=\\s*).*$`, 'm')
+    if (re.test(text)) return text.replace(re, `$1${value}`)
+    if (/^\[theme\]/m.test(text)) {
+      return text.replace(/^\[theme\][^\n]*$/m, (h) => `${h}\n${key} = ${value}`)
+    }
+    return `${text.replace(/\s*$/, '')}\n\n[theme]\n${key} = ${value}\n`
+  }
+  let out = setKey(raw, 'followSystem', mode === 'system' ? 'true' : 'false')
+  if (mode !== 'system') out = setKey(out, 'name', `"${mode}"`)
+  return out
+}
+
+export function settingsPath(): string {
+  return join(app.getPath('userData'), 'settings.toml')
+}
+
+/** Create the settings file with documented defaults if it does not exist. */
+export function ensureSettingsFile(): string {
+  const path = settingsPath()
+  if (!existsSync(path)) writeFileSync(path, DEFAULT_TOML, 'utf8')
+  return path
+}
+
+export function readSettings(): Settings {
+  ensureSettingsFile()
+  try {
+    return parseSettings(readFileSync(settingsPath(), 'utf8'))
+  } catch {
+    return { editor: { ...DEFAULTS.editor }, theme: { ...DEFAULTS.theme } }
+  }
+}

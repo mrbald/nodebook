@@ -1,0 +1,17 @@
+node_modules/
+out/
+dist/
+
+# Test output
+test-results/
+playwright-report/
+.playwright/
+
+# Rebuildable local index — must never become a second source of truth.
+.nodebook/
+
+# OS / editor noise
+.DS_Store
+*.log
+.idea/
+.vscode/

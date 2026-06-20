@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      # postinstall runs `electron-builder install-app-deps`, rebuilding
+      # better-sqlite3 against the Electron ABI used by the e2e app.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # The Electron e2e drives a real window, so it needs a virtual display and
+      # Chromium's shared libraries (Electron links the same set).
+      - run: npx playwright install-deps chromium
+      - run: xvfb-run --auto-servernum npm run test:e2e

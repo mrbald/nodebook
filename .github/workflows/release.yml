@@ -1,0 +1,43 @@
+name: Release
+
+# Tag a commit `vX.Y.Z` and push the tag to build + publish all three OS
+# binaries to a single GitHub Release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # GITHUB_TOKEN needs this to create the Release
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false # one OS failing must not cancel the others
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      # Native better-sqlite3 must compile on each OS — no cross-compile, which
+      # is exactly why this is a per-OS matrix.
+      - run: npm ci
+      - name: Build & publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code-signing certs (base64 .p12/.pfx). Set as repo secrets to enable
+          # signing; absent ⇒ unsigned build and the pipeline still succeeds.
+          CSC_LINK: ${{ (runner.os == 'macOS' && secrets.MAC_CSC_LINK) || (runner.os == 'Windows' && secrets.WIN_CSC_LINK) || '' }}
+          CSC_KEY_PASSWORD: ${{ (runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD) || (runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD) || '' }}
+          # Don't scan the keychain on macOS when no cert was supplied.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK != '' }}
+          # Apple notarization (effective once mac.notarize is `true`).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npm run build
+          npx electron-builder --publish always
