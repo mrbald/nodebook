@@ -2,6 +2,8 @@ appId: com.nodebook.app
 productName: Nodebook
 directories:
   buildResources: build
+# Ad-hoc signs unsigned macOS builds so arm64 isn't rejected as "damaged".
+afterPack: build/afterPack.cjs
 files:
   - '!**/.vscode/*'
   - '!src/*'
