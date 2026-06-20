@@ -4,12 +4,14 @@ import { EditorState, type Extension } from '@codemirror/state'
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
 import { indentOnInput } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
+import { languages } from '@codemirror/language-data'
 import { GFM } from '@lezer/markdown'
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete'
 import { searchKeymap } from '@codemirror/search'
 import { useCodeMirror } from './useCodeMirror'
 import { livePreview } from './livePreview'
 import { sourceLinks } from './sourceLinks'
+import { codeBlockFont } from './codeBlocks'
 import { wikilinkComplete } from './wikilinkComplete'
 import { WikilinkExtension } from '@shared/markdown/wikilink'
 import { getEditorTheme } from './themes'
@@ -67,7 +69,10 @@ export function Editor({
       history(),
       drawSelection(),
       indentOnInput(),
-      markdown({ extensions: [GFM, WikilinkExtension] }),
+      // codeLanguages lazy-loads a grammar per fenced-block info string so
+      // ```js / ```python / … get real language highlighting.
+      markdown({ extensions: [GFM, WikilinkExtension], codeLanguages: languages }),
+      codeBlockFont,
       autocompletion({ override: [wikilinkComplete(() => namesRef.current)] }),
       EditorView.lineWrapping,
       keymap.of([...defaultKeymap, ...historyKeymap, ...completionKeymap, ...searchKeymap])

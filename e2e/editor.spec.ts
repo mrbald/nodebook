@@ -307,6 +307,17 @@ test('three view modes: Code (raw), Live (default), Reading (read-only) — swit
   })
   expect(headingColors).toContain('rgb(122, 162, 247)')
 
+  // The ```js fenced block gets real language highlighting once lang-javascript
+  // lazy-loads: `const` turns the keyword color (#bb9af7 = rgb(187, 154, 247)).
+  const constColor = (): Promise<string | null> =>
+    page.evaluate(() => {
+      const el = [...document.querySelectorAll('.cm-content .cm-line span')].find(
+        (s) => s.textContent === 'const'
+      )
+      return el ? getComputedStyle(el).color : null
+    })
+  await expect.poll(constColor, { timeout: 9000 }).toBe('rgb(187, 154, 247)')
+
   // Reading: styled, pills back, heading '#' hidden ("no formatting symbols"),
   // and read-only.
   await switchMode('Reading')

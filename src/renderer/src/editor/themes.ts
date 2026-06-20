@@ -41,6 +41,8 @@ export interface Theme {
   vars: Record<string, string>
   /** CodeMirror extension (chrome + syntax). */
   editor: Extension
+  /** The syntax HighlightStyle (exposed for regression tests). */
+  highlight: HighlightStyle
 }
 
 function build(name: string, p: Palette): Theme {
@@ -94,20 +96,25 @@ function build(name: string, p: Palette): Theme {
     { tag: [t.variableName, t.name], color: p.variable },
     { tag: [t.operator, t.separator], color: p.operator },
     // Accent-colored links; the underline is hover-only (see .cm-source-link).
+    // Accent-colored links; the underline is hover-only (see .cm-source-link).
     { tag: [t.link, t.url], color: p.accent },
     { tag: t.emphasis, fontStyle: 'italic' },
     { tag: t.strong, fontWeight: 'bold', color: p.text },
     // Markdown source markers (#, **, `, [, ], >, -) — dim them like a code editor.
     { tag: t.processingInstruction, color: p.muted },
-    // Inline code + fenced-code text read as code (monospace) even in Code mode,
-    // where there are no live-preview decorations to switch the font.
-    { tag: [t.monospace], fontFamily: mono, color: p.property },
-    { tag: t.list, color: p.operator },
-    { tag: [t.tagName, t.atom], color: p.tag },
+    // Inline code reads as code; fenced blocks get monospace from a decoration
+    // (codeBlockFont) so they stay monospace even when parsed by a sub-language.
+    { tag: t.monospace, fontFamily: mono, color: p.property },
+    // NOTE: deliberately NO mapping for t.list / t.tagName / t.atom. The
+    // markdown parser tags ALL list content as `list`, inline `<x>` as
+    // `tagName`, and task markers `[x]` as `atom` — mapping those colored every
+    // list cyan and every `<...>` / checkbox red (the "random red"). Leaving
+    // them default keeps prose clean; the cost is HTML/JSX *tags* inside fenced
+    // code aren't tinted (keywords/strings/numbers still are).
     { tag: t.invalid, color: '#ff5370' }
   ])
 
-  return { name, dark: p.dark, vars, editor: [chrome, syntaxHighlighting(highlight)] }
+  return { name, dark: p.dark, vars, editor: [chrome, syntaxHighlighting(highlight)], highlight }
 }
 
 const THEMES: Record<string, Theme> = {
