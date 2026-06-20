@@ -15,3 +15,6 @@ playwright-report/
 *.log
 .idea/
 .vscode/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
