@@ -36,18 +36,29 @@ jobs:
       - name: Typecheck & unit tests
         run: npm run typecheck && npm test
       - name: Build & publish
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code-signing certs (base64 .p12/.pfx). Set as repo secrets to enable
-          # signing; absent ⇒ unsigned build and the pipeline still succeeds.
-          CSC_LINK: ${{ (runner.os == 'macOS' && secrets.MAC_CSC_LINK) || (runner.os == 'Windows' && secrets.WIN_CSC_LINK) || '' }}
-          CSC_KEY_PASSWORD: ${{ (runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD) || (runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD) || '' }}
-          # Don't scan the keychain on macOS when no cert was supplied.
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK != '' }}
+          # Raw cert secrets (base64 .p12/.pfx). CSC_LINK is exported below ONLY
+          # when non-empty — setting it to "" makes macOS electron-builder treat
+          # the empty value as a cert path and fail ("not a file").
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           # Apple notarization (effective once mac.notarize is `true`).
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Enable signing only when a cert is actually present; otherwise build
+          # unsigned without electron-builder attempting (and failing) to sign.
+          if [ "$RUNNER_OS" = "macOS" ] && [ -n "$MAC_CSC_LINK" ]; then
+            export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+          elif [ "$RUNNER_OS" = "Windows" ] && [ -n "$WIN_CSC_LINK" ]; then
+            export CSC_LINK="$WIN_CSC_LINK" CSC_KEY_PASSWORD="$WIN_CSC_KEY_PASSWORD"
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
           npm run build
           npx electron-builder --publish always
