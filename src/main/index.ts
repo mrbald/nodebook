@@ -357,6 +357,8 @@ function registerIpc(): void {
 
   ipcMain.handle('index:backlinks', (_e, target: string) => index?.backlinks(target) ?? [])
 
+  ipcMain.handle('index:outbound', (_e, sourceFile: string) => index?.outbound(sourceFile) ?? [])
+
   ipcMain.handle('index:search', (_e, query: string) => index?.search(query) ?? [])
 
   ipcMain.handle('index:noteNames', () => index?.noteNames() ?? [])

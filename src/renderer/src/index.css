@@ -184,6 +184,32 @@ body {
   background: var(--accent-bg);
 }
 
+/* Outbound links + key:: value properties of the current note. */
+.backlinks section + section {
+  margin-top: 16px;
+}
+.outbound-relation {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 12px 0 4px;
+}
+.outbound-item {
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+/* A value that resolves to a note is navigable; a literal value is not. */
+.outbound-item.is-link {
+  color: var(--accent);
+  cursor: pointer;
+}
+.outbound-item.is-link:hover {
+  background: var(--accent-bg);
+}
+
 /* --- Editor pane --------------------------------------------------------- */
 
 .editor-pane {

@@ -124,6 +124,17 @@ test('the index resolves backlinks with their relation', async () => {
   expect(links.every((l) => l.relation === 'links_to')).toBe(true)
 })
 
+test('the panel surfaces outbound links/properties and they navigate', async () => {
+  await page.locator('.tree-file', { hasText: 'welcome' }).click()
+  const panel = page.locator('.backlinks')
+  // welcome links out to [[Graph Model]] and [[projects/Roadmap]].
+  await expect(panel.locator('.outbound-relation', { hasText: 'links_to' })).toBeVisible()
+  await expect(panel.locator('.outbound-item', { hasText: 'Graph Model' })).toBeVisible()
+  // A target that resolves to a note is navigable.
+  await panel.locator('.outbound-item.is-link', { hasText: 'Graph Model' }).click()
+  await expect(page.locator('.tree-file.active')).toHaveText('Graph Model')
+})
+
 test('full-text search finds a note by its content', async () => {
   const hits = await page.evaluate(() => window.nodebook.search('claim'))
   expect(hits).toHaveLength(1)

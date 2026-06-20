@@ -1,4 +1,4 @@
-import type { Backlink, SearchHit, Settings, VaultListing } from '../shared/types'
+import type { Backlink, Outbound, SearchHit, Settings, VaultListing } from '../shared/types'
 
 export interface NodebookApi {
   pickVault: () => Promise<string | null>
@@ -13,6 +13,7 @@ export interface NodebookApi {
   saveFile: (path: string, content: string) => Promise<void>
   saveFileNow: (path: string, content: string) => void
   backlinks: (target: string) => Promise<Backlink[]>
+  outbound: (sourceFile: string) => Promise<Outbound[]>
   search: (query: string) => Promise<SearchHit[]>
   noteNames: () => Promise<string[]>
   settingsPath: () => Promise<string>

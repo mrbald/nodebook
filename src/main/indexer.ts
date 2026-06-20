@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { basename, dirname } from 'path'
 import { harvest } from './harvest'
-import type { Backlink, SearchHit } from '../shared/types'
+import type { Backlink, Outbound, SearchHit } from '../shared/types'
 
 /**
  * The per-vault index: FTS5 full text + a triple store, in a single SQLite DB
@@ -90,6 +90,16 @@ export class VaultIndex {
          WHERE object = ? ORDER BY relation, source_file`
       )
       .all(target) as Backlink[]
+  }
+
+  /** Outbound edges from one note: its `[[links]]` and `key:: value` fields. */
+  outbound(sourceFile: string): Outbound[] {
+    return this.db
+      .prepare(
+        `SELECT DISTINCT relation, object FROM triples
+         WHERE source_file = ? ORDER BY relation, object`
+      )
+      .all(sourceFile) as Outbound[]
   }
 
   /** Full-text search over titles + bodies, prefix-matched, best first, with a

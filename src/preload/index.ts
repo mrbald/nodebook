@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Backlink, SearchHit, Settings, VaultListing } from '../shared/types'
+import type { Backlink, Outbound, SearchHit, Settings, VaultListing } from '../shared/types'
 
 const api = {
   pickVault: (): Promise<string | null> => ipcRenderer.invoke('vault:pick'),
@@ -21,6 +21,8 @@ const api = {
     ipcRenderer.sendSync('file:save-now', path, content)
   },
   backlinks: (target: string): Promise<Backlink[]> => ipcRenderer.invoke('index:backlinks', target),
+  outbound: (sourceFile: string): Promise<Outbound[]> =>
+    ipcRenderer.invoke('index:outbound', sourceFile),
   search: (query: string): Promise<SearchHit[]> => ipcRenderer.invoke('index:search', query),
   noteNames: (): Promise<string[]> => ipcRenderer.invoke('index:noteNames'),
   settingsPath: (): Promise<string> => ipcRenderer.invoke('settings:path'),

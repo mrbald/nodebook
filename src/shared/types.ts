@@ -14,6 +14,12 @@ export interface Backlink {
   relation: string
 }
 
+/** An outbound edge from a note: a `[[link]]` or a `key:: value` field. */
+export interface Outbound {
+  relation: string
+  object: string
+}
+
 /** A full-text search result. */
 export interface SearchHit {
   path: string
