@@ -32,7 +32,13 @@ export interface ChatModel {
   chat(req: ChatRequest): AsyncIterable<string>
 }
 
-/** The three realistic ways to connect a model to the app. */
+/**
+ * How a *model* backend is reached. Scope discipline: this abstraction is for
+ * embedders + chat models ONLY. Document conversion (book → markdown) is a
+ * separate `DocumentConverter` subsystem, and exposing Nodebook *as* an MCP
+ * server is a separate outbound feature — neither is a `ProviderKind`. `'mcp'`
+ * here means Nodebook as an MCP *client* of a model/tool server.
+ */
 export type ProviderKind = 'local' | 'openai-compat' | 'anthropic' | 'mcp'
 
 export interface ProviderConfig {

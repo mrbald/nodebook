@@ -1,5 +1,12 @@
 # Body of knowledge — one growing graph, kept stable
 
+> **Status: research, not committed.** This is the speculative far end. It is
+> **firewalled from the v1 build** (explicit-graph mindmap + the shipped semantic
+> search): entity resolution, canonical merges, and stable incremental updates need
+> the durable-state model and the commit protocol in
+> [state-and-scopes.md](state-and-scopes.md) pinned down first. Treat the below as a
+> direction to validate, not a plan to build next.
+
 > Reconciles the two modes the design implies. [distill-documents.md](distill-documents.md)
 > makes *perspective artifacts* (a fresh map per source/angle). This is the other
 > mode: one **canonical, cumulative** graph grown incrementally from many sources
@@ -43,6 +50,12 @@ When ingesting, a new "Reinforcement Learning" concept must recognize an existin
   or merge — **suggested, user-confirmed, never silent**. "Manage, don't draw"
   applies to merges too.
 
+The merge decision itself is a **tier-1 durable decision that lives in markdown**
+(the `same_as::` field → a triple), so it survives a `.nodebook` rebuild — it was
+never in the cache. See [state-and-scopes.md](state-and-scopes.md); whole-note
+centroids are also a poor matching substrate, so resolution operates on
+*concept-grain* (`extracted` scope) vectors, not note centroids.
+
 A concept then accumulates **multi-source provenance**: `cite:: BookA §3`,
 `cite:: BookB §7`, your own note — the inspector shows every source that fed it.
 Provenance across sources is a feature, not bookkeeping.
@@ -78,6 +91,13 @@ output change.** Three axes:
 So "incremental" here is less about online algorithms (recompute is cheap at vault
 scale) than about **seeding from prior state + aligning identities + surfacing
 deltas**.
+
+Crucially, this staging applies to the **semantic layer only** — entity merges and
+cluster re-identification. The **explicit link graph stays live and deterministic**
+(adding a `[[link]]` just adds an edge; no confirmation, no churn). That split — and
+why mindmap-mode's "pure function of the index" and this doc's "proposed, accepted
+deltas" are *both* true once separated — is the contract in
+[state-and-scopes.md](state-and-scopes.md).
 
 ## Phases (compose with auto-mindmap + distill)
 

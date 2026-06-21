@@ -92,9 +92,13 @@ All are **view state** over a derived graph, never geometry edits:
    relation" in the inspector **edits the source note's `key:: value`** (atomic
    write → re-index → edge updates). Management acts on the notes, the source of
    truth — never a separate map file.
-7. **Save view → `.map.md`** — serialize the curation (focus, filters, pins) into a
-   `.map.md` snapshot, reusing the existing `parseMap`/`MapView`. Hand-authoring
-   still works, but it's no longer the *only* way to get a map.
+7. **Save view → a saved-view artifact** — serialize the curation (focus, filters,
+   pins, derived hierarchy). **Note (see [state-and-scopes.md](state-and-scopes.md)):
+   the hand-authored `.map.md` outline and generated saved-view *state* are two
+   different things** with different round-trip rules — a regenerated view must never
+   clobber a document the user hand-edits, so saved-view config is a *separate*
+   artifact (frontmatter or a sibling `.view`), not an overwrite of `parseMap`'s
+   outline. Hand-authoring still works; it's just no longer the only way to get a map.
 
 ## Why this is right (one paragraph)
 

@@ -13,6 +13,13 @@ markdown notes**, each carrying a **reference back to the exact source span** it
 came from. The "mindmap of the book" is then just the normal derived map over
 those generated notes.
 
+> **Status: D1 (standalone, `distill-staged` scope) is the buildable target;
+> merging into the canonical KB is research** (depends on entity resolution +
+> the commit protocol — see [body-of-knowledge.md](body-of-knowledge.md)). Distill
+> output lands in the `distill-staged` scope and **must not** affect vault-wide
+> search / centrality / clustering until an explicit promote step — see
+> [state-and-scopes.md](state-and-scopes.md). A folder prefix is not that boundary.
+
 ## Why it fits (and reuses almost everything)
 
 - **Provenance is already in the chunker.** `chunk.ts` stores `start`/`end` offsets
@@ -25,8 +32,10 @@ those generated notes.
   representatives, not the whole book on repeat.
 - **The output is notes, not a locked artifact** — one source of truth, and the
   user can *correct* the LLM. The book is the *source*; the notes are
-  *derived-but-adopted* (a first draft you own). Once emitted they participate in
-  search, backlinks, the graph, and the map like any note.
+  *derived-but-adopted* (a first draft you own). They land in the `distill-staged`
+  scope and drive *that run's* map; only an explicit **promote** step folds them
+  into the vault-wide search/backlinks/canonical graph (so throwaway runs don't
+  distort it — see [state-and-scopes.md](state-and-scopes.md)).
 
 ## The pipeline
 
@@ -51,9 +60,12 @@ interface:
   **`markitdown-ts`** (TS, works on buffers/URLs/paths, edge-friendly) or
   **`markitdown-js`** (Node port). Pure JS → no external runtime, ships in the asar.
 - **Pluggable upgrade: MarkItDown itself via its MCP server** (`markitdown-mcp`,
-  runnable over NPX, no Docker). This reuses the **MCP connection pattern already in
-  `provider.ts`** — Nodebook as an MCP *client* of a converter server — giving the
-  full Python-grade fidelity for users who run it, without us shipping Python.
+  runnable over NPX, no Docker) — an MCP-client *transport* for one `DocumentConverter`
+  implementation. (`DocumentConverter` is its **own** subsystem with its own trust /
+  lifecycle / error model — **not** a model-provider kind; the model `provider.ts`
+  stays embed/chat only. See the abstraction note in
+  [talk-to-docs.md](talk-to-docs.md).) Gives Python-grade fidelity for users who run
+  it, without us shipping Python.
 - **Avoid** the wrappers that shell out to the Python package (e.g.
   `@mote-software/markitdown`) as the default — they reintroduce a Python dep.
 

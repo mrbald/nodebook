@@ -42,6 +42,13 @@ So: **graph-primary, tree-derived.** One index, two lenses.
 The automagic layer fuses them: explicit edges = what you *wrote*; semantic edges
 = what you *meant*.
 
+Two notes on grain and timing (see [state-and-scopes.md](state-and-scopes.md)): a
+per-note centroid is fine for *clustering whole notes* here, but is **not** the
+substrate for entity *resolution* (that needs concept-grain vectors). And the
+**explicit** graph + centrality are **live/deterministic** (recompute on save, no
+churn); only the **semantic** clusters/merges are *staged* and user-confirmed — the
+stability concerns apply to that layer alone.
+
 ## Naming what you described (the toolkit)
 
 | Your words | Proper term | What it is | Cost |

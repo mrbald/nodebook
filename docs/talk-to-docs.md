@@ -54,12 +54,19 @@ Everything goes through one small abstraction (`src/main/rag/provider.ts`):
    llama.cpp, vLLM — all expose OpenAI-compat endpoints). One adapter → dozens of
    backends by changing `baseUrl`/`apiKey`/`model`. (`kind: 'anthropic'` is a thin
    sibling for Claude's native API; OpenAI-compat gateways/LiteLLM can also front it.)
-3. **MCP (Model Context Protocol)** (`kind: 'mcp'`) — two directions, both valuable:
-   - **Nodebook as an MCP *server*** — expose the vault + semantic search as MCP
-     resources/tools so any MCP host (Claude Desktop, IDE agents) can "talk to your
-     docs" with *their* model. Turns the vault into a knowledge backend for the whole
-     ecosystem — the strongest strategic angle.
-   - **Nodebook as an MCP *client*** — pull external tools/data to enrich answers.
+3. **MCP client** (`kind: 'mcp'`) — pull a model/tool from an MCP server as another
+   backend transport.
+
+**Scope discipline (one subsystem per concern — they have different trust,
+lifecycle, and error models; don't fold them into one kind):**
+- `provider.ts` is **model backends only** — `Embedder` + `ChatModel`. The three
+  kinds above are *how a model is reached*, nothing more.
+- **Document conversion** (book → markdown) is its **own** `DocumentConverter`
+  interface (see [distill-documents.md](distill-documents.md)) — *not* a provider kind,
+  even when its transport happens to be MCP.
+- **Nodebook-as-an-MCP-server** (exposing the vault + search as tools for other
+  hosts) is a **separate outbound feature**, not part of this abstraction at all.
+  Strategically interesting, tracked elsewhere.
 
 **Default model pairs** (configurable): *local* — embed `EmbeddingGemma-300M` (or
 `bge-small-en-v1.5` for speed), chat (later) a small local model
@@ -68,11 +75,12 @@ Everything goes through one small abstraction (`src/main/rag/provider.ts`):
 
 ## Pipeline (and the event-loop angle)
 
-On index (save / chokidar / first-open scan): chunk → embed → upsert into
-`chunks` + the vec table. **Embedding runs in a worker thread**, never on the main
-event loop, so IPC/UI stay responsive (and the planned telemetry would show the
-loop staying healthy — embedding a vault is the kind of load that would otherwise
-spike loop lag). First-open is a one-time batch with a progress indicator;
+On index (save / chokidar / first-open scan): main chunks → the **renderer**
+embeds → main upserts into `chunks` + the vec table. **As shipped, embedding runs
+in a renderer Web Worker on `onnxruntime-web` (WASM)** — a different process from
+the main event loop entirely, so IPC/UI stay responsive (telemetry confirms the
+main loop stays healthy). Pull-based bridge: renderer pulls `talk:pending` → embeds
+→ pushes `talk:putEmbeddings`. First-open is a one-time batch with progress;
 thereafter only changed notes re-embed (content-hash gated).
 
 ## UX — how the feature is exposed (UX/UI hat)
@@ -123,49 +131,33 @@ model = "bge-small-en-v1.5"
 provider = "none"          # none (search-only) | openai-compat | anthropic | local
 ```
 
-## Build / packaging implications (needs a greenlight)
+## Build / packaging — as shipped (decisions resolved)
 
-This adds **native dependencies** to the cross-platform release we just
-stabilized:
-- `onnxruntime-node` (pulled by transformers.js) — native, per-OS/arch binaries.
-- the `sqlite-vec` loadable extension — per-OS/arch binary, `asarUnpack`-ed.
-- the embedding **model** (~30–300 MB) — bundle it, or download on first run.
+The runtime fork below was **decided in favour of WASM** and is live:
+- **Embeddings: `onnxruntime-web` (WASM) in a renderer Web Worker** — no native
+  per-OS binary, one cross-platform blob, **lazy** (the 1.27 MB transformers.js
+  chunk loads only when the feature is enabled; 0 bytes of it in the eager entry).
+  `onnxruntime-node` (native) is *not* shipped; it remains a future "fast mode".
+- **`sqlite-vec`** loadable extension — `asarUnpack`-ed (`**/node_modules/sqlite-vec*/**`),
+  loaded into `better-sqlite3` in main (vec0 rowids bind as **BigInt**).
+- **Model** — downloads on first *enable* (renderer Cache API), keeping the base
+  installer lean; bundling is a later option.
 
-All are cross-platform, but they must be wired into electron-builder (unpack the
-binaries, per-arch) and re-tested on all three OSes.
-
-**P1 runtime decision (installer size vs speed), since the feature is off by
-default:**
-- **onnxruntime-node (native)** — fastest, but a large per-OS/arch native binary
-  shipped to *everyone* even if they never enable Talk-to-docs.
-- **onnxruntime-web (WASM)** — transformers.js also runs in-renderer/worker on a
-  single small cross-platform WASM blob; slower, but lazy-loadable and no per-OS
-  native packaging. **Leaning WASM** for a lean, opt-in feature; native is a later
-  perf upgrade.
-- **Model**: download on first *enable* (keeps the base installer small), cache
-  under userData; offer a bundle option later.
+Verified end-to-end (stub-embedder e2e + a real-model run): enable → chunk → embed
+→ store → hybrid search, with the main loop staying healthy throughout.
 
 ## Phases
 
-- **P0 — spike ✅ (done, then reverted to keep `main` lean):** verified under
-  Electron — `sqlite-vec` v0.1.9 loads into our `better-sqlite3` and KNN works
-  (vec0 rowids must bind as **BigInt**); transformers.js (MiniLM) embeds via
-  onnxruntime-node (**N-API → no Electron rebuild**), model auto-downloaded
-  (~23 MB) and ran in ~90 ms cached. Conclusion: foundation viable; deps re-added
-  in P1.
-- **P1 — semantic search (fully local, no LLM):** chunk + embed pipeline (worker)
-  + sqlite-vec store + hybrid retrieval surfaced in the sidebar. *Ships value with
-  zero cloud/keys.*
+- **P0 — spike ✅** verified `sqlite-vec` + transformers.js under Electron.
+- **P1 — semantic search ✅ SHIPPED (fully local, no LLM):** chunk + renderer-WASM
+  embed pipeline + sqlite-vec store + hybrid FTS⊕vector (RRF) in the sidebar. Off by
+  default; zero cloud/keys.
 - **P2 — "Ask" chat:** the Ask panel + pluggable LLM (Claude default, key in
-  settings) + citations.
+  settings) + citations. *Deferred by choice ("search-only for now").*
 - **P3:** local-LLM option (node-llama-cpp), incremental re-embed, model management.
 
-## Open decisions
+## Resolved decisions (for the record)
 
-1. **Native deps + model size** — OK to add `onnxruntime-node` + `sqlite-vec` +
-   a ~30–300 MB model to the build? (bundle vs first-run download?)
-2. **Chat provider** — cloud Claude (best, needs key, sends retrieved chunks out)
-   vs local-only vs search-only for now?
-
-The chunker (Phase-1 step 1) is pure and dependency-free, so it's built first
-(see `src/main/rag/chunk.ts`) regardless of the above.
+1. **Runtime / packaging** → WASM in a renderer worker, model-on-enable (above).
+2. **Chat provider** → **search-only for now**; chat is P2 via the provider
+   abstraction (Claude default when built).

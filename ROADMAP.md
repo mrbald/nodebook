@@ -34,6 +34,25 @@ barely visible in the UI today.
 - **Onboarding/empty state** that introduces `[[links]]`, `key:: value`,
   backlinks, and maps.
 
+## Knowledge features — committed vs research (read before building)
+
+An independent spec review drew a firewall worth keeping explicit (see
+[docs/state-and-scopes.md](docs/state-and-scopes.md)):
+
+- **Committed / buildable now** — the **explicit-graph mindmap** (derive + curate
+  from triples; live, deterministic) and the **already-shipped semantic search**.
+  These rest on stable foundations and need no new persistent-state model.
+- **Research / not committed** — the **cumulative body of knowledge**: entity
+  resolution, canonical merges, and stable incremental graph updates
+  ([docs/body-of-knowledge.md](docs/body-of-knowledge.md)), plus **distill→canonical
+  merge** ([docs/distill-documents.md](docs/distill-documents.md)). These need a
+  durable-decision model, explicit scopes, a commit protocol, and scale targets
+  pinned down *first*. Distill's standalone (`distill-staged`) path is buildable;
+  the merge-into-canonical path is not, yet.
+
+Net: build the mindmap + lean on shipped search; treat the KB/merge layer as a
+direction to validate, not the next sprint.
+
 ## Mindmap mode — "manage, don't draw"
 
 Full design in [docs/mindmap-mode.md](docs/mindmap-mode.md). Philosophy: the map
