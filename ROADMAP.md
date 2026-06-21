@@ -62,9 +62,12 @@ nodes or dragging edges. Editing the map means editing the notes.
 
 Incremental slices (each independently shippable):
 
-1. **Read-only local map (MVP)** — `index:graph` returns a depth-1 slice around a
-   focus note; a `GraphView` renders force/radial layout with edges colored by
-   relation; entry from the note status bar; live re-query on `vault:changed`.
+1. ✅ **Read-only local map (MVP) — shipped.** `index:graph` returns a depth-1 slice
+   around a focus note (pure builder, golden-tested; `.map.md` views excluded); a
+   `GraphView` island renders a force-directed layout (pure, golden-tested) with
+   relation-coloured edges, degree-sized nodes, ghost nodes, and click-to-recenter;
+   entry from the status-bar **⊹ Map** button. e2e-covered. *Next: live re-query on
+   save, pan/zoom, depth control, the global map.*
 2. **Curation** — relation filter (the killer feature the typed triples unlock),
    focus/expand/collapse, stable relayout (seed from previous positions).
 3. **Pin / hide / promote + global map** — view-state curation; degree-threshold
