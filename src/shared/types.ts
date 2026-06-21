@@ -109,4 +109,9 @@ export interface Settings {
       model: string
     }
   }
+  /** Main-process telemetry (event-loop lag + CPU/RAM). Off by default; when on,
+   *  a tiny status-bar widget appears. */
+  telemetry: {
+    enabled: boolean
+  }
 }

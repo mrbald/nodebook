@@ -9,7 +9,8 @@ describe('parseSettings', () => {
     expect(s).toEqual({
       editor: { fontSize: 18, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
       theme: { followSystem: false, dark: 'dracula', light: 'solarized-light', name: 'nord' },
-      talk: DEFAULTS.talk
+      talk: DEFAULTS.talk,
+      telemetry: DEFAULTS.telemetry
     })
   })
 
@@ -46,9 +47,16 @@ describe('parseSettings', () => {
     expect(parseSettings('[editor]\nfontSize = 20')).toEqual({
       editor: { ...DEFAULTS.editor, fontSize: 20 },
       theme: { ...DEFAULTS.theme },
-      talk: DEFAULTS.talk
+      talk: DEFAULTS.talk,
+      telemetry: DEFAULTS.telemetry
     })
     expect(parseSettings('')).toEqual(DEFAULTS)
+  })
+
+  it('reads [telemetry] enabled and defaults it off', () => {
+    expect(parseSettings('[telemetry]\nenabled = true').telemetry.enabled).toBe(true)
+    expect(parseSettings('').telemetry.enabled).toBe(false)
+    expect(parseSettings('[telemetry]\nenabled = "yes"').telemetry.enabled).toBe(false)
   })
 
   it('reads [talk] config and validates the runtime + enabled flag', () => {

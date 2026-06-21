@@ -15,7 +15,8 @@ import type { Settings } from '../shared/types'
 export const DEFAULTS: Settings = {
   editor: { fontSize: 15, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
   theme: { followSystem: true, dark: 'dark', light: 'light', name: 'dark' },
-  talk: { enabled: false, embed: { runtime: 'wasm', model: 'Xenova/all-MiniLM-L6-v2' } }
+  talk: { enabled: false, embed: { runtime: 'wasm', model: 'Xenova/all-MiniLM-L6-v2' } },
+  telemetry: { enabled: false }
 }
 
 const MODES = ['code', 'live', 'reading'] as const
@@ -58,6 +59,11 @@ enabled = false
 runtime = "wasm"
 # Embedding model (a transformers.js repo). Downloaded on first enable.
 model = "Xenova/all-MiniLM-L6-v2"
+
+[telemetry]
+# Show a tiny status-bar widget with event-loop lag (a log-bucketed histogram),
+# plus rolling CPU and memory — "measure everything". Off by default.
+enabled = false
 `
 
 /** Pure: TOML text → validated Settings, defaults filling any gap. */
@@ -72,6 +78,7 @@ export function parseSettings(raw: string): Settings {
   const theme = (data.theme ?? {}) as Record<string, unknown>
   const talk = (data.talk ?? {}) as Record<string, unknown>
   const embed = (talk.embed ?? {}) as Record<string, unknown>
+  const telemetry = (data.telemetry ?? {}) as Record<string, unknown>
   const runtime = RUNTIMES.includes(embed.runtime as (typeof RUNTIMES)[number])
     ? (embed.runtime as (typeof RUNTIMES)[number])
     : DEFAULTS.talk.embed.runtime
@@ -107,6 +114,12 @@ export function parseSettings(raw: string): Settings {
     talk: {
       enabled: typeof talk.enabled === 'boolean' ? talk.enabled : DEFAULTS.talk.enabled,
       embed: { runtime, model: str(embed.model, DEFAULTS.talk.embed.model) }
+    },
+    telemetry: {
+      enabled:
+        typeof telemetry.enabled === 'boolean'
+          ? telemetry.enabled
+          : DEFAULTS.telemetry.enabled
     }
   }
 }

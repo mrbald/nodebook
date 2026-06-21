@@ -6,6 +6,7 @@ import type {
   Settings,
   TalkChunk,
   TalkStatus,
+  TelemetrySnapshot,
   VaultListing
 } from '../shared/types'
 
@@ -49,6 +50,11 @@ const api = {
     ipcRenderer.on('talk:dirty', listener)
     return () => ipcRenderer.removeListener('talk:dirty', listener)
   },
+  // Telemetry (event-loop lag + CPU/RAM).
+  telemetryApply: (enabled: boolean): Promise<void> =>
+    ipcRenderer.invoke('telemetry:apply', enabled),
+  telemetrySnapshot: (): Promise<TelemetrySnapshot | null> =>
+    ipcRenderer.invoke('telemetry:snapshot'),
   settingsPath: (): Promise<string> => ipcRenderer.invoke('settings:path'),
   readSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:read'),
   setThemeMode: (mode: 'system' | 'dark' | 'light'): Promise<Settings> =>

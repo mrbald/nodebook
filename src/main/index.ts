@@ -16,6 +16,7 @@ import {
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
+import { Telemetry } from './telemetry'
 import {
   ensureSettingsFile,
   readSettings,
@@ -171,6 +172,7 @@ function atomicWrite(filePath: string, content: string): void {
 let index: VaultIndex | null = null
 let watcher: FSWatcher | null = null
 let vaultRoot: string | null = null
+const telemetry = new Telemetry()
 
 async function closeVault(): Promise<void> {
   if (watcher) await watcher.close()
@@ -436,6 +438,15 @@ function registerIpc(): void {
     index?.talkSearch(query, vector?.length ? Float32Array.from(vector) : null) ?? []
   )
 
+  // --- Telemetry (measure everything) -------------------------------------
+  // Reconcile the measurement to the settings flag (called by the renderer on
+  // load and after a settings change; no TOML write).
+  ipcMain.handle('telemetry:apply', (_e, enabled: boolean) => {
+    if (enabled) telemetry.start()
+    else telemetry.stop()
+  })
+  ipcMain.handle('telemetry:snapshot', () => (telemetry.running ? telemetry.snapshot() : null))
+
   ipcMain.handle('settings:path', () => ensureSettingsFile())
   ipcMain.handle('settings:read', () => readSettings())
 
@@ -521,6 +532,7 @@ app.whenReady().then(() => {
   registerIpc()
   buildAppMenu()
   createWindow()
+  if (readSettings().telemetry.enabled) telemetry.start()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -534,5 +546,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  telemetry.stop()
   void closeVault()
 })

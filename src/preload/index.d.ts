@@ -5,6 +5,7 @@ import type {
   Settings,
   TalkChunk,
   TalkStatus,
+  TelemetrySnapshot,
   VaultListing
 } from '../shared/types'
 
@@ -31,6 +32,8 @@ export interface NodebookApi {
   talkPutEmbeddings: (rows: { id: number; vector: number[] }[]) => Promise<TalkStatus>
   talkSearch: (query: string, vector: number[]) => Promise<SearchHit[]>
   onTalkDirty: (cb: () => void) => () => void
+  telemetryApply: (enabled: boolean) => Promise<void>
+  telemetrySnapshot: () => Promise<TelemetrySnapshot | null>
   settingsPath: () => Promise<string>
   readSettings: () => Promise<Settings>
   setThemeMode: (mode: 'system' | 'dark' | 'light') => Promise<Settings>
