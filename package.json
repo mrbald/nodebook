@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "gen:icon": "node scripts/gen-icon.mjs",
+    "pack": "electron-vite build && electron-builder --dir",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
