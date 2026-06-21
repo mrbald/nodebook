@@ -55,6 +55,14 @@ describe('buildGraph', () => {
     expect(g.nodes.find((n) => n.id === 'A')!.degree).toBe(2) // A-B, A-Ghost
   })
 
+  it('resolves a path-suffix link target to the real note (not a ghost)', () => {
+    // `[[sub/C]]` from A should resolve to the real note C at /v/sub/C.md.
+    const g = buildGraph(files, [{ subject: 'A', relation: 'links_to', object: 'sub/C' }], null)
+    const c = g.nodes.find((n) => n.id === 'C')!
+    expect(c.ghost).toBe(false)
+    expect(g.edges).toEqual([{ source: 'A', target: 'C', relation: 'links_to' }])
+  })
+
   it('isolated focus note yields a single node, no edges', () => {
     const g = buildGraph([{ path: '/v/Lonely.md', title: 'Lonely' }], [], 'Lonely')
     expect(g.nodes).toHaveLength(1)

@@ -130,9 +130,13 @@ export class VaultIndex {
   /** A slice of the knowledge graph: local depth-`d` around a focus note (by
    *  path), or the whole graph (focusPath null) capped to the busiest nodes. */
   graph(focusPath: string | null, opts?: { depth?: number; cap?: number }): GraphData {
-    const files = this.db.prepare('SELECT path, title FROM files').all() as FileRow[]
+    // `.map.md` files are saved *views*, not knowledge — exclude them and the
+    // edges they author from the graph (see docs/state-and-scopes.md).
+    const files = this.db
+      .prepare("SELECT path, title FROM files WHERE path NOT LIKE '%.map.md'")
+      .all() as FileRow[]
     const triples = this.db
-      .prepare('SELECT subject, relation, object FROM triples')
+      .prepare("SELECT subject, relation, object FROM triples WHERE source_file NOT LIKE '%.map.md'")
       .all() as TripleRow[]
     return buildGraph(files, triples, focusPath ? noteName(focusPath) : null, opts)
   }

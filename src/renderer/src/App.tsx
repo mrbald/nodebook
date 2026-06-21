@@ -15,6 +15,7 @@ import { useDirtyDoc } from './useDirtyDoc'
 import { useTalk } from './talk/useTalk'
 import { TalkPanel } from './talk/TalkPanel'
 import { TelemetryWidget } from './telemetry/TelemetryWidget'
+import { GraphView } from './graph/GraphView'
 import HELP_DOC from './help.md?raw'
 
 type ThemeMode = 'system' | 'dark' | 'light'
@@ -55,6 +56,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchHit[]>([])
   const [telemetryOn, setTelemetryOn] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
   const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -213,6 +215,7 @@ export default function App() {
       setDoc(null)
       setSettingsOpen(false)
       setHelpOpen(false)
+      setGraphOpen(false)
       setQuery('')
       // openVault builds/refreshes the index and returns files + dirs.
       const listing = await window.nodebook.openVault(dir)
@@ -301,10 +304,21 @@ export default function App() {
     setSettingsDoc(content)
     setSettingsOpen(true)
     setHelpOpen(false)
+    setGraphOpen(false)
   }, [flushCurrent])
+
+  // Open a note clicked in the graph, keeping the map open so it recenters.
+  const openPathInGraph = useCallback(
+    (path: string) => {
+      const f = files.find((x) => x.path === path)
+      if (f) void openFile(f)
+    },
+    [files, openFile]
+  )
 
   const openHelp = useCallback(() => {
     flushCurrent()
+    setGraphOpen(false)
     setSettingsOpen(false)
     setHelpOpen(true)
   }, [flushCurrent])
@@ -564,6 +578,13 @@ export default function App() {
               />
             </div>
           </div>
+        ) : graphOpen && active ? (
+          <GraphView
+            focusPath={active.path}
+            focusName={active.name}
+            onOpen={openPathInGraph}
+            onClose={() => setGraphOpen(false)}
+          />
         ) : active && doc !== null ? (
           active.rel.endsWith('.map.md') ? (
             <MapView key={active.path} content={doc} onOpen={openLink} />
@@ -596,6 +617,13 @@ export default function App() {
                   options={MODE_OPTIONS}
                   onChange={(v) => setEditorMode(v as ViewMode)}
                 />
+                <button
+                  className="status-btn graph-open-btn"
+                  title="Show this note in the knowledge map"
+                  onClick={() => setGraphOpen(true)}
+                >
+                  ⊹ Map
+                </button>
                 <TelemetryWidget enabled={telemetryOn} />
               </div>
               {/* Off-screen; populated only for Print / Export-PDF. */}
@@ -607,7 +635,7 @@ export default function App() {
         )}
       </main>
 
-      {active && !settingsOpen && !helpOpen && (
+      {active && !settingsOpen && !helpOpen && !graphOpen && (
         <BacklinksPanel active={active} files={files} onOpen={openFile} />
       )}
 

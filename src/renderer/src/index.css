@@ -568,6 +568,105 @@ body {
   border-color: var(--accent);
 }
 
+/* Knowledge map (GraphView). */
+.graph-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.graph-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: 13px;
+}
+.graph-title {
+  font-weight: 600;
+}
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.graph-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.graph-close {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.graph-close:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.graph-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  background: var(--bg);
+}
+.graph-edge {
+  stroke-width: 1.2;
+  opacity: 0.5;
+}
+.graph-node circle {
+  fill: var(--accent-bg);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+.graph-node text {
+  fill: var(--text);
+  font-size: 11px;
+  text-anchor: middle;
+  pointer-events: none;
+  user-select: none;
+}
+.graph-node:hover circle {
+  fill: var(--accent);
+}
+.graph-node.is-focus circle {
+  fill: var(--accent);
+  stroke: var(--text);
+}
+.graph-node.is-ghost circle {
+  fill: transparent;
+  stroke: var(--muted);
+  stroke-dasharray: 3 2;
+  cursor: default;
+}
+.graph-node.is-ghost text {
+  fill: var(--muted);
+}
+.graph-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* Talk to docs — the "search by meaning" affordance under the search box. */
 .talk-cta {
   display: block;
