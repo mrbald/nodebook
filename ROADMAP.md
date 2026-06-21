@@ -71,8 +71,12 @@ Incremental slices (each independently shippable):
    `index:changed` signal.
 3. ✅ **Auto-structure (B+C) — shipped.** PageRank → node size (centres of gravity);
    deterministic label-propagation communities → node colour (clusters). Pure +
-   golden-tested. *Next: D — semantic overlay (kNN "related" edges + embedding
-   clusters) when talk-to-docs is on; relation filter; pin/hide; save view.*
+   golden-tested.
+4. ✅ **Semantic overlay (D) — shipped.** With talk-to-docs on, an opt-in **✨ Related**
+   overlay adds dashed edges from the focus note to its semantically-nearest
+   *unlinked* notes (per-note embedding centroids + cosine kNN in main). "What you
+   meant" on top of "what you wrote". *Next: relation filter, pin/hide, save view;
+   embedding-space clustering; Louvain upgrade.*
 2. **Curation** — relation filter (the killer feature the typed triples unlock),
    focus/expand/collapse, stable relayout (seed from previous positions).
 3. **Pin / hide / promote + global map** — view-state curation; degree-threshold

@@ -31,10 +31,11 @@ store) index in the main process.
   See [docs/talk-to-docs.md](docs/talk-to-docs.md).
 - **Knowledge index** — `[[links]]` and `key:: value` fields are harvested into a
   triple store (`subject, relation, object`).
-- **Knowledge map** — a force-directed local graph of the current note (the **⊹ Map**
-  button): nodes sized by connectivity, edges coloured by relation, "ghost" nodes for
-  links you haven't created yet; click any node to recenter. Derived from the index,
-  never hand-drawn — editing the map means editing the notes.
+- **Knowledge map** — a force-directed graph (the **⊹ Map** button): local or global,
+  pan/zoom, **PageRank-sized** nodes (the hubs), **cluster-coloured** communities,
+  relation-coloured edges, "ghost" nodes for uncreated links; click to recenter, live
+  on save. With Talk-to-docs on, an opt-in **✨ Related** overlay adds dashed edges to
+  *semantically similar but unlinked* notes. Derived from the index, never hand-drawn.
 - **`.map.md`** files render as a collapsible map (indentation = containment,
   `## Edges` = relations).
 - **App-wide themes** (dark/light/system + several presets) — quick-switch from
