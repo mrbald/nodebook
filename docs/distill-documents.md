@@ -41,26 +41,71 @@ those generated notes.
 4. **Emit editable notes** with `[[links]]`, `key:: value`, and `cite::`/`source::`
    provenance → normal index → the derived mindmap appears for free.
 
+## Ingestion — the converter (Microsoft MarkItDown & Node options)
+
+MarkItDown (Python) is the quality bar, and it now has Node counterparts, so we
+don't need a Python runtime baked into the app. Behind one `DocumentConverter`
+interface:
+
+- **Default: a pure-JS converter** that bundles cleanly into Electron — e.g.
+  **`markitdown-ts`** (TS, works on buffers/URLs/paths, edge-friendly) or
+  **`markitdown-js`** (Node port). Pure JS → no external runtime, ships in the asar.
+- **Pluggable upgrade: MarkItDown itself via its MCP server** (`markitdown-mcp`,
+  runnable over NPX, no Docker). This reuses the **MCP connection pattern already in
+  `provider.ts`** — Nodebook as an MCP *client* of a converter server — giving the
+  full Python-grade fidelity for users who run it, without us shipping Python.
+- **Avoid** the wrappers that shell out to the Python package (e.g.
+  `@mote-software/markitdown`) as the default — they reintroduce a Python dep.
+
+Community ports vary in fidelity/maintenance vs. the Python original; we evaluate
+on real PDFs at **D3** and keep the converter swappable. Crucially, **D1 (markdown/
+text books) needs no converter at all**, so the interesting loop is built first.
+
 ## What's genuinely new vs. risky
 
-- **Format ingestion** (PDF/EPUB → markdown, page anchors) is the one real new
-  dependency surface; markdown/text books need none.
+- **Format ingestion** is the one real new dependency surface — mitigated by the
+  swappable `DocumentConverter` above; markdown/text books need none.
 - **Fidelity.** Grounding every claim in a clickable span is the anti-hallucination
   safeguard — the user *verifies*, not trusts. Lead with citations; prefer extract
   + locate over free paraphrase.
 - **Cost.** A whole book is many chunks; cluster-first + representative sampling
   keeps the LLM bounded. The provider abstraction lets the user pick local vs cloud.
-- **Re-run vs. edits.** Extraction is a *generate-a-draft* step the user then owns;
-  re-running must not clobber edits (track generated-vs-edited, or emit into a fresh
-  namespace). A real design point, not an afterthought.
+
+## Many maps per vault — perspectives, versions, seeds
+
+A distillation **run is not "the map" — it's *a* map**, and that's the right model.
+Users understand an LLM run is a fresh generation, so re-running to get a brand-new
+map is expected, not a surprise to guard against. This falls straight out of the
+existing model where **`.map.md` is just a file**: a vault can hold many.
+
+So a run = a **named, self-contained artifact**: a folder of cited notes + a
+`.map.md` view over them, e.g. `distill/sapiens—by-themes/`,
+`distill/sapiens—by-argument/`, `distill/sapiens—v2-seed7/`. Because each run lives
+in its own namespace:
+
+- **No clobbering** — re-running as v2 never touches your edits in v1; you keep,
+  compare, or discard whole runs.
+- **Perspectives are first-class** — the same book distilled "by theme" vs "by
+  chronology" vs "by argument" (different extraction prompts) are just different
+  artifacts side by side. Several lenses on one source coexisting *is* the
+  knowledge-management win.
+- **Comparable** — stamp each run with light metadata (`perspective::`, `model::`,
+  `seed::`, `date::`) so the maps can be diffed/sorted.
+
+This generalizes beyond distillation: "multiple saved views/perspectives" is
+equally useful for the hand-curated map (mindmap-mode's "Save view → `.map.md`" can
+write many).
 
 ## Phasing
 
 - **D1. Markdown/text books** (no new deps) → chunk + embed + cluster + extract →
-  cited notes. Proves the whole loop on the easy format.
+  cited notes as a named run-artifact. Proves the whole loop on the easy format.
 - **D2. Provenance UX** — `cite::` opens the source span; a "sources" inspector.
-- **D3. PDF/EPUB ingestion** + page/§ anchors.
-- **D4. Quality** — extractive grounding, dedup across clusters, re-run safety.
+- **D3. PDF/EPUB ingestion** via the swappable `DocumentConverter` (pure-JS default,
+  MarkItDown-MCP upgrade) + page/§ anchors.
+- **D4. Perspectives & quality** — extraction prompt presets (by theme / argument /
+  chronology), per-run metadata, a "maps in this vault" browser, extractive
+  grounding, intra-run dedup.
 
 Depends on talk-to-docs (embeddings + the model-provider abstraction) and composes
 with auto-mindmap (clustering + map). Effectively **talk-to-docs inverted**:
