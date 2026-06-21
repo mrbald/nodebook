@@ -81,9 +81,13 @@ Incremental slices (each independently shippable):
    **Knowledge map** section added to in-app Help.
    *Deferred on purpose (the "explain it simply or nerdify/discard" filter): **save
    view → `.map.md`*** (complex round-trip — needs the saved-view artifact from
-   docs/state-and-scopes.md), **pin/drag** (needs incremental relayout; fights
-   auto-layout), **Louvain** (invisible polish; the tested label-propagation is
-   fine). Still open & simple: embedding-space clustering as a colour mode.
+   docs/state-and-scopes.md), **Louvain** (invisible polish; the tested
+   label-propagation is fine).
+6. ✅ **Interactive + colour modes — shipped** (from a visual-check review). **Drag
+   nodes** to arrange them (the map was "non-interactive" before). **Colour** the
+   dots by **links** (clusters), **folder** (top-level vault folder), or **meaning**
+   (embedding kNN clusters via `talk:semanticEdges`, talk only); the legend is
+   contextual and filters (relations, or folders — "select folders"). e2e-covered.
 2. **Curation** — relation filter (the killer feature the typed triples unlock),
    focus/expand/collapse, stable relayout (seed from previous positions).
 3. **Pin / hide / promote + global map** — view-state curation; degree-threshold
