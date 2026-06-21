@@ -66,6 +66,17 @@ overlay reusing the talk-to-docs embeddings ("related but not linked" kNN edges 
 clustering + PCA/UMAP layout); **E** optional LLM last-mile (cluster names,
 missing-link suggestions) via the existing provider abstraction.
 
+### Distill a document (book → cited, editable notes)
+
+Design in [docs/distill-documents.md](docs/distill-documents.md). Ingest a book →
+chunk (offsets = provenance) → embed → cluster → LLM extracts concepts/claims/
+relations, each **cited to the source span** → emit *editable* markdown notes
+(`[[links]]`, `key:: value`, `cite::`) → normal index → derived mindmap for free.
+Talk-to-docs *inverted* (push-distill vs question-pull); reuses the chunker's
+offsets, the embeddings, the clustering, and the provider abstraction. Phases:
+D1 markdown/text books, D2 provenance UX, D3 PDF/EPUB ingestion, D4 grounding /
+re-run safety.
+
 ## Talk to docs (AI semantic search + chat)
 
 Full design in [docs/talk-to-docs.md](docs/talk-to-docs.md). Local-first RAG over
