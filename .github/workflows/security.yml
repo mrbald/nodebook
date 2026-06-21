@@ -33,3 +33,15 @@ jobs:
       contents: read
       security-events: write
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8
+
+  # Secret scanning — fail the build if a credential/key/token is committed.
+  # gitleaks-action is free for public repositories (no license key required).
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history so a secret in any past commit is caught
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
