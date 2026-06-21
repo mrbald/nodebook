@@ -88,6 +88,11 @@ Incremental slices (each independently shippable):
    dots by **links** (clusters), **folder** (top-level vault folder), or **meaning**
    (embedding kNN clusters via `talk:semanticEdges`, talk only); the legend is
    contextual and filters (relations, or folders — "select folders"). e2e-covered.
+7. ✅ **Layout modes + reset view — shipped.** `layout: force | tree` — dagre
+   (`@dagrejs/dagre`) gives a layered, mind-map-style hierarchical layout (layout-only
+   lib → our SVG renders it; pure, golden-tested). **⟲ reset view** clears zoom, pan,
+   and dragged positions. *Open: radial layout; super-node collapsing for huge global
+   maps.*
 2. **Curation** — relation filter (the killer feature the typed triples unlock),
    focus/expand/collapse, stable relayout (seed from previous positions).
 3. **Pin / hide / promote + global map** — view-state curation; degree-threshold
