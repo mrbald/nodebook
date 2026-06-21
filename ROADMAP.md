@@ -63,13 +63,13 @@ the vault, reusing the SQLite index (+ `sqlite-vec` for vectors, transformers.js
 for local embeddings, hybrid FTS5+vector retrieval, pluggable chat LLM).
 
 - ✅ **Chunker** (`src/main/rag/chunk.ts`, golden-tested) — pure, dependency-free.
-- **P0 spike** — sqlite-vec loads in our Electron better-sqlite3; a local embedding
-  runs; bundle-vs-download the model.
-- **P1** — embed pipeline (worker thread) + sqlite-vec store + hybrid semantic
-  search in the sidebar (fully local, no LLM).
+- ✅ **P0 spike** — sqlite-vec + transformers.js verified under Electron.
+- ✅ **P1 — semantic search (shipped)** — renderer WASM embedder (worker) +
+  sqlite-vec store + hybrid FTS⊕vector (RRF), surfaced in the sidebar. Fully local,
+  off by default, no LLM/keys. e2e-covered (stub embedder) + real-model verified.
 - **P2** — "Ask" chat panel + pluggable LLM (Claude default) + citations.
-- **P3** — local-LLM option, incremental re-embed, model management.
-- *Decisions pending:* native-deps/model-size greenlight; chat provider (cloud/local/search-only).
+- **P3** — local-LLM option, bundle-vs-download model management, move the embedder
+  to a renderer Web Worker tuning / distance-threshold for the ✨ marker.
 
 ## Event-loop telemetry ("measure everything")
 

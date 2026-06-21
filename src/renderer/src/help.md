@@ -59,6 +59,20 @@ text:
 - **Indentation = containment** — nested bullets become a tree
 - A `## Edges` section with `[[A]] relation [[B]]` lines declares relations
 
+## Talk to docs — semantic search
+
+AI-assisted **search by meaning** over your notes, on top of keyword search. It is
+**off by default**; turn it on from the **✨ Search by meaning** link under the
+search box.
+
+- **Local & private** — embeddings are computed on your machine with a small model
+  that downloads once on enable. Your notes never leave your computer; no API key.
+- Once on, the search box **fuses keyword + meaning** automatically — there is no
+  mode to switch. A **✨** marks hits surfaced by meaning.
+- Indexing runs in the background; new and edited notes are re-embedded on save.
+- Fully **reversible** — *Turn off* drops the embeddings (they live in
+  `<vault>/.nodebook/`, rebuildable by re-enabling).
+
 ## View modes
 
 Switch from the bottom-right status bar, or with the keyboard:

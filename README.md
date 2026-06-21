@@ -24,6 +24,11 @@ store) index in the main process.
 - **`[[wikilinks]]`** with `[[`-autocomplete from the vault, clickable pills, and
   a **backlinks panel** grouped by relation type.
 - **Full-text search** (FTS5) with highlighted snippets.
+- **Talk to docs** — opt-in **AI semantic search** over your notes. Fully local
+  and private (on-device embeddings via `transformers.js` + `sqlite-vec`); nothing
+  leaves your machine and no API key is needed. Off by default; once enabled, the
+  search box fuses keyword + meaning automatically (✨ marks meaning-matched hits).
+  See [docs/talk-to-docs.md](docs/talk-to-docs.md).
 - **Knowledge index** — `[[links]]` and `key:: value` fields are harvested into a
   triple store (`subject, relation, object`).
 - **`.map.md`** files render as a collapsible map (indentation = containment,
