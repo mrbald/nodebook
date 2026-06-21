@@ -680,11 +680,12 @@ body {
   user-select: none;
 }
 .graph-node:hover circle {
-  fill: var(--accent);
+  stroke: var(--text);
+  stroke-width: 2.5;
 }
 .graph-node.is-focus circle {
-  fill: var(--accent);
   stroke: var(--text);
+  stroke-width: 3;
 }
 .graph-node.is-ghost circle {
   fill: transparent;

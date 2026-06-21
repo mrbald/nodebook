@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GraphData, GraphEdge } from '@shared/types'
 import { forceLayout } from './layout'
+import { pageRank, community } from './structure'
 
 const W = 800
 const H = 600
 const PALETTE = ['#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66']
+const COMMUNITY = ['#7aa2f7', '#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66', '#9ece6a']
+const communityColor = (c: number): string => COMMUNITY[c % COMMUNITY.length]
 
 /** Map each typed relation to a stable colour; `links_to` stays neutral. */
 function relationColors(edges: GraphEdge[]): Map<string, string> {
@@ -62,6 +65,11 @@ export function GraphView({
     [data]
   )
   const colors = useMemo(() => (data ? relationColors(data.edges) : new Map()), [data])
+  // Centres of gravity (PageRank → size) and clusters (community → colour).
+  const pr = useMemo(() => (data ? pageRank(data.nodes, data.edges) : new Map()), [data])
+  const comm = useMemo(() => (data ? community(data.nodes, data.edges) : new Map()), [data])
+  const maxPr = useMemo(() => Math.max(1e-9, ...[...pr.values()]), [pr])
+  const radius = (id: string): number => 7 + Math.sqrt((pr.get(id) ?? 0) / maxPr) * 14
 
   // Screen → viewBox scale (the svg fits viewBox W×H into its client box).
   const unitsPerPx = (): number => W / (svgRef.current?.clientWidth || W)
@@ -185,7 +193,7 @@ export function GraphView({
             {data.nodes.map((node) => {
               const p = layout.get(node.id)
               if (!p) return null
-              const r = 6 + Math.min(node.degree, 8) * 1.5
+              const r = radius(node.id)
               const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}`
               return (
                 <g
@@ -196,7 +204,10 @@ export function GraphView({
                     if (!movedRef.current && node.path) onOpen(node.path)
                   }}
                 >
-                  <circle r={r} />
+                  <circle
+                    r={r}
+                    style={node.ghost ? undefined : { fill: communityColor(comm.get(node.id) ?? 0) }}
+                  />
                   <text y={r + 13}>{node.label}</text>
                 </g>
               )
