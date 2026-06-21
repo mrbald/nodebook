@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { GraphData, GraphEdge, TalkNeighbor } from '@shared/types'
-import { forceLayout } from './layout'
+import type { GraphData, GraphEdge, GraphNode, TalkNeighbor } from '@shared/types'
+import { forceLayout, type Point } from './layout'
 import { pageRank, community } from './structure'
 
 const W = 800
@@ -10,18 +10,18 @@ const PALETTE = ['#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66
 const COMMUNITY = ['#7aa2f7', '#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66', '#9ece6a']
 const communityColor = (c: number): string => COMMUNITY[c % COMMUNITY.length]
 
-/** Colour each relation; `links_to` neutral, the AI "related" overlay accent-green. */
 function relationColors(edges: GraphEdge[]): Map<string, string> {
-  const m = new Map<string, string>([['links_to', 'var(--muted)'], [RELATED, '#9ece6a']])
-  const typed = [...new Set(edges.map((e) => e.relation))]
+  const present = new Set(edges.map((e) => e.relation))
+  const m = new Map<string, string>()
+  if (present.has('links_to')) m.set('links_to', 'var(--muted)')
+  if (present.has(RELATED)) m.set(RELATED, '#9ece6a')
+  ;[...present]
     .filter((r) => r !== 'links_to' && r !== RELATED)
     .sort()
-  typed.forEach((r, i) => m.set(r, PALETTE[i % PALETTE.length]))
+    .forEach((r, i) => m.set(r, PALETTE[i % PALETTE.length]))
   return m
 }
 
-/** Overlay the focus note's semantic neighbours as nodes + dashed "related" edges
- *  (only where they aren't already link-connected — "related but not linked"). */
 function mergeRelated(base: GraphData, related: TalkNeighbor[], focusName: string): GraphData {
   if (related.length === 0) return base
   const ids = new Set(base.nodes.map((n) => n.id))
@@ -46,12 +46,16 @@ function mergeRelated(base: GraphData, related: TalkNeighbor[], focusName: strin
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 const relLabel = (rel: string): string => (rel === RELATED ? '✨ related' : rel)
 
+type Gesture =
+  | { kind: 'pan'; ox: number; oy: number; sx: number; sy: number }
+  | { kind: 'node'; node: GraphNode; ox: number; oy: number; sx: number; sy: number }
+
 /**
- * The knowledge map — a force-directed, read-only view of an index slice. Local
- * (depth-`d` around the focus note) or global. Curate the *view* (filter link
- * types by clicking the legend; right-click to hide a noisy node) — never the
- * geometry. With talk-to-docs on, an opt-in **✨ Related** overlay adds dashed
- * edges to similar-but-unlinked notes. Pan with a drag, zoom with the wheel.
+ * The knowledge map — a force-directed, read-only view of an index slice. Drag a
+ * node to arrange it, drag the background to pan, wheel to zoom, click a node to
+ * open it. Curate the *view* (filter link types by clicking the legend; right-click
+ * to hide a noisy node) — never the geometry of your notes. With talk-to-docs on,
+ * an opt-in **✨ Related** overlay adds dashed edges to similar-but-unlinked notes.
  */
 export function GraphView({
   focusPath,
@@ -75,9 +79,10 @@ export function GraphView({
   const [showRelated, setShowRelated] = useState(true)
   const [hiddenRels, setHiddenRels] = useState<Set<string>>(new Set())
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
+  const [dragged, setDragged] = useState<Map<string, Point>>(new Map())
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const svgRef = useRef<SVGSVGElement>(null)
-  const pan = useRef<{ ox: number; oy: number; sx: number; sy: number; moved: boolean } | null>(null)
+  const gesture = useRef<Gesture | null>(null)
   const movedRef = useRef(false)
 
   useEffect(() => {
@@ -104,17 +109,17 @@ export function GraphView({
     }
   }, [focusPath, talkReady, showRelated, global, reloadKey])
 
-  // New graph → reset pan/zoom and the node-specific hides (relation filter persists).
+  // New graph → reset pan/zoom, hand-placed nodes, and per-node hides.
   useEffect(() => {
     setView({ x: 0, y: 0, k: 1 })
     setHiddenNodes(new Set())
+    setDragged(new Map())
   }, [focusPath, global, depth])
 
   const data = useMemo(
     () => (base ? mergeRelated(base, related, focusName) : null),
     [base, related, focusName]
   )
-  // The curated view: drop hidden nodes and filtered relations.
   const visible = useMemo(() => {
     if (!data) return null
     const nodes = data.nodes.filter((n) => !hiddenNodes.has(n.id))
@@ -137,6 +142,7 @@ export function GraphView({
   )
   const maxPr = useMemo(() => Math.max(1e-9, ...[...pr.values()]), [pr])
   const radius = (id: string): number => 7 + Math.sqrt((pr.get(id) ?? 0) / maxPr) * 14
+  const posOf = (id: string): Point | undefined => dragged.get(id) ?? layout?.get(id)
   const filtered = hiddenRels.size + hiddenNodes.size
 
   const unitsPerPx = (): number => W / (svgRef.current?.clientWidth || W)
@@ -156,25 +162,40 @@ export function GraphView({
       return { k, x: p.x - (p.x - v.x) * r, y: p.y - (p.y - v.y) * r }
     })
   }
-  const onPointerDown = (e: React.PointerEvent): void => {
-    pan.current = { ox: view.x, oy: view.y, sx: e.clientX, sy: e.clientY, moved: false }
+  const onBgPointerDown = (e: React.PointerEvent): void => {
+    if (e.button !== 0) return // left button only; right-click is reserved for hide
+    gesture.current = { kind: 'pan', ox: view.x, oy: view.y, sx: e.clientX, sy: e.clientY }
     movedRef.current = false
-    ;(e.target as Element).setPointerCapture?.(e.pointerId)
+    svgRef.current?.setPointerCapture(e.pointerId)
+  }
+  const onNodePointerDown = (e: React.PointerEvent, node: GraphNode): void => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    const p = posOf(node.id)
+    if (!p) return
+    gesture.current = { kind: 'node', node, ox: p.x, oy: p.y, sx: e.clientX, sy: e.clientY }
+    movedRef.current = false
+    svgRef.current?.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent): void => {
-    const g = pan.current
+    const g = gesture.current
     if (!g) return
     const dx = e.clientX - g.sx
     const dy = e.clientY - g.sy
-    if (Math.abs(dx) + Math.abs(dy) > 3) {
-      g.moved = true
-      movedRef.current = true
+    if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true
+    if (g.kind === 'pan') {
+      const s = unitsPerPx()
+      setView((v) => ({ ...v, x: g.ox + dx * s, y: g.oy + dy * s }))
+    } else {
+      const s = unitsPerPx() / view.k
+      const np = { x: g.ox + dx * s, y: g.oy + dy * s }
+      setDragged((m) => new Map(m).set(g.node.id, np))
     }
-    const s = unitsPerPx()
-    setView((v) => ({ ...v, x: g.ox + dx * s, y: g.oy + dy * s }))
   }
   const onPointerUp = (): void => {
-    pan.current = null
+    const g = gesture.current
+    if (g?.kind === 'node' && !movedRef.current && g.node.path) onOpen(g.node.path)
+    gesture.current = null
   }
 
   const toggleRel = (rel: string): void =>
@@ -267,15 +288,15 @@ export function GraphView({
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="xMidYMid meet"
           onWheel={onWheel}
-          onPointerDown={onPointerDown}
+          onPointerDown={onBgPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={onPointerUp}
         >
           <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
             {visible.edges.map((e, i) => {
-              const a = layout.get(e.source)
-              const b = layout.get(e.target)
+              const a = posOf(e.source)
+              const b = posOf(e.target)
               if (!a || !b) return null
               return (
                 <line
@@ -290,7 +311,7 @@ export function GraphView({
               )
             })}
             {visible.nodes.map((node) => {
-              const p = layout.get(node.id)
+              const p = posOf(node.id)
               if (!p) return null
               const r = radius(node.id)
               const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}`
@@ -299,11 +320,9 @@ export function GraphView({
                   key={node.id}
                   className={cls}
                   transform={`translate(${p.x},${p.y})`}
-                  onClick={() => {
-                    if (!movedRef.current && node.path) onOpen(node.path)
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
+                  onPointerDown={(ev) => onNodePointerDown(ev, node)}
+                  onContextMenu={(ev) => {
+                    ev.preventDefault()
                     if (!node.focus) setHiddenNodes((s) => new Set(s).add(node.id))
                   }}
                 >

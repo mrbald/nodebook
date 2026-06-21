@@ -687,11 +687,13 @@ body {
   color: var(--accent);
   border-color: var(--accent);
 }
+.graph-node {
+  cursor: grab;
+}
 .graph-node circle {
   fill: var(--accent-bg);
   stroke: var(--accent);
   stroke-width: 1.5;
-  cursor: pointer;
 }
 .graph-node text {
   fill: var(--text);

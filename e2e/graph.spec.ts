@@ -74,6 +74,18 @@ test('clicking a neighbour node recenters the map on it', async () => {
   await expect(page.locator('.graph-node.is-focus')).toHaveText(/Graph Model/)
 })
 
+test('dragging a node moves it (interactive layout)', async () => {
+  const node = page.locator('.graph-node', { hasText: 'Graph Model' }).first()
+  const before = await node.getAttribute('transform')
+  const box = await node.boundingBox()
+  if (!box) throw new Error('no node box')
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 90, box.y + 60, { steps: 5 })
+  await page.mouse.up()
+  await expect(node).not.toHaveAttribute('transform', before ?? '')
+})
+
 test('Close returns to the editor', async () => {
   await page.locator('.graph-close').click()
   await expect(page.locator('.graph-view')).toHaveCount(0)
