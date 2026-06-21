@@ -93,11 +93,25 @@ stabilized:
 All are cross-platform, but they must be wired into electron-builder (unpack the
 binaries, per-arch) and re-tested on all three OSes.
 
+**P1 runtime decision (installer size vs speed), since the feature is off by
+default:**
+- **onnxruntime-node (native)** — fastest, but a large per-OS/arch native binary
+  shipped to *everyone* even if they never enable Talk-to-docs.
+- **onnxruntime-web (WASM)** — transformers.js also runs in-renderer/worker on a
+  single small cross-platform WASM blob; slower, but lazy-loadable and no per-OS
+  native packaging. **Leaning WASM** for a lean, opt-in feature; native is a later
+  perf upgrade.
+- **Model**: download on first *enable* (keeps the base installer small), cache
+  under userData; offer a bundle option later.
+
 ## Phases
 
-- **P0 — spike (de-risk):** prove `sqlite-vec` loads into our Electron
-  `better-sqlite3` and a transformers.js embedding runs in the main/worker. Decide
-  bundle-vs-download for the model.
+- **P0 — spike ✅ (done, then reverted to keep `main` lean):** verified under
+  Electron — `sqlite-vec` v0.1.9 loads into our `better-sqlite3` and KNN works
+  (vec0 rowids must bind as **BigInt**); transformers.js (MiniLM) embeds via
+  onnxruntime-node (**N-API → no Electron rebuild**), model auto-downloaded
+  (~23 MB) and ran in ~90 ms cached. Conclusion: foundation viable; deps re-added
+  in P1.
 - **P1 — semantic search (fully local, no LLM):** chunk + embed pipeline (worker)
   + sqlite-vec store + hybrid retrieval surfaced in the sidebar. *Ships value with
   zero cloud/keys.*
