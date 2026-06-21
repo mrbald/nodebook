@@ -3,7 +3,7 @@
 [![CI](https://github.com/mrbald/nodebook/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbald/nodebook/actions/workflows/ci.yml)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/your-bmc-username)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/gt9gt7cvwmg)
 
 A source-mode Markdown notebook with a built-in knowledge index. Your notes stay
 plain `.md` files on disk; Nodebook adds `[[wikilinks]]`, backlinks, full-text
@@ -102,4 +102,4 @@ safe to delete; it rebuilds on next open.
 Nodebook is licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 Commercial licensing (for use that can't comply with the AGPL) may be available
 — open an issue to ask. If you'd like to support development, there's a
-[Buy Me a Coffee](https://www.buymeacoffee.com/your-bmc-username) button. ☕
+[Buy Me a Coffee](https://www.buymeacoffee.com/gt9gt7cvwmg) button. ☕
