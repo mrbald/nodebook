@@ -14,6 +14,7 @@ import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
 import { useTalk } from './talk/useTalk'
 import { TalkPanel } from './talk/TalkPanel'
+import { TelemetryWidget } from './telemetry/TelemetryWidget'
 import HELP_DOC from './help.md?raw'
 
 type ThemeMode = 'system' | 'dark' | 'light'
@@ -53,6 +54,7 @@ export default function App() {
   const [noteNames, setNoteNames] = useState<string[]>([])
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchHit[]>([])
+  const [telemetryOn, setTelemetryOn] = useState(false)
   const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -100,6 +102,7 @@ export default function App() {
     settingsRef.current = s
     applyTheme(resolveThemeName(s), s.editor.fontSize)
     setAutosave({ delayMs: s.editor.autosaveDelayMs, onSwitch: s.editor.autosaveOnSwitch })
+    setTelemetryOn(s.telemetry.enabled)
     // The quick selector collapses the theme config to system / dark / light.
     setThemeMode(s.theme.followSystem ? 'system' : getTheme(s.theme.name).dark ? 'dark' : 'light')
   }
@@ -107,6 +110,12 @@ export default function App() {
   const pickThemeMode = (mode: string): void => {
     void window.nodebook.setThemeMode(mode as ThemeMode).then(applySettings)
   }
+
+  // Own telemetry measurement at the app level so it tracks the setting, not the
+  // status-bar widget's mount state (which comes and goes with the view).
+  useEffect(() => {
+    void window.nodebook.telemetryApply(telemetryOn)
+  }, [telemetryOn])
 
   useEffect(() => {
     void window.nodebook.readSettings().then((s) => {
@@ -587,6 +596,7 @@ export default function App() {
                   options={MODE_OPTIONS}
                   onChange={(v) => setEditorMode(v as ViewMode)}
                 />
+                <TelemetryWidget enabled={telemetryOn} />
               </div>
               {/* Off-screen; populated only for Print / Export-PDF. */}
               <div className="print-reader" ref={printRef} />

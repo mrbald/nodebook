@@ -287,6 +287,125 @@ body {
   border-top: 1px solid var(--border);
   background: var(--bg-elev);
 }
+/* Telemetry widget — sits at the far left of the status bar. */
+.telemetry {
+  position: relative;
+  margin-right: auto;
+}
+.telemetry-mini {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 5px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.telemetry-mini:hover {
+  border-color: var(--border);
+}
+.spark {
+  display: block;
+}
+.spark-cpu polyline {
+  stroke: var(--accent);
+}
+.spark-ram polyline {
+  stroke: #7ec699;
+}
+.histo .histo-bar {
+  fill: var(--muted);
+}
+.histo .histo-bad {
+  fill: #e06c75;
+}
+.telemetry-lag {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.telemetry-lag.bad,
+.telemetry-worst .bad {
+  color: #e06c75;
+}
+.telemetry-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 220px;
+  padding: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 12px;
+}
+.telemetry-pop-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.telemetry-pop-sub {
+  margin: 8px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.telemetry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+}
+.telemetry-k {
+  width: 30px;
+  color: var(--muted);
+}
+.telemetry-v {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.telemetry-histo-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 1px;
+}
+.telemetry-stats {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.telemetry-worst {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+}
+.telemetry-worst li {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+.telemetry-when {
+  color: var(--muted);
+}
+.telemetry-credit {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px 0 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
 .status-select {
   position: relative;
 }
