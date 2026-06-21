@@ -68,7 +68,9 @@ it by hand, and nothing here changes your notes.
 - **Getting around** — **drag a note to arrange it**, drag the empty space to move
   the whole map, scroll to zoom, **click a note to open it**. **−/+** show fewer or
   more steps out from the note; **Global** shows the whole vault instead of just this
-  note's neighbourhood; **⟲** resets the zoom.
+  note's neighbourhood; **⟲ reset view** undoes your zoom, pan, and any drags.
+- **Layout** — switch between an **organic web** (force) and a tidy **hierarchical
+  tree** that reads like a mind map.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);
   **line colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a
   **dashed outline** is a note you've linked to but haven't created yet.

@@ -102,7 +102,7 @@ test('clicking a link type in the legend filters it; reset restores', async () =
   await expect(page.locator('.graph-legend-item.is-off', { hasText: 'topic' })).toBeVisible()
   expect(await page.locator('.graph-edge').count()).toBeLessThan(before)
 
-  await page.locator('.graph-ctl', { hasText: 'reset' }).click()
+  await page.locator('.graph-ctl', { hasText: 'show all' }).click()
   await expect(page.locator('.graph-legend-item.is-off')).toHaveCount(0)
 })
 
@@ -111,7 +111,7 @@ test('right-clicking a node hides it; reset brings it back', async () => {
   await page.locator('.graph-node', { hasText: 'Graph Model' }).click({ button: 'right' })
   expect(await page.locator('.graph-node').count()).toBeLessThan(before)
 
-  await page.locator('.graph-ctl', { hasText: 'reset' }).click()
+  await page.locator('.graph-ctl', { hasText: 'show all' }).click()
   expect(await page.locator('.graph-node').count()).toBe(before)
 })
 
@@ -119,4 +119,12 @@ test('colour mode cycles to folder and the legend switches to folders', async ()
   await page.locator('.graph-ctl', { hasText: 'colour' }).click() // links → folder
   await expect(page.locator('.graph-ctl', { hasText: 'colour: folder' })).toBeVisible()
   await expect(page.locator('.graph-legend-item', { hasText: '(root)' })).toBeVisible()
+})
+
+test('layout switches to a hierarchical tree (dagre); reset view re-fits', async () => {
+  await page.locator('.graph-ctl', { hasText: 'layout: force' }).click()
+  await expect(page.locator('.graph-ctl', { hasText: 'layout: tree' })).toBeVisible()
+  await expect(page.locator('.graph-node').first()).toBeVisible()
+  await page.locator('.graph-ctl', { hasText: 'reset view' }).click()
+  await expect(page.locator('.graph-node').first()).toBeVisible()
 })

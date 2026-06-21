@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GraphData, GraphEdge, GraphNode, TalkNeighbor } from '@shared/types'
 import { forceLayout, type Point } from './layout'
+import { dagreLayout } from './dagreLayout'
 import { pageRank, community } from './structure'
 
 const W = 800
@@ -94,6 +95,7 @@ export function GraphView({
   const [global, setGlobal] = useState(false)
   const [showRelated, setShowRelated] = useState(true)
   const [colorMode, setColorMode] = useState<ColorMode>('links')
+  const [layoutMode, setLayoutMode] = useState<'force' | 'tree'>('force')
   const [hiddenRels, setHiddenRels] = useState<Set<string>>(new Set())
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
@@ -133,6 +135,9 @@ export function GraphView({
     setDragged(new Map())
   }, [focusPath, global, depth])
 
+  // A new layout invalidates hand-placed positions.
+  useEffect(() => setDragged(new Map()), [layoutMode])
+
   const data = useMemo(
     () => (base ? mergeRelated(base, related, focusName) : null),
     [base, related, focusName]
@@ -166,10 +171,11 @@ export function GraphView({
     return { nodes, edges }
   }, [data, hiddenRels, hiddenNodes, hiddenFolders, vaultRoot])
 
-  const layout = useMemo(
-    () => (visible ? forceLayout(visible.nodes, visible.edges, { width: W, height: H }) : null),
-    [visible]
-  )
+  const layout = useMemo(() => {
+    if (!visible) return null
+    const fn = layoutMode === 'tree' ? dagreLayout : forceLayout
+    return fn(visible.nodes, visible.edges, { width: W, height: H })
+  }, [visible, layoutMode])
   const colors = useMemo(() => (data ? relationColors(data.edges) : new Map()), [data])
   const pr = useMemo(() => (visible ? pageRank(visible.nodes, visible.edges) : new Map()), [visible])
   const comm = useMemo(
@@ -299,6 +305,13 @@ export function GraphView({
           <button className="graph-ctl" title="Colour the dots by…" onClick={cycleColor}>
             colour: {colorMode}
           </button>
+          <button
+            className="graph-ctl"
+            title="Layout: organic web, or hierarchical tree (dagre)"
+            onClick={() => setLayoutMode((m) => (m === 'force' ? 'tree' : 'force'))}
+          >
+            layout: {layoutMode}
+          </button>
           {talkReady && !global && (
             <button
               className={`graph-ctl${showRelated ? ' is-on' : ''}`}
@@ -318,15 +331,18 @@ export function GraphView({
                 setHiddenFolders(new Set())
               }}
             >
-              reset ({filtered})
+              show all ({filtered})
             </button>
           )}
           <button
             className="graph-ctl"
-            title="Reset zoom"
-            onClick={() => setView({ x: 0, y: 0, k: 1 })}
+            title="Reset the view — zoom, pan, and any nodes you've dragged"
+            onClick={() => {
+              setView({ x: 0, y: 0, k: 1 })
+              setDragged(new Map())
+            }}
           >
-            ⟲
+            ⟲ reset view
           </button>
         </div>
         {legend.length > 1 && (
