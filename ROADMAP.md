@@ -62,12 +62,17 @@ nodes or dragging edges. Editing the map means editing the notes.
 
 Incremental slices (each independently shippable):
 
-1. ✅ **Read-only local map (MVP) — shipped.** `index:graph` returns a depth-1 slice
-   around a focus note (pure builder, golden-tested; `.map.md` views excluded); a
-   `GraphView` island renders a force-directed layout (pure, golden-tested) with
-   relation-coloured edges, degree-sized nodes, ghost nodes, and click-to-recenter;
-   entry from the status-bar **⊹ Map** button. e2e-covered. *Next: live re-query on
-   save, pan/zoom, depth control, the global map.*
+1. ✅ **Local map (MVP) — shipped.** `index:graph` depth-1 slice (pure builder,
+   golden-tested; `.map.md` views excluded); a `GraphView` island renders a
+   force-directed layout (pure, golden-tested) with relation-coloured edges, ghost
+   nodes, click-to-recenter; status-bar **⊹ Map** entry.
+2. ✅ **Explore — shipped.** Wheel-zoom-to-pointer + drag-pan; depth 1–3 stepper;
+   Local/Global toggle (whole-vault, degree-capped); live re-query on save via an
+   `index:changed` signal.
+3. ✅ **Auto-structure (B+C) — shipped.** PageRank → node size (centres of gravity);
+   deterministic label-propagation communities → node colour (clusters). Pure +
+   golden-tested. *Next: D — semantic overlay (kNN "related" edges + embedding
+   clusters) when talk-to-docs is on; relation filter; pin/hide; save view.*
 2. **Curation** — relation filter (the killer feature the typed triples unlock),
    focus/expand/collapse, stable relayout (seed from previous positions).
 3. **Pin / hide / promote + global map** — view-state curation; degree-threshold
