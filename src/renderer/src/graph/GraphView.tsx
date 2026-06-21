@@ -1,47 +1,77 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { GraphData, GraphEdge } from '@shared/types'
+import type { GraphData, GraphEdge, TalkNeighbor } from '@shared/types'
 import { forceLayout } from './layout'
 import { pageRank, community } from './structure'
 
 const W = 800
 const H = 600
+const RELATED = '~related'
 const PALETTE = ['#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66']
 const COMMUNITY = ['#7aa2f7', '#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66', '#9ece6a']
 const communityColor = (c: number): string => COMMUNITY[c % COMMUNITY.length]
 
-/** Map each typed relation to a stable colour; `links_to` stays neutral. */
+/** Colour each relation; `links_to` neutral, the AI "related" overlay accent-green. */
 function relationColors(edges: GraphEdge[]): Map<string, string> {
-  const m = new Map<string, string>([['links_to', 'var(--muted)']])
-  const typed = [...new Set(edges.map((e) => e.relation))].filter((r) => r !== 'links_to').sort()
+  const m = new Map<string, string>([['links_to', 'var(--muted)'], [RELATED, '#9ece6a']])
+  const typed = [...new Set(edges.map((e) => e.relation))]
+    .filter((r) => r !== 'links_to' && r !== RELATED)
+    .sort()
   typed.forEach((r, i) => m.set(r, PALETTE[i % PALETTE.length]))
   return m
+}
+
+/** Overlay the focus note's semantic neighbours as nodes + dashed "related" edges
+ *  (only where they aren't already link-connected — "related but not linked"). */
+function mergeRelated(base: GraphData, related: TalkNeighbor[], focusName: string): GraphData {
+  if (related.length === 0) return base
+  const ids = new Set(base.nodes.map((n) => n.id))
+  const nodes = [...base.nodes]
+  const edges = [...base.edges]
+  const linked = new Set(
+    base.edges
+      .filter((e) => e.source === focusName || e.target === focusName)
+      .map((e) => (e.source === focusName ? e.target : e.source))
+  )
+  for (const nb of related) {
+    if (nb.name === focusName) continue
+    if (!ids.has(nb.name)) {
+      ids.add(nb.name)
+      nodes.push({ id: nb.name, label: nb.name, path: nb.path, ghost: false, degree: 0, focus: false })
+    }
+    if (!linked.has(nb.name)) edges.push({ source: focusName, target: nb.name, relation: RELATED })
+  }
+  return { nodes, edges }
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 
 /**
  * The knowledge map — a force-directed, read-only view of an index slice. Local
- * (depth-`d` around the focus note) or global (the whole vault, capped). Pan with
- * a drag, zoom with the wheel; click a real node to recenter/open it. "Manage,
- * don't draw": layout is automatic, edges are harvested triples, nothing writes
- * back.
+ * (depth-`d` around the focus note) or global (the whole vault, capped). With
+ * talk-to-docs on, an opt-in **✨ Related** overlay adds dashed edges to
+ * semantically-similar-but-unlinked notes ("what you meant" vs "what you wrote").
+ * Pan with a drag, zoom with the wheel; click a real node to recenter/open it.
  */
 export function GraphView({
   focusPath,
   focusName,
+  talkReady,
   onOpen,
   onClose,
   reloadKey
 }: {
   focusPath: string | null
   focusName: string
+  talkReady: boolean
   onOpen: (path: string) => void
   onClose: () => void
   reloadKey?: number
 }): React.JSX.Element {
-  const [data, setData] = useState<GraphData | null>(null)
+  const [base, setBase] = useState<GraphData | null>(null)
+  const [related, setRelated] = useState<TalkNeighbor[]>([])
   const [depth, setDepth] = useState(1)
   const [global, setGlobal] = useState(false)
+  const [showRelated, setShowRelated] = useState(true)
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const svgRef = useRef<SVGSVGElement>(null)
   const pan = useRef<{ ox: number; oy: number; sx: number; sy: number; moved: boolean } | null>(null)
@@ -50,28 +80,44 @@ export function GraphView({
   useEffect(() => {
     let alive = true
     void window.nodebook.graph(global ? null : focusPath, { depth }).then((d) => {
-      if (alive) setData(d)
+      if (alive) setBase(d)
     })
     return () => {
       alive = false
     }
   }, [focusPath, depth, global, reloadKey])
 
-  // Reset pan/zoom when the *graph* changes (not on a mere save-triggered reload).
+  // Semantic overlay — focus-centric, local only, when talk is enabled.
+  useEffect(() => {
+    if (!talkReady || !showRelated || global || !focusPath) {
+      setRelated([])
+      return
+    }
+    let alive = true
+    void window.nodebook.talkNeighbors(focusPath, 5).then((n) => {
+      if (alive) setRelated(n)
+    })
+    return () => {
+      alive = false
+    }
+  }, [focusPath, talkReady, showRelated, global, reloadKey])
+
   useEffect(() => setView({ x: 0, y: 0, k: 1 }), [focusPath, global, depth])
 
+  const data = useMemo(
+    () => (base ? mergeRelated(base, related, focusName) : null),
+    [base, related, focusName]
+  )
   const layout = useMemo(
     () => (data ? forceLayout(data.nodes, data.edges, { width: W, height: H }) : null),
     [data]
   )
   const colors = useMemo(() => (data ? relationColors(data.edges) : new Map()), [data])
-  // Centres of gravity (PageRank → size) and clusters (community → colour).
   const pr = useMemo(() => (data ? pageRank(data.nodes, data.edges) : new Map()), [data])
   const comm = useMemo(() => (data ? community(data.nodes, data.edges) : new Map()), [data])
   const maxPr = useMemo(() => Math.max(1e-9, ...[...pr.values()]), [pr])
   const radius = (id: string): number => 7 + Math.sqrt((pr.get(id) ?? 0) / maxPr) * 14
 
-  // Screen → viewBox scale (the svg fits viewBox W×H into its client box).
   const unitsPerPx = (): number => W / (svgRef.current?.clientWidth || W)
 
   const onWheel = (e: React.WheelEvent): void => {
@@ -82,14 +128,13 @@ export function GraphView({
     pt.y = e.clientY
     const m = svg.getScreenCTM()
     if (!m) return
-    const p = pt.matrixTransform(m.inverse()) // pointer in viewBox coords
+    const p = pt.matrixTransform(m.inverse())
     setView((v) => {
       const k = clamp(v.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.25, 6)
       const r = k / v.k
       return { k, x: p.x - (p.x - v.x) * r, y: p.y - (p.y - v.y) * r }
     })
   }
-
   const onPointerDown = (e: React.PointerEvent): void => {
     pan.current = { ox: view.x, oy: view.y, sx: e.clientX, sy: e.clientY, moved: false }
     movedRef.current = false
@@ -138,6 +183,15 @@ export function GraphView({
               </button>
             </span>
           )}
+          {talkReady && !global && (
+            <button
+              className={`graph-ctl${showRelated ? ' is-on' : ''}`}
+              title="Show semantically-related (but unlinked) notes"
+              onClick={() => setShowRelated((s) => !s)}
+            >
+              ✨ Related
+            </button>
+          )}
           <button
             className="graph-ctl"
             title="Reset zoom"
@@ -151,7 +205,7 @@ export function GraphView({
             {[...colors.entries()].map(([rel, c]) => (
               <span key={rel} className="graph-legend-item">
                 <span className="graph-legend-dot" style={{ background: c }} />
-                {rel}
+                {rel === RELATED ? '✨ related' : rel}
               </span>
             ))}
           </span>
@@ -181,7 +235,7 @@ export function GraphView({
               return (
                 <line
                   key={i}
-                  className="graph-edge"
+                  className={`graph-edge${e.relation === RELATED ? ' graph-edge-related' : ''}`}
                   x1={a.x}
                   y1={a.y}
                   x2={b.x}

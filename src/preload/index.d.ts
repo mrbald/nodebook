@@ -5,6 +5,7 @@ import type {
   SearchHit,
   Settings,
   TalkChunk,
+  TalkNeighbor,
   TalkStatus,
   TelemetrySnapshot,
   VaultListing
@@ -33,6 +34,7 @@ export interface NodebookApi {
   talkPending: (limit: number) => Promise<TalkChunk[]>
   talkPutEmbeddings: (rows: { id: number; vector: number[] }[]) => Promise<TalkStatus>
   talkSearch: (query: string, vector: number[]) => Promise<SearchHit[]>
+  talkNeighbors: (focusPath: string, k?: number) => Promise<TalkNeighbor[]>
   onTalkDirty: (cb: () => void) => () => void
   telemetryApply: (enabled: boolean) => Promise<void>
   telemetrySnapshot: () => Promise<TelemetrySnapshot | null>

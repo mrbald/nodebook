@@ -666,6 +666,14 @@ body {
   stroke-width: 1.2;
   opacity: 0.5;
 }
+.graph-edge-related {
+  stroke-dasharray: 5 4;
+  opacity: 0.85;
+}
+.graph-ctl.is-on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .graph-node circle {
   fill: var(--accent-bg);
   stroke: var(--accent);

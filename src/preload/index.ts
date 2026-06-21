@@ -6,6 +6,7 @@ import type {
   SearchHit,
   Settings,
   TalkChunk,
+  TalkNeighbor,
   TalkStatus,
   TelemetrySnapshot,
   VaultListing
@@ -47,6 +48,8 @@ const api = {
     ipcRenderer.invoke('talk:putEmbeddings', rows),
   talkSearch: (query: string, vector: number[]): Promise<SearchHit[]> =>
     ipcRenderer.invoke('talk:search', query, vector),
+  talkNeighbors: (focusPath: string, k?: number): Promise<TalkNeighbor[]> =>
+    ipcRenderer.invoke('talk:neighbors', focusPath, k),
   /** Notifies the renderer that saved/changed notes need (re)embedding. */
   onTalkDirty: (cb: () => void): (() => void) => {
     const listener = (): void => cb()

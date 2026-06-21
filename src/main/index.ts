@@ -458,6 +458,10 @@ function registerIpc(): void {
     index?.talkSearch(query, vector?.length ? Float32Array.from(vector) : null) ?? []
   )
 
+  ipcMain.handle('talk:neighbors', (_e, focusPath: string, k?: number) =>
+    index?.talkNeighbors(focusPath, k) ?? []
+  )
+
   // --- Telemetry (measure everything) -------------------------------------
   // Reconcile the measurement to the settings flag (called by the renderer on
   // load and after a settings change; no TOML write).

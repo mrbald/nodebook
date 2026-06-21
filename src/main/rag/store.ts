@@ -163,6 +163,59 @@ export class VectorStore {
     })()
   }
 
+  /** Per-note centroid vectors (mean of a note's chunk embeddings), L2-normalized
+   *  so a dot product is cosine similarity. */
+  private centroids(): Map<string, Float32Array> {
+    const map = new Map<string, Float32Array>()
+    if (!this.dims) return map
+    const rows = this.db
+      .prepare(
+        `SELECT c.file AS file, v.embedding AS emb
+         FROM chunks c JOIN chunk_vec v ON v.rowid = c.id WHERE c.embedded = 1`
+      )
+      .all() as { file: string; emb: Buffer }[]
+    const counts = new Map<string, number>()
+    for (const r of rows) {
+      const vec = new Float32Array(
+        r.emb.buffer.slice(r.emb.byteOffset, r.emb.byteOffset + this.dims * 4)
+      )
+      let s = map.get(r.file)
+      if (!s) {
+        s = new Float32Array(this.dims)
+        map.set(r.file, s)
+      }
+      for (let i = 0; i < this.dims; i++) s[i] += vec[i]
+      counts.set(r.file, (counts.get(r.file) ?? 0) + 1)
+    }
+    for (const [file, s] of map) {
+      const c = counts.get(file) || 1
+      let norm = 0
+      for (let i = 0; i < this.dims; i++) {
+        s[i] /= c
+        norm += s[i] * s[i]
+      }
+      norm = Math.sqrt(norm) || 1
+      for (let i = 0; i < this.dims; i++) s[i] /= norm
+    }
+    return map
+  }
+
+  /** The k notes most semantically similar to `focusFile` (cosine over centroids). */
+  neighbors(focusFile: string, k: number): { file: string; score: number }[] {
+    const cents = this.centroids()
+    const f = cents.get(focusFile)
+    if (!f) return []
+    const scored: { file: string; score: number }[] = []
+    for (const [file, vec] of cents) {
+      if (file === focusFile) continue
+      let dot = 0
+      for (let i = 0; i < this.dims; i++) dot += f[i] * vec[i]
+      scored.push({ file, score: dot })
+    }
+    scored.sort((a, b) => b.score - a.score)
+    return scored.slice(0, k)
+  }
+
   /** k-NN over chunk embeddings → best chunks, in distance order. */
   vectorHits(queryVec: Float32Array, k = 30): VectorHit[] {
     if (!this.dims) return []

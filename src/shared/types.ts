@@ -76,6 +76,13 @@ export interface TalkChunk {
   text: string
 }
 
+/** A semantically-similar note (cosine over per-note embedding centroids). */
+export interface TalkNeighbor {
+  path: string
+  name: string
+  score: number
+}
+
 /** A rolling snapshot of main-process telemetry for the status-bar widget. */
 export interface TelemetrySnapshot {
   /** Length of the rolling window in ms (e.g. 5 min). */

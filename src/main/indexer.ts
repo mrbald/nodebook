@@ -193,6 +193,15 @@ export class VaultIndex {
     this.vec?.putEmbeddings(rows)
   }
 
+  /** Notes semantically similar to the focus note (for the map's "related" overlay). */
+  talkNeighbors(focusPath: string, k = 5): { path: string; name: string; score: number }[] {
+    return (this.vec?.neighbors(focusPath, k) ?? []).map((n) => ({
+      path: n.file,
+      name: noteName(n.file),
+      score: n.score
+    }))
+  }
+
   /** Turn the feature off and drop all embeddings + chunks (reversible — the
    *  data is derived and re-creatable by re-enabling). */
   disableTalk(): void {
