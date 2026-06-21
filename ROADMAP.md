@@ -56,6 +56,29 @@ Incremental slices (each independently shippable):
 5. **Polish** — edge labels/legend per theme, hover preview, ⌘G/View-menu entry,
    large-vault perf (Barnes-Hut, culling).
 
+## Talk to docs (AI semantic search + chat)
+
+Full design in [docs/talk-to-docs.md](docs/talk-to-docs.md). Local-first RAG over
+the vault, reusing the SQLite index (+ `sqlite-vec` for vectors, transformers.js
+for local embeddings, hybrid FTS5+vector retrieval, pluggable chat LLM).
+
+- ✅ **Chunker** (`src/main/rag/chunk.ts`, golden-tested) — pure, dependency-free.
+- **P0 spike** — sqlite-vec loads in our Electron better-sqlite3; a local embedding
+  runs; bundle-vs-download the model.
+- **P1** — embed pipeline (worker thread) + sqlite-vec store + hybrid semantic
+  search in the sidebar (fully local, no LLM).
+- **P2** — "Ask" chat panel + pluggable LLM (Claude default) + citations.
+- **P3** — local-LLM option, incremental re-embed, model management.
+- *Decisions pending:* native-deps/model-size greenlight; chat provider (cloud/local/search-only).
+
+## Event-loop telemetry ("measure everything")
+
+Approved design (queued behind talk-to-docs). Main-loop lag via
+`perf_hooks.monitorEventLoopDelay` + a rolling log-linear histogram (port the
+`pfw` bucket geometry: linear <16, then major=log2 + 4 minor bits, ≤6% error) with
+worst-N exemplars; whole-app CPU/RAM via `app.getAppMetrics()`; a tiny toggleable
+status-bar widget (sparklines + mini histogram) crediting the `ufw/pfw` repo.
+
 ## Other post-1.0
 
 - **Settings UI** — replace (or supplement) the raw-TOML editor with a form.
