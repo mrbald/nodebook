@@ -636,6 +636,19 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.graph-legend-item:hover {
+  color: var(--accent);
+}
+.graph-legend-item.is-off {
+  opacity: 0.4;
+  text-decoration: line-through;
 }
 .graph-legend-dot {
   width: 8px;

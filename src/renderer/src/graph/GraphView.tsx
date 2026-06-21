@@ -44,13 +44,14 @@ function mergeRelated(base: GraphData, related: TalkNeighbor[], focusName: strin
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
+const relLabel = (rel: string): string => (rel === RELATED ? '✨ related' : rel)
 
 /**
  * The knowledge map — a force-directed, read-only view of an index slice. Local
- * (depth-`d` around the focus note) or global (the whole vault, capped). With
- * talk-to-docs on, an opt-in **✨ Related** overlay adds dashed edges to
- * semantically-similar-but-unlinked notes ("what you meant" vs "what you wrote").
- * Pan with a drag, zoom with the wheel; click a real node to recenter/open it.
+ * (depth-`d` around the focus note) or global. Curate the *view* (filter link
+ * types by clicking the legend; right-click to hide a noisy node) — never the
+ * geometry. With talk-to-docs on, an opt-in **✨ Related** overlay adds dashed
+ * edges to similar-but-unlinked notes. Pan with a drag, zoom with the wheel.
  */
 export function GraphView({
   focusPath,
@@ -72,6 +73,8 @@ export function GraphView({
   const [depth, setDepth] = useState(1)
   const [global, setGlobal] = useState(false)
   const [showRelated, setShowRelated] = useState(true)
+  const [hiddenRels, setHiddenRels] = useState<Set<string>>(new Set())
+  const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const svgRef = useRef<SVGSVGElement>(null)
   const pan = useRef<{ ox: number; oy: number; sx: number; sy: number; moved: boolean } | null>(null)
@@ -87,7 +90,6 @@ export function GraphView({
     }
   }, [focusPath, depth, global, reloadKey])
 
-  // Semantic overlay — focus-centric, local only, when talk is enabled.
   useEffect(() => {
     if (!talkReady || !showRelated || global || !focusPath) {
       setRelated([])
@@ -102,21 +104,40 @@ export function GraphView({
     }
   }, [focusPath, talkReady, showRelated, global, reloadKey])
 
-  useEffect(() => setView({ x: 0, y: 0, k: 1 }), [focusPath, global, depth])
+  // New graph → reset pan/zoom and the node-specific hides (relation filter persists).
+  useEffect(() => {
+    setView({ x: 0, y: 0, k: 1 })
+    setHiddenNodes(new Set())
+  }, [focusPath, global, depth])
 
   const data = useMemo(
     () => (base ? mergeRelated(base, related, focusName) : null),
     [base, related, focusName]
   )
+  // The curated view: drop hidden nodes and filtered relations.
+  const visible = useMemo(() => {
+    if (!data) return null
+    const nodes = data.nodes.filter((n) => !hiddenNodes.has(n.id))
+    const ids = new Set(nodes.map((n) => n.id))
+    const edges = data.edges.filter(
+      (e) => !hiddenRels.has(e.relation) && ids.has(e.source) && ids.has(e.target)
+    )
+    return { nodes, edges }
+  }, [data, hiddenRels, hiddenNodes])
+
   const layout = useMemo(
-    () => (data ? forceLayout(data.nodes, data.edges, { width: W, height: H }) : null),
-    [data]
+    () => (visible ? forceLayout(visible.nodes, visible.edges, { width: W, height: H }) : null),
+    [visible]
   )
   const colors = useMemo(() => (data ? relationColors(data.edges) : new Map()), [data])
-  const pr = useMemo(() => (data ? pageRank(data.nodes, data.edges) : new Map()), [data])
-  const comm = useMemo(() => (data ? community(data.nodes, data.edges) : new Map()), [data])
+  const pr = useMemo(() => (visible ? pageRank(visible.nodes, visible.edges) : new Map()), [visible])
+  const comm = useMemo(
+    () => (visible ? community(visible.nodes, visible.edges) : new Map()),
+    [visible]
+  )
   const maxPr = useMemo(() => Math.max(1e-9, ...[...pr.values()]), [pr])
   const radius = (id: string): number => 7 + Math.sqrt((pr.get(id) ?? 0) / maxPr) * 14
+  const filtered = hiddenRels.size + hiddenNodes.size
 
   const unitsPerPx = (): number => W / (svgRef.current?.clientWidth || W)
 
@@ -156,6 +177,14 @@ export function GraphView({
     pan.current = null
   }
 
+  const toggleRel = (rel: string): void =>
+    setHiddenRels((s) => {
+      const next = new Set(s)
+      if (next.has(rel)) next.delete(rel)
+      else next.add(rel)
+      return next
+    })
+
   return (
     <div className="graph-view">
       <div className="graph-header">
@@ -192,6 +221,18 @@ export function GraphView({
               ✨ Related
             </button>
           )}
+          {filtered > 0 && (
+            <button
+              className="graph-ctl"
+              title="Show everything again"
+              onClick={() => {
+                setHiddenRels(new Set())
+                setHiddenNodes(new Set())
+              }}
+            >
+              reset ({filtered})
+            </button>
+          )}
           <button
             className="graph-ctl"
             title="Reset zoom"
@@ -201,12 +242,16 @@ export function GraphView({
           </button>
         </div>
         {colors.size > 1 && (
-          <span className="graph-legend">
+          <span className="graph-legend" title="Click a link type to show/hide it">
             {[...colors.entries()].map(([rel, c]) => (
-              <span key={rel} className="graph-legend-item">
+              <button
+                key={rel}
+                className={`graph-legend-item${hiddenRels.has(rel) ? ' is-off' : ''}`}
+                onClick={() => toggleRel(rel)}
+              >
                 <span className="graph-legend-dot" style={{ background: c }} />
-                {rel === RELATED ? '✨ related' : rel}
-              </span>
+                {relLabel(rel)}
+              </button>
             ))}
           </span>
         )}
@@ -215,7 +260,7 @@ export function GraphView({
         </button>
       </div>
 
-      {data && layout && data.nodes.length > 0 ? (
+      {visible && layout && visible.nodes.length > 0 ? (
         <svg
           ref={svgRef}
           className="graph-canvas"
@@ -228,7 +273,7 @@ export function GraphView({
           onPointerLeave={onPointerUp}
         >
           <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
-            {data.edges.map((e, i) => {
+            {visible.edges.map((e, i) => {
               const a = layout.get(e.source)
               const b = layout.get(e.target)
               if (!a || !b) return null
@@ -244,7 +289,7 @@ export function GraphView({
                 />
               )
             })}
-            {data.nodes.map((node) => {
+            {visible.nodes.map((node) => {
               const p = layout.get(node.id)
               if (!p) return null
               const r = radius(node.id)
@@ -256,6 +301,10 @@ export function GraphView({
                   transform={`translate(${p.x},${p.y})`}
                   onClick={() => {
                     if (!movedRef.current && node.path) onOpen(node.path)
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    if (!node.focus) setHiddenNodes((s) => new Set(s).add(node.id))
                   }}
                 >
                   <circle
@@ -270,7 +319,7 @@ export function GraphView({
         </svg>
       ) : (
         <div className="graph-empty">
-          {data ? 'No links yet — add a [[link]] or a key:: value to this note.' : 'Loading…'}
+          {data ? 'Nothing to show — clear the filters, or add a [[link]] to this note.' : 'Loading…'}
         </div>
       )}
     </div>

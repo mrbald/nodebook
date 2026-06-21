@@ -59,6 +59,27 @@ text:
 - **Indentation = containment** — nested bullets become a tree
 - A `## Edges` section with `[[A]] relation [[B]]` lines declares relations
 
+## Knowledge map
+
+Click **⊹ Map** in the bottom bar to see the current note as a dot, with lines to
+the notes it links to. The map is drawn for you from your links — you never arrange
+it by hand, and nothing here changes your notes.
+
+- **Getting around** — drag to move, scroll to zoom, click a note to jump to it (the
+  map re-centres there). **−/+** show fewer or more steps out from the note;
+  **Global** shows the whole vault instead of just this note's neighbourhood; **⟲**
+  resets the zoom.
+- **What the picture means** — **bigger dots are more connected** (your hub notes);
+  **dots that clump together share a colour** (notes about the same thing); **line
+  colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a **dashed
+  outline** is a note you've linked to but haven't created yet.
+- **Tidying the view** (just this view — your notes are untouched) — **click a link
+  type in the legend** to show/hide it; **right-click a dot to hide it** for now;
+  **reset** brings everything back. Closing the map forgets these tweaks.
+- **✨ Related** (only when Talk to docs is on) — adds **dashed green lines** to notes
+  that *seem related by meaning* even though you never linked them: a hint of links
+  you might want to add. The **✨ Related** button turns it off.
+
 ## Talk to docs — semantic search
 
 AI-assisted **search by meaning** over your notes, on top of keyword search. It is

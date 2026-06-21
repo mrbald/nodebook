@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { cpSync, mkdtempSync } from 'fs'
+import { cpSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, sep } from 'path'
 
@@ -18,6 +18,9 @@ test.beforeAll(async () => {
     recursive: true,
     filter: (src) => !src.split(sep).includes('.nodebook')
   })
+  // A note with two link *types* (a wikilink + a typed field) so the legend
+  // filter has something to filter.
+  writeFileSync(join(vaultDir, 'Hub.md'), '# Hub\n\nSee [[Graph Model]].\n\ntopic:: science\n')
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-graph-userdata-'))
   app = await electron.launch({
     args: [projectRoot],
@@ -75,4 +78,27 @@ test('Close returns to the editor', async () => {
   await page.locator('.graph-close').click()
   await expect(page.locator('.graph-view')).toHaveCount(0)
   await expect(page.locator('.cm-content')).toBeVisible()
+})
+
+test('clicking a link type in the legend filters it; reset restores', async () => {
+  await page.locator('.tree-file', { hasText: 'Hub' }).click()
+  await page.locator('.graph-open-btn').click()
+  await expect(page.locator('.graph-legend-item', { hasText: 'topic' })).toBeVisible()
+
+  const before = await page.locator('.graph-edge').count()
+  await page.locator('.graph-legend-item', { hasText: 'topic' }).click()
+  await expect(page.locator('.graph-legend-item.is-off', { hasText: 'topic' })).toBeVisible()
+  expect(await page.locator('.graph-edge').count()).toBeLessThan(before)
+
+  await page.locator('.graph-ctl', { hasText: 'reset' }).click()
+  await expect(page.locator('.graph-legend-item.is-off')).toHaveCount(0)
+})
+
+test('right-clicking a node hides it; reset brings it back', async () => {
+  const before = await page.locator('.graph-node').count()
+  await page.locator('.graph-node', { hasText: 'Graph Model' }).click({ button: 'right' })
+  expect(await page.locator('.graph-node').count()).toBeLessThan(before)
+
+  await page.locator('.graph-ctl', { hasText: 'reset' }).click()
+  expect(await page.locator('.graph-node').count()).toBe(before)
 })
