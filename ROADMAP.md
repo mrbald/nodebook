@@ -74,8 +74,20 @@ relations, each **cited to the source span** → emit *editable* markdown notes
 (`[[links]]`, `key:: value`, `cite::`) → normal index → derived mindmap for free.
 Talk-to-docs *inverted* (push-distill vs question-pull); reuses the chunker's
 offsets, the embeddings, the clustering, and the provider abstraction. Phases:
-D1 markdown/text books, D2 provenance UX, D3 PDF/EPUB ingestion, D4 grounding /
-re-run safety.
+D1 markdown/text books, D2 provenance UX, D3 PDF/EPUB ingestion (swappable
+`DocumentConverter`; pure-JS default, MarkItDown-MCP upgrade), D4 perspectives +
+grounding. Many maps per vault — each run is a named artifact (perspective/seed).
+
+### Body of knowledge (cumulative KB + stability)
+
+Design in [docs/body-of-knowledge.md](docs/body-of-knowledge.md). The other mode:
+**one canonical graph** grown incrementally from many sources (vs distill's
+throwaway lenses) — one source of truth, many `.map.md` views. New concerns:
+**entity resolution** (same concept across sources → one node, via embedding-kNN +
+user-confirmed `same_as`, never silent) and **stability** (bounded, explainable
+change on update: seeded layout + label-aligned clusters + hysteresis +
+change-surfacing diffs). Phases: K1 merge target, K2 entity-resolution suggestions,
+K3 stable update, K4 change-surfacing.
 
 ## Talk to docs (AI semantic search + chat)
 
