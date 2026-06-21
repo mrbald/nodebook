@@ -103,3 +103,6 @@ Nodebook is licensed under **AGPL-3.0-or-later** (see [LICENSE](LICENSE)).
 Commercial licensing (for use that can't comply with the AGPL) may be available
 — open an issue to ask. If you'd like to support development, there's a
 [Buy Me a Coffee](https://www.buymeacoffee.com/gt9gt7cvwmg) button. ☕
+
+_Most of the code is written with the assistance of industrial coding agents —
+primarily Anthropic's Claude — while the original ideas and design are my own._
