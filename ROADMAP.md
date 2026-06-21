@@ -75,8 +75,15 @@ Incremental slices (each independently shippable):
 4. ✅ **Semantic overlay (D) — shipped.** With talk-to-docs on, an opt-in **✨ Related**
    overlay adds dashed edges from the focus note to its semantically-nearest
    *unlinked* notes (per-note embedding centroids + cosine kNN in main). "What you
-   meant" on top of "what you wrote". *Next: relation filter, pin/hide, save view;
-   embedding-space clustering; Louvain upgrade.*
+   meant" on top of "what you wrote".
+5. ✅ **Curation — shipped.** Filter link types (click the legend), hide noisy nodes
+   (right-click), reset — session view-state, never touches notes. Plain-language
+   **Knowledge map** section added to in-app Help.
+   *Deferred on purpose (the "explain it simply or nerdify/discard" filter): **save
+   view → `.map.md`*** (complex round-trip — needs the saved-view artifact from
+   docs/state-and-scopes.md), **pin/drag** (needs incremental relayout; fights
+   auto-layout), **Louvain** (invisible polish; the tested label-propagation is
+   fine). Still open & simple: embedding-space clustering as a colour mode.
 2. **Curation** — relation filter (the killer feature the typed triples unlock),
    focus/expand/collapse, stable relayout (seed from previous positions).
 3. **Pin / hide / promote + global map** — view-state curation; degree-threshold
