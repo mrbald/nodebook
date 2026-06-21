@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseSettings, setThemeMode, DEFAULTS, DEFAULT_TOML } from './settings'
+import { parseSettings, setThemeMode, setTalkEnabled, DEFAULTS, DEFAULT_TOML } from './settings'
 
 describe('parseSettings', () => {
   it('reads valid values', () => {
@@ -85,6 +85,20 @@ describe('parseSettings', () => {
 
   it('never throws on malformed TOML — returns defaults', () => {
     expect(parseSettings('this is = = not toml [[[')).toEqual(DEFAULTS)
+  })
+})
+
+describe('setTalkEnabled', () => {
+  it('flips [talk] enabled in place, preserving comments, round-tripping', () => {
+    const on = setTalkEnabled(DEFAULT_TOML, true)
+    expect(on).toContain('# Nodebook settings') // comments survived
+    expect(parseSettings(on).talk.enabled).toBe(true)
+    expect(parseSettings(setTalkEnabled(on, false)).talk.enabled).toBe(false)
+  })
+
+  it('creates the [talk] section / key when missing', () => {
+    expect(parseSettings(setTalkEnabled('[editor]\nfontSize = 16', true)).talk.enabled).toBe(true)
+    expect(parseSettings(setTalkEnabled('', true)).talk.enabled).toBe(true)
   })
 })
 

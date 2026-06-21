@@ -34,6 +34,7 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.1",
+    "@huggingface/transformers": "^4.2.0",
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "^1.6.4",
     "better-sqlite3": "^12.11.1",
@@ -41,7 +42,8 @@
     "markdown-it": "^14.2.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "smol-toml": "^1.6.1"
+    "smol-toml": "^1.6.1",
+    "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -133,6 +133,21 @@ export function setThemeMode(raw: string, mode: ThemeMode): string {
   return out
 }
 
+/**
+ * Pure: flip `[talk] enabled` in TOML text, editing in place so the user's
+ * comments survive. Creates the key/section if missing. (`enabled` is unique to
+ * `[talk]` in our schema, so a plain key match is unambiguous.)
+ */
+export function setTalkEnabled(raw: string, enabled: boolean): string {
+  const val = enabled ? 'true' : 'false'
+  const re = /^(\s*enabled\s*=\s*).*$/m
+  if (re.test(raw)) return raw.replace(re, `$1${val}`)
+  if (/^\[talk\]/m.test(raw)) {
+    return raw.replace(/^\[talk\][^\n]*$/m, (h) => `${h}\nenabled = ${val}`)
+  }
+  return `${raw.replace(/\s*$/, '')}\n\n[talk]\nenabled = ${val}\n`
+}
+
 export function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.toml')
 }

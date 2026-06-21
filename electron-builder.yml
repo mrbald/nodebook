@@ -11,9 +11,11 @@ files:
   - '!{.eslintrc,.prettierrc,tsconfig.*.json,tsconfig.json}'
   - '!{.github,e2e,playwright.config.ts,vitest.config.*}'
 # Native addons (better-sqlite3) must live outside the asar so their .node
-# binaries can be dlopen'd at runtime.
+# binaries can be dlopen'd at runtime. sqlite-vec ships a loadable extension
+# (.dylib/.so/.dll, not .node) that's likewise dlopen'd, so unpack it too.
 asarUnpack:
   - '**/*.node'
+  - '**/node_modules/sqlite-vec*/**'
 mac:
   category: public.app-category.productivity
   # Signing is applied only when a cert is provided via CSC_LINK (see

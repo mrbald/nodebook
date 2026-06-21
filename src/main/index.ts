@@ -20,10 +20,12 @@ import {
   ensureSettingsFile,
   readSettings,
   setThemeMode,
+  setTalkEnabled,
   settingsPath as settingsFilePath,
   DEFAULT_TOML,
   type ThemeMode
 } from './settings'
+import type { TalkStatus } from '../shared/types'
 
 // Name the app so the macOS menu bar / dialogs say "Nodebook", not "Electron".
 // (In `npm run dev` the bold app-menu title is still read from the Electron.app
@@ -190,10 +192,39 @@ function notifyVaultChanged(): void {
   mainWindow?.webContents.send('vault:changed')
 }
 
+/** Tell the renderer some notes were (re)chunked and need embedding. */
+function notifyTalkDirty(): void {
+  if (index?.talkOn) mainWindow?.webContents.send('talk:dirty')
+}
+
+function talkStatus(): TalkStatus {
+  const enabled = readSettings().talk.enabled
+  const counts = index?.talkCounts() ?? { total: 0, pending: 0 }
+  return { enabled, ready: !!index?.talkReady, total: counts.total, pending: counts.pending }
+}
+
+/** Read + chunk every vault note not already chunked (used on live enable; the
+ *  open scan already chunks when talk was pre-enabled, so those are skipped). */
+async function chunkUnchunkedFiles(): Promise<void> {
+  if (!index || !vaultRoot) return
+  for (const p of await markdownUnder(vaultRoot)) {
+    if (index.isChunked(p)) continue
+    try {
+      index.chunkFile(p, await fs.readFile(p, 'utf8'))
+    } catch {
+      // unreadable / vanished — skip
+    }
+  }
+}
+
 async function openVault(root: string): Promise<VaultListing> {
   await closeVault()
   vaultRoot = root
   index = new VaultIndex(join(root, '.nodebook', 'index.db'))
+  // If talk-to-docs is on, turn the vector layer on *before* the scan so each
+  // indexed file is chunked in the same pass (content-hash gated, so unchanged
+  // notes on reopen are skipped and never re-embedded).
+  if (readSettings().talk.enabled) index.enableTalk()
 
   const listing = await scanVault(root)
   for (const f of listing.files) await indexPath(f.path)
@@ -207,11 +238,11 @@ async function openVault(root: string): Promise<VaultListing> {
   })
   watcher
     .on('add', (p: string) => {
-      if (MD_EXT.test(p)) void indexPath(p)
+      if (MD_EXT.test(p)) void indexPath(p).then(notifyTalkDirty)
       notifyVaultChanged()
     })
     .on('change', (p: string) => {
-      if (MD_EXT.test(p)) void indexPath(p)
+      if (MD_EXT.test(p)) void indexPath(p).then(notifyTalkDirty)
     })
     .on('unlink', (p: string) => {
       if (MD_EXT.test(p)) index?.removeFile(p)
@@ -337,6 +368,7 @@ function registerIpc(): void {
     if (index && withinVault(path)) {
       const { mtimeMs } = await fs.stat(path)
       index.indexFile(path, content, Math.floor(mtimeMs))
+      notifyTalkDirty()
     }
   })
 
@@ -362,6 +394,42 @@ function registerIpc(): void {
   ipcMain.handle('index:search', (_e, query: string) => index?.search(query) ?? [])
 
   ipcMain.handle('index:noteNames', () => index?.noteNames() ?? [])
+
+  // --- Talk to docs -------------------------------------------------------
+  ipcMain.handle('talk:status', () => talkStatus())
+
+  // Turn on (or resume) the feature: persist the flag, load the vector layer,
+  // record the model's dims, and chunk any not-yet-chunked notes.
+  ipcMain.handle('talk:enable', async (_e, dims: number): Promise<TalkStatus> => {
+    const path = ensureSettingsFile()
+    atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), true))
+    index?.enableTalk()
+    if (Number.isFinite(dims) && dims > 0) index?.setEmbedDims(dims)
+    await chunkUnchunkedFiles()
+    return talkStatus()
+  })
+
+  // Turn off + drop the derived embeddings/chunks (rebuildable by re-enabling).
+  ipcMain.handle('talk:disable', (): TalkStatus => {
+    const path = ensureSettingsFile()
+    atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), false))
+    index?.disableTalk()
+    return talkStatus()
+  })
+
+  ipcMain.handle('talk:pending', (_e, limit: number) => index?.talkPending(limit) ?? [])
+
+  ipcMain.handle(
+    'talk:putEmbeddings',
+    (_e, rows: { id: number; vector: number[] }[]): TalkStatus => {
+      index?.putEmbeddings(rows.map((r) => ({ id: r.id, vector: Float32Array.from(r.vector) })))
+      return talkStatus()
+    }
+  )
+
+  ipcMain.handle('talk:search', (_e, query: string, vector: number[]) =>
+    index?.talkSearch(query, vector?.length ? Float32Array.from(vector) : null) ?? []
+  )
 
   ipcMain.handle('settings:path', () => ensureSettingsFile())
   ipcMain.handle('settings:read', () => readSettings())

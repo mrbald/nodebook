@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { basename, dirname } from 'path'
 import { harvest } from './harvest'
+import { VectorStore, type PendingChunk } from './rag/store'
 import type { Backlink, Outbound, SearchHit } from '../shared/types'
 
 /**
@@ -12,6 +13,8 @@ import type { Backlink, Outbound, SearchHit } from '../shared/types'
  */
 export class VaultIndex {
   private db: Database.Database
+  /** Vector/semantic layer — null until "talk to docs" is enabled. */
+  private vec: VectorStore | null = null
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true })
@@ -67,6 +70,9 @@ export class VaultIndex {
       )
       for (const t of triples) insert.run(t.subject, t.relation, t.object, path)
     })()
+    // When talk-to-docs is on, (re)chunk for embedding too (content-hash gated,
+    // so an unchanged file on reopen is a no-op and never re-embeds).
+    this.vec?.chunkFile(path, content)
   }
 
   /** Drop a file's rows (external delete). */
@@ -80,6 +86,7 @@ export class VaultIndex {
       this.db.prepare('DELETE FROM files WHERE id = ?').run(row.id)
       this.db.prepare('DELETE FROM triples WHERE source_file = ?').run(path)
     })()
+    this.vec?.removeFile(path)
   }
 
   /** Files that link to (or otherwise reference) `target`, with the relation. */
@@ -124,6 +131,104 @@ export class VaultIndex {
     const rows = this.db.prepare('SELECT path FROM files').all() as { path: string }[]
     const names = new Set(rows.map((r) => basename(r.path).replace(/\.md$/i, '')))
     return [...names].sort((a, b) => a.localeCompare(b))
+  }
+
+  // -------------------------------------------------------------------------
+  // Talk to docs — the semantic layer. All of this is inert unless enabled.
+  // -------------------------------------------------------------------------
+
+  /** Turn on the vector layer (loads sqlite-vec, creates the chunk tables). */
+  enableTalk(): void {
+    if (!this.vec) this.vec = new VectorStore(this.db)
+  }
+
+  get talkOn(): boolean {
+    return !!this.vec
+  }
+
+  /** True once the embedding width is known (the vec table exists). */
+  get talkReady(): boolean {
+    return !!this.vec?.ready
+  }
+
+  /** Set the embedding dimensionality reported by the loaded model. */
+  setEmbedDims(dims: number): void {
+    this.vec?.setDims(dims)
+  }
+
+  /** (Re)chunk one file for embedding — content-hash gated. */
+  chunkFile(path: string, content: string): boolean {
+    return this.vec?.chunkFile(path, content) ?? false
+  }
+
+  /** Has this file already been chunked? (skip re-reading from disk on enable). */
+  isChunked(path: string): boolean {
+    return this.vec?.hasChunks(path) ?? false
+  }
+
+  talkPending(limit?: number): PendingChunk[] {
+    return this.vec?.pending(limit) ?? []
+  }
+
+  talkCounts(): { total: number; pending: number } {
+    return this.vec?.counts() ?? { total: 0, pending: 0 }
+  }
+
+  putEmbeddings(rows: { id: number; vector: Float32Array }[]): void {
+    this.vec?.putEmbeddings(rows)
+  }
+
+  /** Turn the feature off and drop all embeddings + chunks (reversible — the
+   *  data is derived and re-creatable by re-enabling). */
+  disableTalk(): void {
+    this.db.exec(`DROP TABLE IF EXISTS chunk_vec`)
+    this.db.exec(`DROP TABLE IF EXISTS chunks`)
+    this.db.exec(`DROP TABLE IF EXISTS chunk_file`)
+    this.db.exec(`DROP TABLE IF EXISTS talk_meta`)
+    this.vec = null
+  }
+
+  private titleOf(path: string): string {
+    const row = this.db.prepare('SELECT title FROM files WHERE path = ?').get(path) as
+      | { title: string | null }
+      | undefined
+    return row?.title || basename(path).replace(/\.md$/i, '')
+  }
+
+  /**
+   * Hybrid search: fuse FTS5 (exact terms) with sqlite-vec k-NN (meaning) via
+   * Reciprocal Rank Fusion. With no query vector (talk off / query not embedded
+   * yet) this is just the keyword search. Hits surfaced by the vector side carry
+   * `semantic: true` for the ✨ affordance.
+   */
+  talkSearch(query: string, queryVec: Float32Array | null): SearchHit[] {
+    const fts = this.search(query)
+    const vec = this.vec && queryVec ? this.vec.vectorHits(queryVec) : []
+    if (vec.length === 0) return fts
+
+    const RRF_K = 60
+    const score = new Map<string, number>()
+    const hit = new Map<string, SearchHit>()
+    fts.forEach((h, i) => {
+      score.set(h.path, (score.get(h.path) ?? 0) + 1 / (RRF_K + i + 1))
+      hit.set(h.path, h)
+    })
+    for (const v of vec) {
+      score.set(v.file, (score.get(v.file) ?? 0) + 1 / (RRF_K + v.rank + 1))
+      const existing = hit.get(v.file)
+      if (existing) existing.semantic = true
+      else
+        hit.set(v.file, {
+          path: v.file,
+          title: this.titleOf(v.file),
+          snippet: v.text.replace(/\s+/g, ' ').trim().slice(0, 180),
+          semantic: true
+        })
+    }
+    return [...score.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([path]) => hit.get(path) as SearchHit)
+      .slice(0, 50)
   }
 
   stats(): { files: number; triples: number } {

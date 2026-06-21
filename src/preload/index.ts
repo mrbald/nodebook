@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Backlink, Outbound, SearchHit, Settings, VaultListing } from '../shared/types'
+import type {
+  Backlink,
+  Outbound,
+  SearchHit,
+  Settings,
+  TalkChunk,
+  TalkStatus,
+  VaultListing
+} from '../shared/types'
 
 const api = {
   pickVault: (): Promise<string | null> => ipcRenderer.invoke('vault:pick'),
@@ -25,6 +33,22 @@ const api = {
     ipcRenderer.invoke('index:outbound', sourceFile),
   search: (query: string): Promise<SearchHit[]> => ipcRenderer.invoke('index:search', query),
   noteNames: (): Promise<string[]> => ipcRenderer.invoke('index:noteNames'),
+  // Talk to docs (semantic search). The embedder lives in the renderer (WASM);
+  // main owns the vector store + retrieval.
+  talkStatus: (): Promise<TalkStatus> => ipcRenderer.invoke('talk:status'),
+  talkEnable: (dims: number): Promise<TalkStatus> => ipcRenderer.invoke('talk:enable', dims),
+  talkDisable: (): Promise<TalkStatus> => ipcRenderer.invoke('talk:disable'),
+  talkPending: (limit: number): Promise<TalkChunk[]> => ipcRenderer.invoke('talk:pending', limit),
+  talkPutEmbeddings: (rows: { id: number; vector: number[] }[]): Promise<TalkStatus> =>
+    ipcRenderer.invoke('talk:putEmbeddings', rows),
+  talkSearch: (query: string, vector: number[]): Promise<SearchHit[]> =>
+    ipcRenderer.invoke('talk:search', query, vector),
+  /** Notifies the renderer that saved/changed notes need (re)embedding. */
+  onTalkDirty: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('talk:dirty', listener)
+    return () => ipcRenderer.removeListener('talk:dirty', listener)
+  },
   settingsPath: (): Promise<string> => ipcRenderer.invoke('settings:path'),
   readSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:read'),
   setThemeMode: (mode: 'system' | 'dark' | 'light'): Promise<Settings> =>

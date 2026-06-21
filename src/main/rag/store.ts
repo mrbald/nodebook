@@ -1,0 +1,182 @@
+import type Database from 'better-sqlite3'
+import { createHash } from 'crypto'
+import * as sqliteVec from 'sqlite-vec'
+import { chunkMarkdown, embedText } from './chunk'
+
+/** sqlite-vec stores a `float[N]` vector as a BLOB of N little-endian float32s. */
+const f32ToBlob = (v: Float32Array): Buffer => Buffer.from(v.buffer, v.byteOffset, v.byteLength)
+
+/** A chunk awaiting embedding. */
+export interface PendingChunk {
+  id: number
+  text: string
+}
+
+/** A vector-search hit: the best-matching chunk of a file, in rank order. */
+export interface VectorHit {
+  file: string
+  text: string
+  rank: number
+}
+
+/**
+ * The vector/semantic layer over the *same* index DB — lazily constructed only
+ * when "talk to docs" is enabled (loading the sqlite-vec extension is the heavy
+ * part, so a vault with the feature off pays nothing). Chunks live in `chunks`;
+ * their embeddings in a sqlite-vec `chunk_vec` table keyed by chunk id.
+ *
+ * Re-chunking is **content-hash gated**, so reopening a vault re-chunks (and
+ * therefore re-embeds) only the notes that actually changed — embeddings persist
+ * in `.nodebook/index.db` across restarts (still rebuildable; Discipline #3).
+ */
+export class VectorStore {
+  private dims = 0
+
+  constructor(private db: Database.Database) {
+    sqliteVec.load(this.db)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chunks (
+        id INTEGER PRIMARY KEY,
+        file TEXT NOT NULL,
+        heading TEXT,
+        start INTEGER,
+        "end" INTEGER,
+        text TEXT NOT NULL,
+        embedded INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file);
+      CREATE INDEX IF NOT EXISTS idx_chunks_pending ON chunks(embedded);
+      CREATE TABLE IF NOT EXISTS chunk_file (file TEXT PRIMARY KEY, hash TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS talk_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+    `)
+    const row = this.db.prepare(`SELECT v FROM talk_meta WHERE k = 'dims'`).get() as
+      | { v: string }
+      | undefined
+    if (row) {
+      this.dims = Number(row.v)
+      this.ensureVecTable()
+    }
+  }
+
+  private ensureVecTable(): void {
+    this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(embedding float[${this.dims}])`)
+  }
+
+  /** True once the embedding width is known and the vec table exists. */
+  get ready(): boolean {
+    return this.dims > 0
+  }
+
+  /** Set the embedding width (from the loaded model). Recreates the vec table and
+   *  resets all embeddings if the model's dimensionality changed. */
+  setDims(dims: number): void {
+    if (dims === this.dims) {
+      this.ensureVecTable()
+      return
+    }
+    this.db.transaction(() => {
+      this.db.exec(`DROP TABLE IF EXISTS chunk_vec`)
+      this.dims = dims
+      this.db
+        .prepare(`INSERT INTO talk_meta(k, v) VALUES('dims', ?)
+                  ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
+        .run(String(dims))
+      this.ensureVecTable()
+      this.db.exec(`UPDATE chunks SET embedded = 0`)
+    })()
+  }
+
+  /** True if `file` already has chunks (lets the caller skip re-reading on enable). */
+  hasChunks(file: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM chunk_file WHERE file = ? LIMIT 1`).get(file)
+  }
+
+  /** Replace a file's chunks iff its content changed (hash-gated). New chunks are
+   *  marked unembedded. Returns whether it actually re-chunked. */
+  chunkFile(file: string, content: string): boolean {
+    const hash = createHash('sha1').update(content).digest('hex')
+    const prev = this.db.prepare(`SELECT hash FROM chunk_file WHERE file = ?`).get(file) as
+      | { hash: string }
+      | undefined
+    if (prev?.hash === hash) return false
+    const chunks = chunkMarkdown(content)
+    this.db.transaction(() => {
+      this.deleteFileRows(file)
+      const ins = this.db.prepare(
+        `INSERT INTO chunks(file, heading, start, "end", text, embedded) VALUES (?, ?, ?, ?, ?, 0)`
+      )
+      for (const c of chunks) ins.run(file, c.heading, c.start, c.end, embedText(c))
+      this.db
+        .prepare(`INSERT INTO chunk_file(file, hash) VALUES(?, ?)
+                  ON CONFLICT(file) DO UPDATE SET hash = excluded.hash`)
+        .run(file, hash)
+    })()
+    return true
+  }
+
+  removeFile(file: string): void {
+    this.db.transaction(() => {
+      this.deleteFileRows(file)
+      this.db.prepare(`DELETE FROM chunk_file WHERE file = ?`).run(file)
+    })()
+  }
+
+  private deleteFileRows(file: string): void {
+    if (this.dims > 0) {
+      const ids = this.db.prepare(`SELECT id FROM chunks WHERE file = ?`).all(file) as {
+        id: number
+      }[]
+      const delVec = this.db.prepare(`DELETE FROM chunk_vec WHERE rowid = ?`)
+      for (const r of ids) delVec.run(BigInt(r.id))
+    }
+    this.db.prepare(`DELETE FROM chunks WHERE file = ?`).run(file)
+  }
+
+  /** A batch of chunks still awaiting an embedding. */
+  pending(limit = 32): PendingChunk[] {
+    return this.db
+      .prepare(`SELECT id, text FROM chunks WHERE embedded = 0 LIMIT ?`)
+      .all(limit) as PendingChunk[]
+  }
+
+  counts(): { total: number; pending: number } {
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM chunks`).get() as { n: number }).n
+    const pending = (
+      this.db.prepare(`SELECT COUNT(*) AS n FROM chunks WHERE embedded = 0`).get() as { n: number }
+    ).n
+    return { total, pending }
+  }
+
+  /** Store vectors for freshly-embedded chunks and mark them embedded. */
+  putEmbeddings(rows: { id: number; vector: Float32Array }[]): void {
+    if (!this.dims) throw new Error('embedding dims not set')
+    this.db.transaction(() => {
+      const del = this.db.prepare(`DELETE FROM chunk_vec WHERE rowid = ?`)
+      const insVec = this.db.prepare(`INSERT INTO chunk_vec(rowid, embedding) VALUES (?, ?)`)
+      const mark = this.db.prepare(`UPDATE chunks SET embedded = 1 WHERE id = ?`)
+      for (const r of rows) {
+        const rowid = BigInt(r.id)
+        del.run(rowid)
+        insVec.run(rowid, f32ToBlob(r.vector))
+        mark.run(r.id)
+      }
+    })()
+  }
+
+  /** k-NN over chunk embeddings → best chunks, in distance order. */
+  vectorHits(queryVec: Float32Array, k = 30): VectorHit[] {
+    if (!this.dims) return []
+    const rows = this.db
+      .prepare(
+        `WITH knn AS (
+           SELECT rowid, distance FROM chunk_vec
+           WHERE embedding MATCH ? ORDER BY distance LIMIT ?
+         )
+         SELECT c.file AS file, c.text AS text, knn.distance AS distance
+         FROM knn JOIN chunks c ON c.id = knn.rowid
+         ORDER BY knn.distance`
+      )
+      .all(f32ToBlob(queryVec), k) as { file: string; text: string; distance: number }[]
+    return rows.map((r, i) => ({ file: r.file, text: r.text, rank: i }))
+  }
+}

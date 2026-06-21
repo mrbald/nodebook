@@ -26,6 +26,26 @@ export interface SearchHit {
   title: string
   /** Matching excerpt with `<mark>` around hit terms (FTS5 snippet). */
   snippet: string
+  /** Set when this hit was surfaced (or boosted) by semantic/vector match. */
+  semantic?: boolean
+}
+
+/** State of the "talk to docs" semantic layer, for the UI. */
+export interface TalkStatus {
+  /** The user-facing toggle (settings `[talk] enabled`). */
+  enabled: boolean
+  /** The embedding width is known and the vector table exists. */
+  ready: boolean
+  /** Total chunks across the vault. */
+  total: number
+  /** Chunks still awaiting an embedding (drives the indexing progress UI). */
+  pending: number
+}
+
+/** A chunk handed to the renderer for embedding. */
+export interface TalkChunk {
+  id: number
+  text: string
 }
 
 /** The vault's markdown files plus its directory paths (so empty dirs show). */
