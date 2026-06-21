@@ -65,14 +65,16 @@ Click **⊹ Map** in the bottom bar to see the current note as a dot, with lines
 the notes it links to. The map is drawn for you from your links — you never arrange
 it by hand, and nothing here changes your notes.
 
-- **Getting around** — drag to move, scroll to zoom, click a note to jump to it (the
-  map re-centres there). **−/+** show fewer or more steps out from the note;
-  **Global** shows the whole vault instead of just this note's neighbourhood; **⟲**
-  resets the zoom.
+- **Getting around** — **drag a note to arrange it**, drag the empty space to move
+  the whole map, scroll to zoom, **click a note to open it**. **−/+** show fewer or
+  more steps out from the note; **Global** shows the whole vault instead of just this
+  note's neighbourhood; **⟲** resets the zoom.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);
-  **dots that clump together share a colour** (notes about the same thing); **line
-  colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a **dashed
-  outline** is a note you've linked to but haven't created yet.
+  **line colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a
+  **dashed outline** is a note you've linked to but haven't created yet.
+- **Colour** — the **colour** button recolours the dots: by **links** (notes that
+  clump together get the same colour), by **folder** (which folder each note is in),
+  or by **meaning** (groups by topic — needs Talk to docs on).
 - **Tidying the view** (just this view — your notes are untouched) — **click a link
   type in the legend** to show/hide it; **right-click a dot to hide it** for now;
   **reset** brings everything back. Closing the map forgets these tweaks.

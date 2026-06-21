@@ -50,6 +50,11 @@ const api = {
     ipcRenderer.invoke('talk:search', query, vector),
   talkNeighbors: (focusPath: string, k?: number): Promise<TalkNeighbor[]> =>
     ipcRenderer.invoke('talk:neighbors', focusPath, k),
+  talkSemanticEdges: (
+    paths: string[],
+    k?: number
+  ): Promise<{ source: string; target: string }[]> =>
+    ipcRenderer.invoke('talk:semanticEdges', paths, k),
   /** Notifies the renderer that saved/changed notes need (re)embedding. */
   onTalkDirty: (cb: () => void): (() => void) => {
     const listener = (): void => cb()

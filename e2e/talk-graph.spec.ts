@@ -55,3 +55,10 @@ test('the map overlays a "related but not linked" dashed edge to a similar note'
   await page.locator('.graph-ctl', { hasText: 'Related' }).click()
   await expect(page.locator('.graph-edge-related')).toHaveCount(0)
 })
+
+test('colour-by-meaning is available with talk on and renders', async () => {
+  await page.locator('.graph-ctl', { hasText: 'colour' }).click() // links → folder
+  await page.locator('.graph-ctl', { hasText: 'colour' }).click() // folder → meaning
+  await expect(page.locator('.graph-ctl', { hasText: 'colour: meaning' })).toBeVisible()
+  await expect(page.locator('.graph-node', { hasText: 'Alpha' })).toBeVisible()
+})

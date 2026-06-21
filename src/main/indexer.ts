@@ -202,6 +202,14 @@ export class VaultIndex {
     }))
   }
 
+  /** Semantic kNN edges (by note name) among `paths`, for "colour by meaning". */
+  talkSemanticEdges(paths: string[], k = 4): { source: string; target: string }[] {
+    return (this.vec?.semanticEdges(paths, k) ?? []).map((e) => ({
+      source: noteName(e.source),
+      target: noteName(e.target)
+    }))
+  }
+
   /** Turn the feature off and drop all embeddings + chunks (reversible — the
    *  data is derived and re-creatable by re-enabling). */
   disableTalk(): void {

@@ -8,7 +8,19 @@ const H = 600
 const RELATED = '~related'
 const PALETTE = ['#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66']
 const COMMUNITY = ['#7aa2f7', '#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66', '#9ece6a']
+const FOLDER = ['#7aa2f7', '#e0a050', '#7ec699', '#bb9af7', '#e06c75', '#56b6c2', '#d19a66', '#9ece6a']
 const communityColor = (c: number): string => COMMUNITY[c % COMMUNITY.length]
+
+type ColorMode = 'links' | 'folder' | 'meaning'
+
+/** Top-level vault folder of a note (or '(root)'), for the folder colour mode. */
+function folderOf(path: string | null, root: string | null): string {
+  if (!path) return '(other)'
+  let rel = root && path.startsWith(root) ? path.slice(root.length) : path
+  rel = rel.replace(/^[/\\]+/, '')
+  const segs = rel.split(/[/\\]/)
+  return segs.length > 1 ? segs[0] : '(root)'
+}
 
 function relationColors(edges: GraphEdge[]): Map<string, string> {
   const present = new Set(edges.map((e) => e.relation))
@@ -53,13 +65,15 @@ type Gesture =
 /**
  * The knowledge map — a force-directed, read-only view of an index slice. Drag a
  * node to arrange it, drag the background to pan, wheel to zoom, click a node to
- * open it. Curate the *view* (filter link types by clicking the legend; right-click
- * to hide a noisy node) — never the geometry of your notes. With talk-to-docs on,
- * an opt-in **✨ Related** overlay adds dashed edges to similar-but-unlinked notes.
+ * open it. Colour the dots by cluster (links), by folder, or by meaning. Curate
+ * the *view* (filter via the legend; right-click to hide a node) — never the notes.
+ * With talk-to-docs on, an opt-in **✨ Related** overlay adds dashed edges to
+ * similar-but-unlinked notes.
  */
 export function GraphView({
   focusPath,
   focusName,
+  vaultRoot,
   talkReady,
   onOpen,
   onClose,
@@ -67,6 +81,7 @@ export function GraphView({
 }: {
   focusPath: string | null
   focusName: string
+  vaultRoot: string | null
   talkReady: boolean
   onOpen: (path: string) => void
   onClose: () => void
@@ -74,11 +89,14 @@ export function GraphView({
 }): React.JSX.Element {
   const [base, setBase] = useState<GraphData | null>(null)
   const [related, setRelated] = useState<TalkNeighbor[]>([])
+  const [semEdges, setSemEdges] = useState<{ source: string; target: string }[]>([])
   const [depth, setDepth] = useState(1)
   const [global, setGlobal] = useState(false)
   const [showRelated, setShowRelated] = useState(true)
+  const [colorMode, setColorMode] = useState<ColorMode>('links')
   const [hiddenRels, setHiddenRels] = useState<Set<string>>(new Set())
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
+  const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
   const [dragged, setDragged] = useState<Map<string, Point>>(new Map())
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const svgRef = useRef<SVGSVGElement>(null)
@@ -109,7 +127,6 @@ export function GraphView({
     }
   }, [focusPath, talkReady, showRelated, global, reloadKey])
 
-  // New graph → reset pan/zoom, hand-placed nodes, and per-node hides.
   useEffect(() => {
     setView({ x: 0, y: 0, k: 1 })
     setHiddenNodes(new Set())
@@ -120,15 +137,34 @@ export function GraphView({
     () => (base ? mergeRelated(base, related, focusName) : null),
     [base, related, focusName]
   )
+
+  // Colour-by-meaning: fetch a semantic kNN graph for the current notes.
+  useEffect(() => {
+    if (colorMode !== 'meaning' || !talkReady || !data) {
+      setSemEdges([])
+      return
+    }
+    const paths = data.nodes.map((n) => n.path).filter((p): p is string => !!p)
+    let alive = true
+    void window.nodebook.talkSemanticEdges(paths, 4).then((e) => {
+      if (alive) setSemEdges(e)
+    })
+    return () => {
+      alive = false
+    }
+  }, [colorMode, talkReady, data])
+
   const visible = useMemo(() => {
     if (!data) return null
-    const nodes = data.nodes.filter((n) => !hiddenNodes.has(n.id))
+    const nodes = data.nodes.filter(
+      (n) => !hiddenNodes.has(n.id) && !hiddenFolders.has(folderOf(n.path, vaultRoot))
+    )
     const ids = new Set(nodes.map((n) => n.id))
     const edges = data.edges.filter(
       (e) => !hiddenRels.has(e.relation) && ids.has(e.source) && ids.has(e.target)
     )
     return { nodes, edges }
-  }, [data, hiddenRels, hiddenNodes])
+  }, [data, hiddenRels, hiddenNodes, hiddenFolders, vaultRoot])
 
   const layout = useMemo(
     () => (visible ? forceLayout(visible.nodes, visible.edges, { width: W, height: H }) : null),
@@ -140,10 +176,33 @@ export function GraphView({
     () => (visible ? community(visible.nodes, visible.edges) : new Map()),
     [visible]
   )
+  const meaningCluster = useMemo(
+    () =>
+      visible && colorMode === 'meaning'
+        ? community(visible.nodes, semEdges)
+        : new Map<string, number>(),
+    [visible, semEdges, colorMode]
+  )
+  const folderColors = useMemo(() => {
+    const m = new Map<string, string>()
+    if (!visible) return m
+    ;[...new Set(visible.nodes.map((n) => folderOf(n.path, vaultRoot)))]
+      .sort()
+      .forEach((f, i) => m.set(f, FOLDER[i % FOLDER.length]))
+    return m
+  }, [visible, vaultRoot])
+
   const maxPr = useMemo(() => Math.max(1e-9, ...[...pr.values()]), [pr])
   const radius = (id: string): number => 7 + Math.sqrt((pr.get(id) ?? 0) / maxPr) * 14
   const posOf = (id: string): Point | undefined => dragged.get(id) ?? layout?.get(id)
-  const filtered = hiddenRels.size + hiddenNodes.size
+  const nodeFill = (node: GraphNode): string | undefined => {
+    if (node.ghost) return undefined
+    if (colorMode === 'folder') return folderColors.get(folderOf(node.path, vaultRoot))
+    if (colorMode === 'meaning') return communityColor(meaningCluster.get(node.id) ?? 0)
+    return communityColor(comm.get(node.id) ?? 0)
+  }
+  const filtered = hiddenRels.size + hiddenNodes.size + hiddenFolders.size
+  const modes: ColorMode[] = talkReady ? ['links', 'folder', 'meaning'] : ['links', 'folder']
 
   const unitsPerPx = (): number => W / (svgRef.current?.clientWidth || W)
 
@@ -163,7 +222,7 @@ export function GraphView({
     })
   }
   const onBgPointerDown = (e: React.PointerEvent): void => {
-    if (e.button !== 0) return // left button only; right-click is reserved for hide
+    if (e.button !== 0) return
     gesture.current = { kind: 'pan', ox: view.x, oy: view.y, sx: e.clientX, sy: e.clientY }
     movedRef.current = false
     svgRef.current?.setPointerCapture(e.pointerId)
@@ -188,8 +247,7 @@ export function GraphView({
       setView((v) => ({ ...v, x: g.ox + dx * s, y: g.oy + dy * s }))
     } else {
       const s = unitsPerPx() / view.k
-      const np = { x: g.ox + dx * s, y: g.oy + dy * s }
-      setDragged((m) => new Map(m).set(g.node.id, np))
+      setDragged((m) => new Map(m).set(g.node.id, { x: g.ox + dx * s, y: g.oy + dy * s }))
     }
   }
   const onPointerUp = (): void => {
@@ -198,13 +256,18 @@ export function GraphView({
     gesture.current = null
   }
 
-  const toggleRel = (rel: string): void =>
-    setHiddenRels((s) => {
-      const next = new Set(s)
-      if (next.has(rel)) next.delete(rel)
-      else next.add(rel)
-      return next
-    })
+  const toggle = (set: Set<string>, key: string): Set<string> => {
+    const next = new Set(set)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  }
+  const cycleColor = (): void => setColorMode((m) => modes[(modes.indexOf(m) + 1) % modes.length])
+
+  const byFolder = colorMode === 'folder'
+  const legend: [string, string][] = byFolder ? [...folderColors.entries()] : [...colors.entries()]
+  const hidden = byFolder ? hiddenFolders : hiddenRels
+  const setHidden = byFolder ? setHiddenFolders : setHiddenRels
 
   return (
     <div className="graph-view">
@@ -233,6 +296,9 @@ export function GraphView({
               </button>
             </span>
           )}
+          <button className="graph-ctl" title="Colour the dots by…" onClick={cycleColor}>
+            colour: {colorMode}
+          </button>
           {talkReady && !global && (
             <button
               className={`graph-ctl${showRelated ? ' is-on' : ''}`}
@@ -249,6 +315,7 @@ export function GraphView({
               onClick={() => {
                 setHiddenRels(new Set())
                 setHiddenNodes(new Set())
+                setHiddenFolders(new Set())
               }}
             >
               reset ({filtered})
@@ -262,16 +329,19 @@ export function GraphView({
             ⟲
           </button>
         </div>
-        {colors.size > 1 && (
-          <span className="graph-legend" title="Click a link type to show/hide it">
-            {[...colors.entries()].map(([rel, c]) => (
+        {legend.length > 1 && (
+          <span
+            className="graph-legend"
+            title={byFolder ? 'Click a folder to show/hide it' : 'Click a link type to show/hide it'}
+          >
+            {legend.map(([key, c]) => (
               <button
-                key={rel}
-                className={`graph-legend-item${hiddenRels.has(rel) ? ' is-off' : ''}`}
-                onClick={() => toggleRel(rel)}
+                key={key}
+                className={`graph-legend-item${hidden.has(key) ? ' is-off' : ''}`}
+                onClick={() => setHidden((s) => toggle(s, key))}
               >
                 <span className="graph-legend-dot" style={{ background: c }} />
-                {relLabel(rel)}
+                {byFolder ? key : relLabel(key)}
               </button>
             ))}
           </span>
@@ -315,6 +385,7 @@ export function GraphView({
               if (!p) return null
               const r = radius(node.id)
               const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}`
+              const fill = nodeFill(node)
               return (
                 <g
                   key={node.id}
@@ -326,10 +397,7 @@ export function GraphView({
                     if (!node.focus) setHiddenNodes((s) => new Set(s).add(node.id))
                   }}
                 >
-                  <circle
-                    r={r}
-                    style={node.ghost ? undefined : { fill: communityColor(comm.get(node.id) ?? 0) }}
-                  />
+                  <circle r={r} style={fill ? { fill } : undefined} />
                   <text y={r + 13}>{node.label}</text>
                 </g>
               )

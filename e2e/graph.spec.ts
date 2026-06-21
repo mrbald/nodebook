@@ -114,3 +114,9 @@ test('right-clicking a node hides it; reset brings it back', async () => {
   await page.locator('.graph-ctl', { hasText: 'reset' }).click()
   expect(await page.locator('.graph-node').count()).toBe(before)
 })
+
+test('colour mode cycles to folder and the legend switches to folders', async () => {
+  await page.locator('.graph-ctl', { hasText: 'colour' }).click() // links → folder
+  await expect(page.locator('.graph-ctl', { hasText: 'colour: folder' })).toBeVisible()
+  await expect(page.locator('.graph-legend-item', { hasText: '(root)' })).toBeVisible()
+})

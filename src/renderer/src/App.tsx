@@ -592,6 +592,7 @@ export default function App() {
           <GraphView
             focusPath={active.path}
             focusName={active.name}
+            vaultRoot={vault}
             talkReady={talk.ready}
             onOpen={openPathInGraph}
             onClose={() => setGraphOpen(false)}

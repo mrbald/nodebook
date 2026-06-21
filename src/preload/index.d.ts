@@ -35,6 +35,7 @@ export interface NodebookApi {
   talkPutEmbeddings: (rows: { id: number; vector: number[] }[]) => Promise<TalkStatus>
   talkSearch: (query: string, vector: number[]) => Promise<SearchHit[]>
   talkNeighbors: (focusPath: string, k?: number) => Promise<TalkNeighbor[]>
+  talkSemanticEdges: (paths: string[], k?: number) => Promise<{ source: string; target: string }[]>
   onTalkDirty: (cb: () => void) => () => void
   telemetryApply: (enabled: boolean) => Promise<void>
   telemetrySnapshot: () => Promise<TelemetrySnapshot | null>

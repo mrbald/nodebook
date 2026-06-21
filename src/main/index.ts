@@ -462,6 +462,10 @@ function registerIpc(): void {
     index?.talkNeighbors(focusPath, k) ?? []
   )
 
+  ipcMain.handle('talk:semanticEdges', (_e, paths: string[], k?: number) =>
+    index?.talkSemanticEdges(paths, k) ?? []
+  )
+
   // --- Telemetry (measure everything) -------------------------------------
   // Reconcile the measurement to the settings flag (called by the renderer on
   // load and after a settings change; no TOML write).

@@ -216,6 +216,29 @@ export class VectorStore {
     return scored.slice(0, k)
   }
 
+  /** Semantic kNN edges among the given notes (each → its k nearest by centroid
+   *  cosine), for colouring the map by meaning. */
+  semanticEdges(files: string[], k: number): { source: string; target: string }[] {
+    const cents = this.centroids()
+    const present = files.filter((f) => cents.has(f))
+    const edges: { source: string; target: string }[] = []
+    for (const f of present) {
+      const fv = cents.get(f) as Float32Array
+      const scored = present
+        .filter((g) => g !== f)
+        .map((g) => {
+          const gv = cents.get(g) as Float32Array
+          let dot = 0
+          for (let i = 0; i < this.dims; i++) dot += fv[i] * gv[i]
+          return { g, dot }
+        })
+        .sort((a, b) => b.dot - a.dot)
+        .slice(0, k)
+      for (const s of scored) edges.push({ source: f, target: s.g })
+    }
+    return edges
+  }
+
   /** k-NN over chunk embeddings → best chunks, in distance order. */
   vectorHits(queryVec: Float32Array, k = 30): VectorHit[] {
     if (!this.dims) return []
