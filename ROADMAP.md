@@ -56,6 +56,16 @@ Incremental slices (each independently shippable):
 5. **Polish** — edge labels/legend per theme, hover preview, ⌘G/View-menu entry,
    large-vault perf (Barnes-Hut, culling).
 
+### Automatic structure (centers, clusters, semantic graph)
+
+A layer *on top* of the explicit-graph map: make it legible automatically — design
+in [docs/auto-mindmap.md](docs/auto-mindmap.md). Model is a directed graph
+(graph-primary, tree-derived). Phases: **B** centrality (PageRank → node size),
+**C** community detection (Louvain → color) — both pure-TS, no AI; **D** semantic
+overlay reusing the talk-to-docs embeddings ("related but not linked" kNN edges +
+clustering + PCA/UMAP layout); **E** optional LLM last-mile (cluster names,
+missing-link suggestions) via the existing provider abstraction.
+
 ## Talk to docs (AI semantic search + chat)
 
 Full design in [docs/talk-to-docs.md](docs/talk-to-docs.md). Local-first RAG over
