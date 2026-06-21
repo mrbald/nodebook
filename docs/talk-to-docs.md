@@ -36,6 +36,36 @@ they belong in `.nodebook`, re-creatable by re-embedding.
   - **Search-only** — retrieval with no LLM is useful on its own and 100% local;
     chat is opt-in once a provider is configured.
 
+## Connecting models — three patterns + one abstraction
+
+The feature is **off by default** (`[talk] enabled = false`) and **config-driven**.
+Everything goes through one small abstraction (`src/main/rag/provider.ts`):
+`Embedder { embed(texts) }` and `ChatModel { chat(req) -> stream }`, produced by a
+`ModelProvider` from a `ProviderConfig`. Three provider kinds cover the realistic
+"top 3 ways to connect a model to an app":
+
+1. **In-process / embedded** (`kind: 'local'`) — the model runs inside the app:
+   **transformers.js**(ONNX) for embeddings, **node-llama-cpp** for chat. Private,
+   offline, no key, no per-call cost; costs CPU/RAM + model download. *Default for
+   embeddings.*
+2. **Remote HTTP, OpenAI-compatible** (`kind: 'openai-compat'`) — one client speaks
+   the `/v1/embeddings` + `/v1/chat/completions` wire format pointed at **any base
+   URL**: OpenAI, Together, Groq, Mistral, **or a local server** (Ollama, LM Studio,
+   llama.cpp, vLLM — all expose OpenAI-compat endpoints). One adapter → dozens of
+   backends by changing `baseUrl`/`apiKey`/`model`. (`kind: 'anthropic'` is a thin
+   sibling for Claude's native API; OpenAI-compat gateways/LiteLLM can also front it.)
+3. **MCP (Model Context Protocol)** (`kind: 'mcp'`) — two directions, both valuable:
+   - **Nodebook as an MCP *server*** — expose the vault + semantic search as MCP
+     resources/tools so any MCP host (Claude Desktop, IDE agents) can "talk to your
+     docs" with *their* model. Turns the vault into a knowledge backend for the whole
+     ecosystem — the strongest strategic angle.
+   - **Nodebook as an MCP *client*** — pull external tools/data to enrich answers.
+
+**Default model pairs** (configurable): *local* — embed `EmbeddingGemma-300M` (or
+`bge-small-en-v1.5` for speed), chat (later) a small local model
+(`Qwen2.5-3B`/`Llama-3.2-3B`) via llama.cpp; *cloud* — embed
+`text-embedding-3-small`/`voyage-3`, chat Claude or GPT.
+
 ## Pipeline (and the event-loop angle)
 
 On index (save / chokidar / first-open scan): chunk → embed → upsert into
