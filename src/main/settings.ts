@@ -14,10 +14,12 @@ import type { Settings } from '../shared/types'
 
 export const DEFAULTS: Settings = {
   editor: { fontSize: 15, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
-  theme: { followSystem: true, dark: 'dark', light: 'light', name: 'dark' }
+  theme: { followSystem: true, dark: 'dark', light: 'light', name: 'dark' },
+  talk: { enabled: false, embed: { runtime: 'wasm', model: 'Xenova/all-MiniLM-L6-v2' } }
 }
 
 const MODES = ['code', 'live', 'reading'] as const
+const RUNTIMES = ['wasm', 'native'] as const
 
 export const DEFAULT_TOML = `# Nodebook settings — every option with its default. Edit and save; changes
 # apply live (⌘S to save now). "Reset to defaults" restores this file verbatim.
@@ -43,6 +45,19 @@ followSystem = true
 dark = "dark"
 light = "light"
 name = "dark"
+
+[talk]
+# "Talk to docs" — AI semantic search over your notes. Off by default and fully
+# local: when enabled, a small embedding model downloads once and your notes are
+# indexed on-device — they never leave your machine. Nothing loads until enabled.
+enabled = false
+
+[talk.embed]
+# Embedding runtime: "wasm" (lean, cross-platform, no native binary) or
+# "native" (faster, larger). WASM runs in a background worker.
+runtime = "wasm"
+# Embedding model (a transformers.js repo). Downloaded on first enable.
+model = "Xenova/all-MiniLM-L6-v2"
 `
 
 /** Pure: TOML text → validated Settings, defaults filling any gap. */
@@ -51,10 +66,15 @@ export function parseSettings(raw: string): Settings {
   try {
     data = parseToml(raw) as Record<string, unknown>
   } catch {
-    return { editor: { ...DEFAULTS.editor }, theme: { ...DEFAULTS.theme } }
+    return structuredClone(DEFAULTS)
   }
   const editor = (data.editor ?? {}) as Record<string, unknown>
   const theme = (data.theme ?? {}) as Record<string, unknown>
+  const talk = (data.talk ?? {}) as Record<string, unknown>
+  const embed = (talk.embed ?? {}) as Record<string, unknown>
+  const runtime = RUNTIMES.includes(embed.runtime as (typeof RUNTIMES)[number])
+    ? (embed.runtime as (typeof RUNTIMES)[number])
+    : DEFAULTS.talk.embed.runtime
   const fontSize = Number(editor.fontSize)
   const delay = Number(editor.autosaveDelayMs)
   const mode = MODES.includes(editor.defaultMode as (typeof MODES)[number])
@@ -83,6 +103,10 @@ export function parseSettings(raw: string): Settings {
       dark: str(theme.dark, DEFAULTS.theme.dark),
       light: str(theme.light, DEFAULTS.theme.light),
       name: str(theme.name, DEFAULTS.theme.name)
+    },
+    talk: {
+      enabled: typeof talk.enabled === 'boolean' ? talk.enabled : DEFAULTS.talk.enabled,
+      embed: { runtime, model: str(embed.model, DEFAULTS.talk.embed.model) }
     }
   }
 }
@@ -125,6 +149,6 @@ export function readSettings(): Settings {
   try {
     return parseSettings(readFileSync(settingsPath(), 'utf8'))
   } catch {
-    return { editor: { ...DEFAULTS.editor }, theme: { ...DEFAULTS.theme } }
+    return structuredClone(DEFAULTS)
   }
 }

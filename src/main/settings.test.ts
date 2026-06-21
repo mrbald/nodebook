@@ -8,7 +8,8 @@ describe('parseSettings', () => {
     )
     expect(s).toEqual({
       editor: { fontSize: 18, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
-      theme: { followSystem: false, dark: 'dracula', light: 'solarized-light', name: 'nord' }
+      theme: { followSystem: false, dark: 'dracula', light: 'solarized-light', name: 'nord' },
+      talk: DEFAULTS.talk
     })
   })
 
@@ -44,9 +45,24 @@ describe('parseSettings', () => {
   it('fills missing keys with defaults', () => {
     expect(parseSettings('[editor]\nfontSize = 20')).toEqual({
       editor: { ...DEFAULTS.editor, fontSize: 20 },
-      theme: { ...DEFAULTS.theme }
+      theme: { ...DEFAULTS.theme },
+      talk: DEFAULTS.talk
     })
     expect(parseSettings('')).toEqual(DEFAULTS)
+  })
+
+  it('reads [talk] config and validates the runtime + enabled flag', () => {
+    const s = parseSettings(
+      '[talk]\nenabled = true\n[talk.embed]\nruntime = "native"\nmodel = "Xenova/bge-small-en-v1.5"'
+    )
+    expect(s.talk).toEqual({
+      enabled: true,
+      embed: { runtime: 'native', model: 'Xenova/bge-small-en-v1.5' }
+    })
+    // defaults off; unknown runtime + non-boolean enabled fall back
+    expect(parseSettings('').talk.enabled).toBe(false)
+    expect(parseSettings('[talk.embed]\nruntime = "cuda"').talk.embed.runtime).toBe('wasm')
+    expect(parseSettings('[talk]\nenabled = "yes"').talk.enabled).toBe(false)
   })
 
   it('keeps followSystem default unless it is a real boolean', () => {

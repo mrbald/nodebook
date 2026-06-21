@@ -56,4 +56,15 @@ export interface Settings {
     /** Theme name used when followSystem is off. */
     name: string
   }
+  /** "Talk to docs" — AI semantic search over the vault. Off by default; nothing
+   *  loads until enabled (the model downloads on first enable). */
+  talk: {
+    enabled: boolean
+    embed: {
+      /** 'wasm' (lean, cross-platform, default) or 'native' (faster) runtime. */
+      runtime: 'wasm' | 'native'
+      /** Embedding model id (transformers.js repo, e.g. Xenova/all-MiniLM-L6-v2). */
+      model: string
+    }
+  }
 }
