@@ -48,6 +48,28 @@ export interface TalkChunk {
   text: string
 }
 
+/** A rolling snapshot of main-process telemetry for the status-bar widget. */
+export interface TelemetrySnapshot {
+  /** Length of the rolling window in ms (e.g. 5 min). */
+  windowMs: number
+  /** Event-loop lag histogram + summary (ms). */
+  lag: {
+    /** Counts per octave bucket (<1, 1, 2, … 4096, ≥8192 ms). */
+    buckets: number[]
+    labels: string[]
+    count: number
+    max: number
+    mean: number
+    p99: number
+    /** The slowest samples in the window, with wall-clock timestamps. */
+    worst: { ms: number; at: number }[]
+  }
+  /** Whole-app CPU % samples over the window (oldest → newest). */
+  cpu: number[]
+  /** Whole-app working-set memory (MB) samples over the window. */
+  ram: number[]
+}
+
 /** The vault's markdown files plus its directory paths (so empty dirs show). */
 export interface VaultListing {
   files: MarkdownFile[]
