@@ -3,7 +3,8 @@ import { mkdirSync } from 'fs'
 import { basename, dirname } from 'path'
 import { harvest } from './harvest'
 import { VectorStore, type PendingChunk } from './rag/store'
-import type { Backlink, Outbound, SearchHit } from '../shared/types'
+import { buildGraph, noteName, type FileRow, type TripleRow } from './graph'
+import type { Backlink, GraphData, Outbound, SearchHit } from '../shared/types'
 
 /**
  * The per-vault index: FTS5 full text + a triple store, in a single SQLite DB
@@ -124,6 +125,16 @@ export class VaultIndex {
          WHERE notes_fts MATCH ? ORDER BY rank LIMIT 50`
       )
       .all(fts) as SearchHit[]
+  }
+
+  /** A slice of the knowledge graph: local depth-`d` around a focus note (by
+   *  path), or the whole graph (focusPath null) capped to the busiest nodes. */
+  graph(focusPath: string | null, opts?: { depth?: number; cap?: number }): GraphData {
+    const files = this.db.prepare('SELECT path, title FROM files').all() as FileRow[]
+    const triples = this.db
+      .prepare('SELECT subject, relation, object FROM triples')
+      .all() as TripleRow[]
+    return buildGraph(files, triples, focusPath ? noteName(focusPath) : null, opts)
   }
 
   /** Distinct note base-names (no extension) currently in the index, sorted. */

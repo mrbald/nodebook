@@ -402,6 +402,12 @@ function registerIpc(): void {
 
   ipcMain.handle('index:noteNames', () => index?.noteNames() ?? [])
 
+  ipcMain.handle(
+    'index:graph',
+    (_e, focusPath: string | null, opts?: { depth?: number; cap?: number }) =>
+      index?.graph(focusPath, opts) ?? { nodes: [], edges: [] }
+  )
+
   // --- Talk to docs -------------------------------------------------------
   ipcMain.handle('talk:status', () => talkStatus())
 

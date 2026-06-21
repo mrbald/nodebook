@@ -20,6 +20,34 @@ export interface Outbound {
   object: string
 }
 
+/** A node in the derived knowledge graph (a note, or a "ghost" — a linked target
+ *  with no file yet). Keyed by note name, matching the triple store. */
+export interface GraphNode {
+  /** Note name (the wikilink target); the node's stable id. */
+  id: string
+  label: string
+  /** Absolute path if it resolves to a real note; null for a ghost. */
+  path: string | null
+  ghost: boolean
+  /** Edge count within the returned slice (drives node size). */
+  degree: number
+  /** The note the slice is centred on (local map). */
+  focus: boolean
+}
+
+/** A directed edge: `source --relation--> target` (a harvested triple). */
+export interface GraphEdge {
+  source: string
+  target: string
+  relation: string
+}
+
+/** A slice of the knowledge graph (local around a focus note, or global). */
+export interface GraphData {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
 /** A full-text search result. */
 export interface SearchHit {
   path: string

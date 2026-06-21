@@ -1,5 +1,6 @@
 import type {
   Backlink,
+  GraphData,
   Outbound,
   SearchHit,
   Settings,
@@ -25,6 +26,7 @@ export interface NodebookApi {
   outbound: (sourceFile: string) => Promise<Outbound[]>
   search: (query: string) => Promise<SearchHit[]>
   noteNames: () => Promise<string[]>
+  graph: (focusPath: string | null, opts?: { depth?: number; cap?: number }) => Promise<GraphData>
   talkStatus: () => Promise<TalkStatus>
   talkEnable: (dims: number) => Promise<TalkStatus>
   talkDisable: () => Promise<TalkStatus>
