@@ -519,11 +519,11 @@ export default function App() {
             onContextMenu={onTreeContextMenu}
           />
         )}
-        {vault && (
-          <button className="settings-btn" onClick={openSettings}>
-            ⚙ Settings
-          </button>
-        )}
+        {/* Settings are app-global (userData/settings.toml), not per-vault — so
+            this is always available, even before a vault is opened. */}
+        <button className="settings-btn" onClick={openSettings}>
+          ⚙ Settings
+        </button>
       </aside>
 
       <main className="editor-pane">
