@@ -479,6 +479,11 @@ body {
   font-family: 'SF Mono', ui-monospace, Menlo, monospace;
   font-size: 0.9em;
 }
+/* Reading mode collapses the ``` fence lines entirely (CM injects its own
+   .cm-line rule, so override it). */
+.cm-fence-hidden {
+  display: none !important;
+}
 
 /* --- Live-preview decorations ------------------------------------------- */
 
@@ -494,11 +499,28 @@ body {
 .cm-wikilink:hover {
   background: rgba(122, 162, 247, 0.3);
 }
+/* A wikilink to a note that doesn't exist yet — dimmed + dashed, so it's obvious
+   why clicking it does nothing. */
+.cm-wikilink.is-ghost {
+  color: var(--muted);
+  background: none;
+  border: 1px dashed var(--border);
+  padding: 0 5px;
+}
 
+/* External links open a web browser — mark them with ↗ and a dotted underline so
+   they're unmistakable next to internal [[wikilink]] pills (which stay in-app). */
 .cm-md-link {
   color: var(--accent);
-  text-decoration: underline;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
   cursor: pointer;
+}
+.cm-md-link::after {
+  content: ' ↗';
+  font-size: 0.8em;
+  vertical-align: 0.15em;
+  opacity: 0.75;
 }
 
 /* Code mode: links stay accent-colored, but only reveal the underline + pointer

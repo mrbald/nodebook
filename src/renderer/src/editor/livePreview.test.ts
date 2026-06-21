@@ -86,4 +86,22 @@ describe('computeSpans', () => {
     expect(spans.some((s) => s.kind === 'codeblock')).toBe(true)
     expect(spans.some((s) => s.kind === 'bold')).toBe(false)
   })
+
+  it('Live mode keeps the ``` fences visible (no hide spans)', () => {
+    const spans = spansFor('```js\nconst x = 1\n```', 0, true)
+    expect(spans.some((s) => s.kind === 'hide')).toBe(false)
+    expect(spans.some((s) => s.kind === 'codeblock')).toBe(true)
+  })
+
+  it('Reading mode collapses the ``` fence lines and styles the body', () => {
+    const doc = '```js\nconst x = 1\n```'
+    const spans = spansFor(doc, 0, false)
+    const fences = spans.filter((s) => s.kind === 'fenceline')
+    expect(fences.length).toBe(2) // opening + closing fence lines (line decorations)
+    expect(fences[0].from).toBe(0) // opening line start
+    expect(fences[0].from).toBe(fences[0].to) // zero-width line decoration
+    expect(spans.some((s) => s.kind === 'codeblock')).toBe(true) // body styled
+    // No line-break-spanning replace (that would crash CM6).
+    expect(spans.some((s) => s.kind === 'hide')).toBe(false)
+  })
 })

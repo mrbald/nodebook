@@ -29,7 +29,16 @@ import type { SyntaxNode } from '@lezer/common'
 export type OpenLink = (target: string) => void
 export type OpenUrl = (url: string) => void
 
-export type SpanKind = 'pill' | 'link' | 'hide' | 'bold' | 'italic' | 'code' | 'codeblock' | 'heading'
+export type SpanKind =
+  | 'pill'
+  | 'link'
+  | 'hide'
+  | 'fenceline'
+  | 'bold'
+  | 'italic'
+  | 'code'
+  | 'codeblock'
+  | 'heading'
 
 export interface DecoSpan {
   from: number
@@ -73,6 +82,30 @@ function collectWrapped(
   const innerFrom = marks[0][1]
   const innerTo = marks[marks.length - 1][0]
   if (innerTo > innerFrom) out.push({ from: innerFrom, to: innerTo, kind: INNER_KIND[node.name] })
+}
+
+/**
+ * Reading mode: collapse the opening/closing ``` fence *lines* (via a line
+ * decoration → `display:none`, the only way a plugin may hide a whole line — a
+ * replace spanning the newline is forbidden), and style the body as a code block.
+ */
+function hideFences(state: EditorState, node: SyntaxNode, out: DecoSpan[]): void {
+  const marks: SyntaxNode[] = []
+  for (let c = node.firstChild; c; c = c.nextSibling) if (c.name === 'CodeMark') marks.push(c)
+  if (marks.length === 0) {
+    out.push({ from: node.from, to: node.to, kind: 'codeblock' })
+    return
+  }
+  const openLine = state.doc.lineAt(marks[0].from)
+  out.push({ from: openLine.from, to: openLine.from, kind: 'fenceline' })
+  if (marks.length >= 2) {
+    const closeLine = state.doc.lineAt(marks[marks.length - 1].from)
+    const bodyFrom = openLine.to + 1
+    if (bodyFrom < closeLine.from) out.push({ from: bodyFrom, to: closeLine.from, kind: 'codeblock' })
+    out.push({ from: closeLine.from, to: closeLine.from, kind: 'fenceline' })
+  } else if (openLine.to + 1 < node.to) {
+    out.push({ from: openLine.to + 1, to: node.to, kind: 'codeblock' })
+  }
 }
 
 /** Extract display text + URL from a Link / Autolink / bare URL node. */
@@ -131,8 +164,10 @@ export function computeSpans(
         }
 
         if (name === 'FencedCode' || name === 'CodeBlock') {
-          // Always monospace (not reveal-gated) so code blocks read as code.
-          out.push({ from: ref.from, to: ref.to, kind: 'codeblock' })
+          // Reading mode (reveal=false) hides the ``` fence lines and the info
+          // string — "style only, no formatting symbols". Live/Code keep them.
+          if (!reveal && name === 'FencedCode') hideFences(state, ref.node, out)
+          else out.push({ from: ref.from, to: ref.to, kind: 'codeblock' })
           return false
         }
 
@@ -184,18 +219,20 @@ export function computeSpans(
 class WikilinkWidget extends WidgetType {
   constructor(
     readonly target: string,
+    readonly ghost: boolean,
     readonly onOpen?: OpenLink
   ) {
     super()
   }
   eq(other: WikilinkWidget): boolean {
-    return other.target === this.target
+    return other.target === this.target && other.ghost === this.ghost
   }
   toDOM(): HTMLElement {
     const el = document.createElement('span')
-    el.className = 'cm-wikilink'
+    el.className = this.ghost ? 'cm-wikilink is-ghost' : 'cm-wikilink'
     el.textContent = this.target
     el.dataset.target = this.target
+    if (this.ghost) el.title = 'This note does not exist yet'
     if (this.onOpen) {
       el.addEventListener('mousedown', (e) => {
         e.preventDefault()
@@ -239,6 +276,7 @@ class LinkWidget extends WidgetType {
 }
 
 const HIDE = Decoration.replace({})
+const FENCE_LINE = Decoration.line({ class: 'cm-fence-hidden' })
 const MARK_BOLD = Decoration.mark({ class: 'cm-md-bold' })
 const MARK_ITALIC = Decoration.mark({ class: 'cm-md-italic' })
 const MARK_CODE = Decoration.mark({ class: 'cm-md-code' })
@@ -248,14 +286,24 @@ function headingMark(level: number): Decoration {
   return (headingMarks[level] ??= Decoration.mark({ class: `cm-md-h${level}` }))
 }
 
-function spanToDecoration(s: DecoSpan, onOpen?: OpenLink, onOpenUrl?: OpenUrl): Decoration {
+function spanToDecoration(
+  s: DecoSpan,
+  onOpen?: OpenLink,
+  onOpenUrl?: OpenUrl,
+  linkExists?: (target: string) => boolean
+): Decoration {
   switch (s.kind) {
-    case 'pill':
-      return Decoration.replace({ widget: new WikilinkWidget(s.target ?? '', onOpen) })
+    case 'pill': {
+      const target = s.target ?? ''
+      const ghost = linkExists ? !linkExists(target) : false
+      return Decoration.replace({ widget: new WikilinkWidget(target, ghost, onOpen) })
+    }
     case 'link':
       return Decoration.replace({ widget: new LinkWidget(s.label ?? '', s.target ?? '', onOpenUrl) })
     case 'hide':
       return HIDE
+    case 'fenceline':
+      return FENCE_LINE
     case 'bold':
       return MARK_BOLD
     case 'italic':
@@ -276,12 +324,18 @@ interface Built {
   atomic: DecorationSet
 }
 
-function build(view: EditorView, onOpen?: OpenLink, onOpenUrl?: OpenUrl, reveal = true): Built {
+function build(
+  view: EditorView,
+  onOpen?: OpenLink,
+  onOpenUrl?: OpenUrl,
+  reveal = true,
+  linkExists?: (target: string) => boolean
+): Built {
   const spans = computeSpans(view.state, view.visibleRanges, reveal)
   const decoBuilder = new RangeSetBuilder<Decoration>()
   const atomicBuilder = new RangeSetBuilder<Decoration>()
   for (const s of spans) {
-    const deco = spanToDecoration(s, onOpen, onOpenUrl)
+    const deco = spanToDecoration(s, onOpen, onOpenUrl, linkExists)
     decoBuilder.add(s.from, s.to, deco)
     if (ATOMIC.has(s.kind)) atomicBuilder.add(s.from, s.to, deco)
   }
@@ -293,19 +347,32 @@ function build(view: EditorView, onOpen?: OpenLink, onOpenUrl?: OpenUrl, reveal 
  *   so you edit the source in place; when false (Reading mode) markers stay
  *   hidden regardless of the cursor.
  */
-export function livePreview(onOpen?: OpenLink, onOpenUrl?: OpenUrl, reveal = true): Extension {
+export function livePreview(
+  onOpen?: OpenLink,
+  onOpenUrl?: OpenUrl,
+  reveal = true,
+  linkExists?: (target: string) => boolean
+): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet
       atomic: DecorationSet
       constructor(view: EditorView) {
-        const built = build(view, onOpen, onOpenUrl, reveal)
+        const built = build(view, onOpen, onOpenUrl, reveal, linkExists)
         this.decorations = built.decorations
         this.atomic = built.atomic
       }
       update(u: ViewUpdate): void {
-        if (u.docChanged || u.viewportChanged || (reveal && u.selectionSet)) {
-          const built = build(u.view, onOpen, onOpenUrl, reveal)
+        // Also rebuild when the background parser advances (the syntax tree
+        // changed) — otherwise late-parsed nodes (e.g. a FencedCode in a larger
+        // doc) keep their stale decoration until some other update fires.
+        if (
+          u.docChanged ||
+          u.viewportChanged ||
+          (reveal && u.selectionSet) ||
+          syntaxTree(u.startState) !== syntaxTree(u.state)
+        ) {
+          const built = build(u.view, onOpen, onOpenUrl, reveal, linkExists)
           this.decorations = built.decorations
           this.atomic = built.atomic
         }

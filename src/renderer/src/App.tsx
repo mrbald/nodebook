@@ -306,6 +306,13 @@ export default function App() {
     [files, openFile]
   )
 
+  // A wikilink resolves to a real note (same rule as openLink) → not a "ghost".
+  const linkExists = useCallback(
+    (target: string) =>
+      files.some((x) => x.name === target || x.rel.replace(/\.md$/i, '') === target),
+    [files]
+  )
+
   const openSettings = useCallback(async () => {
     flushCurrent() // save the note we're leaving
     const p = await window.nodebook.settingsPath()
@@ -611,6 +618,7 @@ export default function App() {
                   onChange={noteSaver.onChange}
                   onOpenLink={openLink}
                   onOpenUrl={(url) => void window.nodebook.openExternal(url)}
+                  linkExists={linkExists}
                   theme={editorTheme}
                   mode={editorMode}
                 />

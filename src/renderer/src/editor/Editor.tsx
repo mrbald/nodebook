@@ -33,6 +33,8 @@ interface Props {
   onOpenLink?: (target: string) => void
   /** Called when a markdown/URL link is clicked, with the URL. */
   onOpenUrl?: (url: string) => void
+  /** True if a wikilink target resolves to a real note (else it's a "ghost"). */
+  linkExists?: (target: string) => boolean
   /** Editor color theme name (e.g. "dark"); switches live. */
   theme: string
   /** Which of the three view modes to render; switches live. */
@@ -45,6 +47,7 @@ export function Editor({
   onChange,
   onOpenLink,
   onOpenUrl,
+  linkExists,
   theme,
   mode
 }: Props) {
@@ -61,6 +64,9 @@ export function Editor({
 
   const onOpenUrlRef = useRef(onOpenUrl)
   onOpenUrlRef.current = onOpenUrl
+
+  const linkExistsRef = useRef(linkExists)
+  linkExistsRef.current = linkExists
 
   // Everything that does NOT depend on the view mode. livePreview and the
   // read-only facets live in the mode compartment instead (see below).
@@ -87,7 +93,8 @@ export function Editor({
       livePreview(
         (target) => onOpenLinkRef.current?.(target),
         (url) => onOpenUrlRef.current?.(url),
-        reveal
+        reveal,
+        (target) => linkExistsRef.current?.(target) ?? true
       )
     switch (mode) {
       case 'code':
