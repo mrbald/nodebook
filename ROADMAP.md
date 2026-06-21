@@ -71,13 +71,14 @@ for local embeddings, hybrid FTS5+vector retrieval, pluggable chat LLM).
 - **P3** — local-LLM option, bundle-vs-download model management, move the embedder
   to a renderer Web Worker tuning / distance-threshold for the ✨ marker.
 
-## Event-loop telemetry ("measure everything")
+## Event-loop telemetry ("measure everything") — ✅ shipped
 
-Approved design (queued behind talk-to-docs). Main-loop lag via
-`perf_hooks.monitorEventLoopDelay` + a rolling log-linear histogram (port the
-`pfw` bucket geometry: linear <16, then major=log2 + 4 minor bits, ≤6% error) with
-worst-N exemplars; whole-app CPU/RAM via `app.getAppMetrics()`; a tiny toggleable
-status-bar widget (sparklines + mini histogram) crediting the `ufw/pfw` repo.
+A self-scheduled probe samples main-loop lag into a rolling 5-minute, octave
+(power-of-two ms) histogram with worst-N exemplars; whole-app CPU/RAM via
+`app.getAppMetrics()`; a tiny toggleable status-bar widget (sparkline + mini
+histogram + popover) crediting the `ufw/pfw` repo. Off by default. Golden-tested
+core + e2e. *Possible later:* finer (half-octave) buckets / the full pfw
+log-linear geometry if percentile precision is wanted; sparkline of lag over time.
 
 ## Other post-1.0
 

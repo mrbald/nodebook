@@ -73,6 +73,14 @@ search box.
 - Fully **reversible** — *Turn off* drops the embeddings (they live in
   `<vault>/.nodebook/`, rebuildable by re-enabling).
 
+## Performance telemetry
+
+Set `[telemetry] enabled = true` in Settings to show a tiny widget at the left of
+the status bar: a **rolling 5-minute** view of **event-loop lag** (a log-bucketed
+histogram, <1 ms … ≥8192 ms), CPU, and memory. Click it for max / p99 / mean and
+the worst recent spikes. The goal: never land a sample in the slowest bucket.
+Off by default. ("Measure everything" — inspired by the *ufw/pfw* metrics library.)
+
 ## View modes
 
 Switch from the bottom-right status bar, or with the keyboard:

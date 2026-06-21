@@ -35,6 +35,9 @@ store) index in the main process.
   `## Edges` = relations).
 - **App-wide themes** (dark/light/system + several presets) — quick-switch from
   the status bar; the whole app and the editor recolor together.
+- **Performance telemetry** (opt-in) — a tiny status-bar widget with a
+  log-bucketed **event-loop lag** histogram, worst-spike exemplars, and rolling
+  CPU/RAM. "Measure everything"; aims to never land a sample in the slowest bucket.
 - **Export to PDF** / Print; **explicit-save** model (⌘S) with optional autosave.
 - Plain-files first: atomic writes, the index lives in `<vault>/.nodebook/` and
   is safe to delete.
