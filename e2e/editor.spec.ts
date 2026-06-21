@@ -27,7 +27,7 @@ test.beforeAll(async () => {
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-e2e-userdata-'))
   app = await electron.launch({
     args: [projectRoot],
-    env: { ...process.env, NODEBOOK_USER_DATA: userDataDir }
+    env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
 
   // Stub the native folder picker so it returns our temp vault — Playwright

@@ -56,7 +56,12 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  // In e2e the window is driven over CDP and never needs OS focus, so show it
+  // inactive — otherwise each test run pops a window that steals the keyboard
+  // from whatever the developer is typing into.
+  mainWindow.on('ready-to-show', () =>
+    process.env['NODEBOOK_E2E'] ? mainWindow?.showInactive() : mainWindow?.show()
+  )
 
   // Open real links in the system browser, never in-app.
   mainWindow.webContents.setWindowOpenHandler((details) => {
