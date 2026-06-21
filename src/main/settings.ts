@@ -47,7 +47,7 @@ name = "dark"
 
 /** Pure: TOML text → validated Settings, defaults filling any gap. */
 export function parseSettings(raw: string): Settings {
-  let data: Record<string, unknown> = {}
+  let data: Record<string, unknown>
   try {
     data = parseToml(raw) as Record<string, unknown>
   } catch {

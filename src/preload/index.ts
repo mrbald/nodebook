@@ -52,6 +52,6 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld('nodebook', api)
 } else {
   // Fallback for the (unused) non-isolated path.
-  // @ts-ignore — augmenting window without context isolation
+  // @ts-expect-error — augmenting window without context isolation
   window.nodebook = api
 }

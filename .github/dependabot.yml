@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # npm dependencies — weekly PRs (security updates also arrive automatically).
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Keep the noise down: batch routine minor/patch bumps into one PR.
+      minor-and-patch:
+        update-types: [minor, patch]
+  # Keep the GitHub Actions in the workflows current too.
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly

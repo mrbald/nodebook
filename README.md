@@ -1,6 +1,8 @@
 # Nodebook
 
 [![CI](https://github.com/mrbald/nodebook/actions/workflows/ci.yml/badge.svg)](https://github.com/mrbald/nodebook/actions/workflows/ci.yml)
+[![Security](https://github.com/mrbald/nodebook/actions/workflows/security.yml/badge.svg)](https://github.com/mrbald/nodebook/actions/workflows/security.yml)
+![code style: eslint](https://img.shields.io/badge/code%20style-eslint-4B32C3?logo=eslint&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/gt9gt7cvwmg)

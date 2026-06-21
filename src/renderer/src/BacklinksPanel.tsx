@@ -37,6 +37,8 @@ export function BacklinksPanel({ active, files, onOpen }: Props) {
     return () => {
       ignore = true
     }
+    // active.name/.rel are derived from active.path, so path alone is sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.path])
 
   // A triple object is a note name (navigable) or a literal value (e.g. a

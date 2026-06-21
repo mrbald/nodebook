@@ -116,6 +116,8 @@ export default function App() {
     }
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
+    // Mount-once: load settings + attach the OS-appearance listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // --- Save controllers (one per editor buffer) ---------------------------
@@ -293,6 +295,8 @@ export default function App() {
         })
       }
     })
+    // applySettings only closes over stable setters + module helpers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Render the note's *current* (possibly unsaved) text into the off-screen

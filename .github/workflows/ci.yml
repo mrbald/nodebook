@@ -18,6 +18,7 @@ jobs:
       # postinstall runs `electron-builder install-app-deps`, rebuilding
       # better-sqlite3 against the Electron ABI used by the e2e app.
       - run: npm ci
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       # The Electron e2e drives a real window, so it needs a virtual display and

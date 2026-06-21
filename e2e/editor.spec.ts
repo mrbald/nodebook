@@ -41,10 +41,9 @@ test.beforeAll(async () => {
   await app.evaluate(async ({ shell }) => {
     const g = globalThis as unknown as { __opened: string[] }
     g.__opened = []
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     shell.openExternal = (async (u: string) => {
       g.__opened.push(u)
-    }) as any
+    }) as typeof shell.openExternal
   })
 
   page = await app.firstWindow()
