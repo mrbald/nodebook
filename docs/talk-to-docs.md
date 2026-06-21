@@ -75,12 +75,53 @@ loop staying healthy — embedding a vault is the kind of load that would otherw
 spike loop lag). First-open is a one-time batch with a progress indicator;
 thereafter only changed notes re-embed (content-hash gated).
 
-## UI
+## UX — how the feature is exposed (UX/UI hat)
 
-- Sidebar search gains a **semantic toggle** (rank by meaning vs. exact).
-- A new **"Ask"** panel: a question box → a grounded answer + the source notes it
-  cites (clickable to open). Answers render through the existing reading-mode
-  Markdown renderer.
+Category exemplars: Obsidian (Smart Connections / Copilot), Notion AI, NotebookLM,
+Mem, Reflect, Logseq. The convergent convention: **semantic search *augments* the
+existing search** (the good ones make search "just smarter", not a mode you
+babysit); **chat is a dedicated "Ask" panel**; and enabling AI is a **deliberate,
+clearly-private opt-in**.
+
+1. **Discovery + enable — an honest affordance, no dead toggles.** While off, the
+   sidebar search shows one subtle line under the box:
+   *"✨ Search by meaning — set up AI (local & private)."* It opens a small setup
+   card: "Runs entirely on your machine — your notes never leave it. Downloads a
+   ~30 MB model once, then indexes in the background." `[Enable]` + an **Advanced**
+   disclosure (runtime WASM/native, model). Also in Settings (`[talk]`). The entry
+   only promises what enabling delivers.
+2. **Activation states are designed.** Enable → model-download progress →
+   "Indexing 120/450…" (background, non-blocking) → ready. Offline/error → message
+   + Retry. Disable → stop + offer to delete the embeddings (they live in
+   `.nodebook`, rebuildable — Discipline #3; fully reversible).
+3. **Once enabled, search is hybrid + automatic.** The *same* search box fuses
+   keyword (FTS) ⊕ meaning (vector, RRF) — **no mode the user manages**. A small ✨
+   marks AI-contributed hits; semantic hits show the matching passage. Keyword
+   search still works with AI off.
+4. **"Ask" (Phase 2) is a dedicated panel.** An "Ask" entry opens a chat in the
+   center pane (like Help): question → grounded answer + **clickable cited notes**,
+   rendered through reading-mode. Plain-click a citation to open it (navigation
+   convention, like backlinks).
+5. **Lead with privacy.** "Local & private" is the headline wherever AI appears —
+   honest (local embeddings) and the category's #1 user concern.
+
+Avoid: a permanent "AI" tab cluttering the chrome; a keyword/meaning toggle the
+user must manage; any AI control visible-but-inert before setup.
+
+## Config (off by default, runtime selectable, lazy)
+
+```toml
+[talk]
+enabled = false            # whole feature is opt-in; nothing loads until true
+
+[talk.embed]
+runtime = "wasm"           # wasm (default, lean, cross-platform) | native (faster)
+model = "bge-small-en-v1.5"
+# provider = "local"       # local | openai-compat (baseUrl/apiKey) for remote
+
+[talk.chat]
+provider = "none"          # none (search-only) | openai-compat | anthropic | local
+```
 
 ## Build / packaging implications (needs a greenlight)
 
