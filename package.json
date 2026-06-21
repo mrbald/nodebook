@@ -39,7 +39,7 @@
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "^1.6.4",
     "better-sqlite3": "^12.11.1",
-    "chokidar": "^3.6.0",
+    "chokidar": "^5.0.0",
     "markdown-it": "^14.2.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
