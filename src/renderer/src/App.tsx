@@ -57,6 +57,7 @@ export default function App() {
   const [results, setResults] = useState<SearchHit[]>([])
   const [telemetryOn, setTelemetryOn] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
+  const [graphEpoch, setGraphEpoch] = useState(0)
   const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -247,10 +248,19 @@ export default function App() {
     return l.files
   }, [vault])
 
-  // Live-refresh the tree when files/dirs change on disk.
+  // Live-refresh the tree when files/dirs change on disk, and keep the knowledge
+  // map current when the index content changes (a save added/removed a link).
   useEffect(() => {
     if (!vault) return
-    return window.nodebook.onVaultChanged(() => void relist())
+    const offVault = window.nodebook.onVaultChanged(() => {
+      void relist()
+      setGraphEpoch((e) => e + 1)
+    })
+    const offIndex = window.nodebook.onIndexChanged(() => setGraphEpoch((e) => e + 1))
+    return () => {
+      offVault()
+      offIndex()
+    }
   }, [vault, relist])
 
   const openFile = useCallback(
@@ -584,6 +594,7 @@ export default function App() {
             focusName={active.name}
             onOpen={openPathInGraph}
             onClose={() => setGraphOpen(false)}
+            reloadKey={graphEpoch}
           />
         ) : active && doc !== null ? (
           active.rel.endsWith('.map.md') ? (

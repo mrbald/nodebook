@@ -588,6 +588,43 @@ body {
 .graph-title {
   font-weight: 600;
 }
+.graph-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.graph-depth {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.graph-ctl {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 20px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.graph-ctl:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.graph-ctl:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.graph-canvas {
+  touch-action: none;
+  cursor: grab;
+}
+.graph-canvas:active {
+  cursor: grabbing;
+}
 .graph-legend {
   display: flex;
   flex-wrap: wrap;

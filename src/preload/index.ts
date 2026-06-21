@@ -71,6 +71,12 @@ const api = {
     ipcRenderer.on('vault:changed', listener)
     return () => ipcRenderer.removeListener('vault:changed', listener)
   },
+  /** Subscribe to index content changes (a save added/removed a link, etc.). */
+  onIndexChanged: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('index:changed', listener)
+    return () => ipcRenderer.removeListener('index:changed', listener)
+  },
   /** Subscribe to application-menu commands (export-pdf, print, toggle-read). */
   onMenuCommand: (cb: (cmd: string) => void): (() => void) => {
     const listener = (_e: unknown, cmd: string): void => cb(cmd)

@@ -204,6 +204,12 @@ function notifyTalkDirty(): void {
   if (index?.talkOn) mainWindow?.webContents.send('talk:dirty')
 }
 
+/** Tell the renderer the index content changed (e.g. a save added a link), so
+ *  derived views like the knowledge map can re-query. */
+function notifyIndexChanged(): void {
+  mainWindow?.webContents.send('index:changed')
+}
+
 function talkStatus(): TalkStatus {
   const enabled = readSettings().talk.enabled
   const counts = index?.talkCounts() ?? { total: 0, pending: 0 }
@@ -249,7 +255,11 @@ async function openVault(root: string): Promise<VaultListing> {
       notifyVaultChanged()
     })
     .on('change', (p: string) => {
-      if (MD_EXT.test(p)) void indexPath(p).then(notifyTalkDirty)
+      if (MD_EXT.test(p))
+        void indexPath(p).then(() => {
+          notifyTalkDirty()
+          notifyIndexChanged()
+        })
     })
     .on('unlink', (p: string) => {
       if (MD_EXT.test(p)) index?.removeFile(p)
@@ -376,6 +386,7 @@ function registerIpc(): void {
       const { mtimeMs } = await fs.stat(path)
       index.indexFile(path, content, Math.floor(mtimeMs))
       notifyTalkDirty()
+      notifyIndexChanged()
     }
   })
 
@@ -387,7 +398,10 @@ function registerIpc(): void {
         return
       }
       atomicWrite(path, content)
-      if (index && withinVault(path)) index.indexFile(path, content, 0)
+      if (index && withinVault(path)) {
+        index.indexFile(path, content, 0)
+        notifyIndexChanged()
+      }
     } catch {
       // best effort on the way out
     }

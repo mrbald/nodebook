@@ -43,6 +43,7 @@ export interface NodebookApi {
   openExternal: (url: string) => Promise<void>
   exportPdf: (name: string) => Promise<boolean>
   onVaultChanged: (cb: () => void) => () => void
+  onIndexChanged: (cb: () => void) => () => void
   onMenuCommand: (cb: (cmd: string) => void) => () => void
 }
 

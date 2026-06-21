@@ -49,6 +49,21 @@ test('the ⊹ Map button opens a force-directed graph with nodes and edges', asy
   await expect(page.locator('.graph-edge')).toHaveCount(3)
 })
 
+test('Global toggle and depth control change the slice (then restore)', async () => {
+  await page.locator('.graph-ctl', { hasText: 'Global' }).click()
+  await expect(page.locator('.graph-title')).toContainText('whole vault')
+  await expect(page.locator('.graph-node').first()).toBeVisible()
+
+  await page.locator('.graph-ctl', { hasText: 'Local' }).click()
+  await expect(page.locator('.graph-title')).toContainText('welcome')
+
+  await expect(page.locator('.graph-depth')).toContainText('depth 1')
+  await page.locator('.graph-depth .graph-ctl').last().click() // +
+  await expect(page.locator('.graph-depth')).toContainText('depth 2')
+  await page.locator('.graph-depth .graph-ctl').first().click() // −
+  await expect(page.locator('.graph-depth')).toContainText('depth 1')
+})
+
 test('clicking a neighbour node recenters the map on it', async () => {
   await page.locator('.graph-node', { hasText: 'Graph Model' }).click()
   await expect(page.locator('.graph-title')).toContainText('Graph Model')
