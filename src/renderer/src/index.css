@@ -449,6 +449,98 @@ body {
   border-color: var(--accent);
 }
 
+/* Talk to docs — the "search by meaning" affordance under the search box. */
+.talk-cta {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 8px;
+  padding: 5px 8px;
+  text-align: left;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.talk-cta:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.talk-cta-note {
+  opacity: 0.7;
+}
+.talk-setup {
+  margin: 0 12px 8px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.talk-setup-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.talk-setup-body {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.talk-setup-actions {
+  display: flex;
+  gap: 6px;
+}
+.talk-enable,
+.talk-cancel {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.talk-enable {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.talk-cancel {
+  background: none;
+  color: var(--muted);
+}
+.talk-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.talk-status-error {
+  color: #e0a050;
+}
+.talk-on {
+  color: var(--accent);
+}
+.talk-link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+.talk-link:hover {
+  color: var(--accent);
+}
+.search-result-ai {
+  color: var(--accent);
+}
+
 .search-results {
   list-style: none;
   margin: 0;

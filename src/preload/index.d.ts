@@ -1,4 +1,12 @@
-import type { Backlink, Outbound, SearchHit, Settings, VaultListing } from '../shared/types'
+import type {
+  Backlink,
+  Outbound,
+  SearchHit,
+  Settings,
+  TalkChunk,
+  TalkStatus,
+  VaultListing
+} from '../shared/types'
 
 export interface NodebookApi {
   pickVault: () => Promise<string | null>
@@ -16,6 +24,13 @@ export interface NodebookApi {
   outbound: (sourceFile: string) => Promise<Outbound[]>
   search: (query: string) => Promise<SearchHit[]>
   noteNames: () => Promise<string[]>
+  talkStatus: () => Promise<TalkStatus>
+  talkEnable: (dims: number) => Promise<TalkStatus>
+  talkDisable: () => Promise<TalkStatus>
+  talkPending: (limit: number) => Promise<TalkChunk[]>
+  talkPutEmbeddings: (rows: { id: number; vector: number[] }[]) => Promise<TalkStatus>
+  talkSearch: (query: string, vector: number[]) => Promise<SearchHit[]>
+  onTalkDirty: (cb: () => void) => () => void
   settingsPath: () => Promise<string>
   readSettings: () => Promise<Settings>
   setThemeMode: (mode: 'system' | 'dark' | 'light') => Promise<Settings>

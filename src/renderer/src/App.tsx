@@ -12,6 +12,8 @@ import { Confirm } from './Confirm'
 import { StatusSelect } from './StatusSelect'
 import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
+import { useTalk } from './talk/useTalk'
+import { TalkPanel } from './talk/TalkPanel'
 import HELP_DOC from './help.md?raw'
 
 type ThemeMode = 'system' | 'dark' | 'light'
@@ -51,6 +53,7 @@ export default function App() {
   const [noteNames, setNoteNames] = useState<string[]>([])
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchHit[]>([])
+  const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [settingsPath, setSettingsPath] = useState<string | null>(null)
@@ -207,8 +210,9 @@ export default function App() {
       setFiles(listing.files)
       setDirs(listing.dirs)
       setNoteNames(await window.nodebook.noteNames())
+      talk.onVaultOpened() // resume embedding for the newly-opened vault
     },
-    [flushCurrent]
+    [flushCurrent, talk]
   )
 
   const openVault = useCallback(async () => {
@@ -249,6 +253,7 @@ export default function App() {
     [flushCurrent]
   )
 
+  const { ready: talkReady, searchSemantic } = talk
   useEffect(() => {
     const q = query.trim()
     if (!q) {
@@ -257,14 +262,15 @@ export default function App() {
     }
     let ignore = false
     const t = setTimeout(async () => {
-      const hits = await window.nodebook.search(q)
+      // When semantic search is live, fuse keyword + meaning; else keyword only.
+      const hits = talkReady ? await searchSemantic(q) : await window.nodebook.search(q)
       if (!ignore) setResults(hits)
     }, 150)
     return () => {
       ignore = true
       clearTimeout(t)
     }
-  }, [query])
+  }, [query, talkReady, searchSemantic])
 
   // Resolve a wikilink target to a vault file and open it. Match on bare name
   // first, then on the extension-less relative path (e.g. [[projects/Roadmap]]).
@@ -463,6 +469,7 @@ export default function App() {
             onChange={(e) => setQuery(e.target.value)}
           />
         )}
+        {vault && <TalkPanel talk={talk} />}
         {query.trim() ? (
           <ul className="search-results">
             {results.length === 0 ? (
@@ -476,7 +483,14 @@ export default function App() {
                     className={active?.path === hit.path ? 'active' : ''}
                     onClick={() => { if (f) void openFile(f) }}
                   >
-                    <div className="search-result-title">{hit.title}</div>
+                    <div className="search-result-title">
+                      {hit.semantic && (
+                        <span className="search-result-ai" title="Matched by meaning">
+                          ✨{' '}
+                        </span>
+                      )}
+                      {hit.title}
+                    </div>
                     <div className="search-result-path">{f?.rel ?? hit.path}</div>
                     {hit.snippet && (
                       <div className="search-result-snippet">{renderSnippet(hit.snippet)}</div>
