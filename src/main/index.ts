@@ -435,7 +435,11 @@ function buildAppMenu(): void {
         { role: 'togglefullscreen' as const }
       ]
     },
-    { role: 'windowMenu' }
+    { role: 'windowMenu' },
+    {
+      role: 'help',
+      submenu: [{ label: 'Markdown & Syntax', click: () => send('help') }]
+    }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

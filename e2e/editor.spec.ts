@@ -459,3 +459,15 @@ test('Settings: "Reset to defaults" restores the factory file', async () => {
   await expect.poll(fontSizeVar, { timeout: 3000 }).toBe('15px')
   await expect(page.locator('.cm-content')).toContainText('defaultMode') // shipped default
 })
+
+test('Help menu opens the Markdown reference (read-only) and closes', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'help')
+  })
+  await expect(page.locator('.settings-title')).toHaveText(/Help/)
+  await expect(page.locator('.cm-content')).toContainText('CommonMark')
+  await expect(page.locator('.cm-content')).toHaveAttribute('contenteditable', 'false')
+
+  await page.locator('.settings-reset', { hasText: 'Close' }).click()
+  await expect(page.locator('.settings-title')).toHaveCount(0)
+})

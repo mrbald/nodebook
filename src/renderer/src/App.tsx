@@ -12,6 +12,7 @@ import { Confirm } from './Confirm'
 import { StatusSelect } from './StatusSelect'
 import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
+import HELP_DOC from './help.md?raw'
 
 type ThemeMode = 'system' | 'dark' | 'light'
 const MODE_OPTIONS = [
@@ -51,6 +52,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchHit[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [settingsPath, setSettingsPath] = useState<string | null>(null)
   const [settingsDoc, setSettingsDoc] = useState<string | null>(null)
   // Bumped on "reset to defaults" to force the settings editor to remount with
@@ -198,6 +200,7 @@ export default function App() {
       setActive(null)
       setDoc(null)
       setSettingsOpen(false)
+      setHelpOpen(false)
       setQuery('')
       // openVault builds/refreshes the index and returns files + dirs.
       const listing = await window.nodebook.openVault(dir)
@@ -241,6 +244,7 @@ export default function App() {
       setActive(f)
       setDoc(content)
       setSettingsOpen(false)
+      setHelpOpen(false)
     },
     [flushCurrent]
   )
@@ -281,6 +285,13 @@ export default function App() {
     setSettingsPath(p)
     setSettingsDoc(content)
     setSettingsOpen(true)
+    setHelpOpen(false)
+  }, [flushCurrent])
+
+  const openHelp = useCallback(() => {
+    flushCurrent()
+    setSettingsOpen(false)
+    setHelpOpen(true)
   }, [flushCurrent])
 
   const resetSettingsToDefaults = useCallback(() => {
@@ -320,13 +331,14 @@ export default function App() {
       else if (cmd === 'mode-code') setEditorMode('code')
       else if (cmd === 'mode-live') setEditorMode('live')
       else if (cmd === 'mode-reading') setEditorMode('reading')
+      else if (cmd === 'help') openHelp()
       else if (cmd === 'export-pdf') void exportPdf()
       else if (cmd === 'print') {
         fillPrint()
         window.print()
       }
     })
-  }, [exportPdf, fillPrint])
+  }, [exportPdf, fillPrint, openHelp])
 
   // Absolute directory a "new" action should create into.
   const dirOf = (target: ContextTarget): string => {
@@ -492,7 +504,27 @@ export default function App() {
       </aside>
 
       <main className="editor-pane">
-        {settingsOpen && settingsDoc !== null ? (
+        {helpOpen ? (
+          <div className="settings-pane">
+            <div className="settings-header">
+              <span className="settings-title">Help — Markdown &amp; Syntax</span>
+              <button className="settings-reset" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="settings-body">
+              <Editor
+                key="help"
+                initialDoc={HELP_DOC}
+                noteNames={[]}
+                onChange={() => {}}
+                theme={editorTheme}
+                mode="reading"
+                onOpenUrl={(url) => void window.nodebook.openExternal(url)}
+              />
+            </div>
+          </div>
+        ) : settingsOpen && settingsDoc !== null ? (
           <div className="settings-pane">
             <div className="settings-header">
               <span className="settings-title">Settings</span>
@@ -551,7 +583,7 @@ export default function App() {
         )}
       </main>
 
-      {active && !settingsOpen && (
+      {active && !settingsOpen && !helpOpen && (
         <BacklinksPanel active={active} files={files} onOpen={openFile} />
       )}
 
