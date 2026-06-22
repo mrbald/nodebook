@@ -52,6 +52,14 @@ test('the ⊹ Map button opens a force-directed graph with nodes and edges', asy
   await expect(page.locator('.graph-edge')).toHaveCount(3)
 })
 
+test('chrome is consistent: controls sit at the bottom, no blank right column', async () => {
+  const canvas = await page.locator('.graph-canvas').boundingBox()
+  const toolbar = await page.locator('.graph-toolbar').boundingBox()
+  if (!canvas || !toolbar) throw new Error('no boxes')
+  expect(toolbar.y).toBeGreaterThan(canvas.y) // toolbar below the canvas, like the editor
+  await expect(page.locator('.app')).toHaveClass(/app--no-right/) // grid collapsed — no void
+})
+
 test('Global toggle and depth control change the slice (then restore)', async () => {
   await page.locator('.graph-ctl', { hasText: 'Global' }).click()
   await expect(page.locator('.graph-title')).toContainText('whole vault')

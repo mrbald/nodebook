@@ -485,8 +485,12 @@ export default function App() {
     setMenu({ x, y, items })
   }
 
+  // The right panel (backlinks) only shows when editing a note; collapse the grid
+  // to two columns otherwise (map / settings / help / empty) so the centre fills
+  // the width instead of leaving a blank third column.
+  const showRightPanel = !!active && !settingsOpen && !helpOpen && !graphOpen
   return (
-    <div className="app">
+    <div className={`app${showRightPanel ? '' : ' app--no-right'}`}>
       <aside className="sidebar">
         <div className="vault-actions">
           <button className="open-btn" onClick={openVault}>
@@ -656,9 +660,7 @@ export default function App() {
         )}
       </main>
 
-      {active && !settingsOpen && !helpOpen && !graphOpen && (
-        <BacklinksPanel active={active} files={files} onOpen={openFile} />
-      )}
+      {showRightPanel && <BacklinksPanel active={active} files={files} onOpen={openFile} />}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />

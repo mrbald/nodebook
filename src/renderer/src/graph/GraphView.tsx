@@ -277,7 +277,7 @@ export function GraphView({
 
   return (
     <div className="graph-view">
-      <div className="graph-header">
+      <div className="graph-toolbar">
         <span className="graph-title">⊹ Map — {global ? 'whole vault' : focusName}</span>
         <div className="graph-controls">
           <button className="graph-ctl" onClick={() => setGlobal((g) => !g)}>

@@ -32,6 +32,11 @@ body {
   grid-template-columns: 260px 1fr 260px;
   height: 100%;
 }
+/* No right panel (map / settings / help / empty): drop the third column so the
+   centre fills the width instead of leaving a blank gap. */
+.app--no-right {
+  grid-template-columns: 260px 1fr;
+}
 
 /* --- Sidebar ------------------------------------------------------------- */
 
@@ -597,13 +602,17 @@ body {
   height: 100%;
   min-height: 0;
 }
-.graph-header {
+/* The map's controls live at the *bottom* (order: 1, after the canvas) to match
+   the editor's bottom status bar — consistent chrome placement across views. */
+.graph-toolbar {
+  order: 1;
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
   background: var(--bg-elev);
   font-size: 13px;
 }
