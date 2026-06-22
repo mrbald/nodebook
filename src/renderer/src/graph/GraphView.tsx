@@ -77,6 +77,7 @@ export function GraphView({
   vaultRoot,
   talkReady,
   onOpen,
+  onOpenInEditor,
   onClose,
   reloadKey,
   statusSlot
@@ -85,7 +86,10 @@ export function GraphView({
   focusName: string
   vaultRoot: string | null
   talkReady: boolean
+  /** Recenter the map on a note (double-click / "Focus here") — keeps the map open. */
   onOpen: (path: string) => void
+  /** Leave the map and open a note in the editor ("Open ↗"). */
+  onOpenInEditor: (path: string) => void
   onClose: () => void
   reloadKey?: number
   /** Global status controls (theme, telemetry) rendered in the toolbar, so they
@@ -104,10 +108,14 @@ export function GraphView({
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
   const [dragged, setDragged] = useState<Map<string, Point>>(new Map())
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const svgRef = useRef<SVGSVGElement>(null)
   const gesture = useRef<Gesture | null>(null)
   const movedRef = useRef(false)
+  // Manual double-click detection (more reliable than onDoubleClick alongside
+  // pointer-capture dragging): same node clicked twice within the threshold.
+  const lastClick = useRef<{ id: string; t: number }>({ id: '', t: 0 })
 
   useEffect(() => {
     let alive = true
@@ -137,6 +145,7 @@ export function GraphView({
     setView({ x: 0, y: 0, k: 1 })
     setHiddenNodes(new Set())
     setDragged(new Map())
+    setSelectedId(null)
   }, [focusPath, global, depth])
 
   // A new layout invalidates hand-placed positions.
@@ -262,8 +271,26 @@ export function GraphView({
   }
   const onPointerUp = (): void => {
     const g = gesture.current
-    if (g?.kind === 'node' && !movedRef.current && g.node.path) onOpen(g.node.path)
     gesture.current = null
+    // A plain click on the background deselects.
+    if (g?.kind === 'pan' && !movedRef.current) {
+      setSelectedId(null)
+      return
+    }
+    if (g?.kind !== 'node' || movedRef.current) return
+    // A plain click selects (fills the inspector, view unchanged); a second click
+    // on the same node within the threshold refocuses the map on it. Navigation
+    // is the secondary gesture — never a single click.
+    const now = performance.now()
+    const isDouble = lastClick.current.id === g.node.id && now - lastClick.current.t < 350
+    if (isDouble && g.node.path) {
+      onOpen(g.node.path)
+      setSelectedId(null)
+      lastClick.current = { id: '', t: 0 }
+    } else {
+      setSelectedId(g.node.id)
+      lastClick.current = { id: g.node.id, t: now }
+    }
   }
 
   const toggle = (set: Set<string>, key: string): Set<string> => {
@@ -285,6 +312,11 @@ export function GraphView({
   const clusterCount = byFolder
     ? folderColors.size
     : new Set([...(colorMode === 'meaning' ? meaningCluster : comm).values()]).size
+
+  // The selected node's details (its edges in the current slice) for the inspector.
+  const selectedNode = selectedId ? (data?.nodes.find((n) => n.id === selectedId) ?? null) : null
+  const selOut = selectedNode && data ? data.edges.filter((e) => e.source === selectedNode.id) : []
+  const selIn = selectedNode && data ? data.edges.filter((e) => e.target === selectedNode.id) : []
 
   return (
     <div className="graph-view">
@@ -322,7 +354,7 @@ export function GraphView({
                 const p = posOf(node.id)
                 if (!p) return null
                 const r = radius(node.id)
-                const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}`
+                const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}${node.id === selectedId ? ' is-selected' : ''}`
                 const fill = nodeFill(node)
                 return (
                   <g
@@ -427,34 +459,98 @@ export function GraphView({
       </div>
 
       <aside className="graph-inspector">
-        <div className="graph-insp-title">⊹ {global ? 'Whole vault' : focusName}</div>
-        <div className="graph-insp-stat">
-          {nodeCount} {nodeCount === 1 ? 'note' : 'notes'} · {edgeCount}{' '}
-          {edgeCount === 1 ? 'link' : 'links'}
-          {clusterCount > 1 ? ` · ${clusterCount} clusters` : ''}
-        </div>
-        {legend.length > 1 && (
-          <div className="graph-insp-section">
-            <div className="graph-insp-label">
-              {byFolder ? 'Folders' : 'Link types'} — click to show / hide
+        {selectedNode ? (
+          <>
+            <div className="graph-insp-title">
+              {selectedNode.ghost ? '◌ ' : '● '}
+              {selectedNode.label}
             </div>
-            <div className="graph-legend">
-              {legend.map(([key, c]) => (
-                <button
-                  key={key}
-                  className={`graph-legend-item${hidden.has(key) ? ' is-off' : ''}`}
-                  onClick={() => setHidden((s) => toggle(s, key))}
-                >
-                  <span className="graph-legend-dot" style={{ background: c }} />
-                  {byFolder ? key : relLabel(key)}
-                </button>
-              ))}
+            <div className="graph-insp-stat">
+              {selectedNode.ghost
+                ? 'Referenced, not yet created'
+                : `${selOut.length} out · ${selIn.length} in`}
             </div>
-          </div>
+            <div className="graph-insp-actions">
+              {selectedNode.path && (
+                <>
+                  <button
+                    className="graph-ctl"
+                    title="Recenter the map on this note"
+                    onClick={() => {
+                      onOpen(selectedNode.path!)
+                      setSelectedId(null)
+                    }}
+                  >
+                    Focus here
+                  </button>
+                  <button
+                    className="graph-ctl"
+                    title="Open this note in the editor"
+                    onClick={() => onOpenInEditor(selectedNode.path!)}
+                  >
+                    Open ↗
+                  </button>
+                </>
+              )}
+              <button className="graph-ctl" onClick={() => setSelectedId(null)}>
+                Deselect
+              </button>
+            </div>
+            {selOut.length > 0 && (
+              <div className="graph-insp-section">
+                <div className="graph-insp-label">Links out</div>
+                {selOut.map((e, i) => (
+                  <div key={`o${i}`} className="graph-insp-edge">
+                    <span className="graph-insp-rel">{relLabel(e.relation)}</span>
+                    {e.target}
+                  </div>
+                ))}
+              </div>
+            )}
+            {selIn.length > 0 && (
+              <div className="graph-insp-section">
+                <div className="graph-insp-label">Links in</div>
+                {selIn.map((e, i) => (
+                  <div key={`i${i}`} className="graph-insp-edge">
+                    <span className="graph-insp-rel">{relLabel(e.relation)}</span>
+                    {e.source}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="graph-insp-title">⊹ {global ? 'Whole vault' : focusName}</div>
+            <div className="graph-insp-stat">
+              {nodeCount} {nodeCount === 1 ? 'note' : 'notes'} · {edgeCount}{' '}
+              {edgeCount === 1 ? 'link' : 'links'}
+              {clusterCount > 1 ? ` · ${clusterCount} clusters` : ''}
+            </div>
+            {legend.length > 1 && (
+              <div className="graph-insp-section">
+                <div className="graph-insp-label">
+                  {byFolder ? 'Folders' : 'Link types'} — click to show / hide
+                </div>
+                <div className="graph-legend">
+                  {legend.map(([key, c]) => (
+                    <button
+                      key={key}
+                      className={`graph-legend-item${hidden.has(key) ? ' is-off' : ''}`}
+                      onClick={() => setHidden((s) => toggle(s, key))}
+                    >
+                      <span className="graph-legend-dot" style={{ background: c }} />
+                      {byFolder ? key : relLabel(key)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="graph-insp-hint">
+              Click a note to inspect · double-click to focus · right-click to hide.
+            </p>
+          </>
         )}
-        <p className="graph-insp-hint">
-          Drag a note to arrange · click to open · right-click to hide.
-        </p>
       </aside>
     </div>
   )

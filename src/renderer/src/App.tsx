@@ -631,6 +631,13 @@ export default function App() {
             vaultRoot={vault}
             talkReady={talk.ready}
             onOpen={openPathInGraph}
+            onOpenInEditor={(path) => {
+              const f = files.find((x) => x.path === path)
+              if (f) {
+                setGraphOpen(false)
+                void openFile(f)
+              }
+            }}
             onClose={() => setGraphOpen(false)}
             reloadKey={graphEpoch}
             statusSlot={

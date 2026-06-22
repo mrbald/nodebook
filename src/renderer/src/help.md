@@ -66,9 +66,13 @@ the notes it links to. The map is drawn for you from your links — you never ar
 it by hand, and nothing here changes your notes.
 
 - **Getting around** — **drag a note to arrange it**, drag the empty space to move
-  the whole map, scroll to zoom, **click a note to open it**. **−/+** show fewer or
-  more steps out from the note; **Global** shows the whole vault instead of just this
-  note's neighbourhood; **⟲ reset view** undoes your zoom, pan, and any drags.
+  the whole map, scroll to zoom. **Click a note** to see its details in the panel on
+  the right; **double-click** to recentre the map on it, or use **Open ↗** in the
+  panel to open it in the editor. **−/+** show fewer or more steps out from the note;
+  **Global** shows the whole vault instead of just this note's neighbourhood;
+  **⟲ reset view** undoes your zoom, pan, and any drags.
+- **The panel on the right** — with nothing selected it shows the map's totals and the
+  colour legend. **Click a note** and it shows that note's links — out and in.
 - **Layout** — switch between an **organic web** (force) and a tidy **hierarchical
   tree** that reads like a mind map.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);

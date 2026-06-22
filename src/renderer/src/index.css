@@ -674,6 +674,29 @@ body {
   font-size: 11px;
   line-height: 1.5;
 }
+.graph-insp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+.graph-insp-edge {
+  padding: 2px 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.graph-insp-rel {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 6px;
+}
+/* The clicked node gets a ring — distinct from the focus node's fill emphasis. */
+.graph-node.is-selected circle {
+  stroke: var(--accent);
+  stroke-width: 2.5px;
+}
 .graph-inspector .graph-legend {
   display: flex;
   flex-direction: column;

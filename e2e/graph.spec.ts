@@ -75,10 +75,16 @@ test('Global toggle and depth control change the slice (then restore)', async ()
   await expect(page.locator('.graph-depth')).toContainText('depth 1')
 })
 
-test('clicking a neighbour node recenters the map on it', async () => {
+test('clicking a node selects it (inspector shows details); double-click refocuses', async () => {
+  // Single click = select: the inspector shows the node; the view is unchanged.
   await page.locator('.graph-node', { hasText: 'Graph Model' }).click()
   await expect(page.locator('.graph-insp-title')).toContainText('Graph Model')
-  // Graph Model is linked from welcome and projects/Roadmap → at least those appear.
+  await expect(page.locator('.graph-node.is-selected')).toHaveText(/Graph Model/)
+  await expect(page.locator('.graph-insp-section', { hasText: 'Links' })).toBeVisible()
+  await expect(page.locator('.graph-node.is-focus')).toHaveText(/welcome/) // still welcome
+
+  // Double click = refocus the map on it.
+  await page.locator('.graph-node', { hasText: 'Graph Model' }).dblclick()
   await expect(page.locator('.graph-node.is-focus')).toHaveText(/Graph Model/)
 })
 
@@ -135,4 +141,11 @@ test('layout switches to a hierarchical tree (dagre); reset view re-fits', async
   await expect(page.locator('.graph-node').first()).toBeVisible()
   await page.locator('.graph-ctl', { hasText: 'reset view' }).click()
   await expect(page.locator('.graph-node').first()).toBeVisible()
+})
+
+test('the inspector "Open ↗" leaves the map and opens the note in the editor', async () => {
+  await page.locator('.graph-node.is-focus').click() // the focus node is always a real note
+  await page.locator('.graph-ctl', { hasText: 'Open ↗' }).click()
+  await expect(page.locator('.graph-view')).toHaveCount(0) // map closed
+  await expect(page.locator('.cm-content')).toBeVisible()
 })
