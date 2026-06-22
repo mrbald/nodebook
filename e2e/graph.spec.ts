@@ -42,7 +42,7 @@ test.afterAll(async () => {
 test('the ⊹ Map button opens a force-directed graph with nodes and edges', async () => {
   await page.locator('.graph-open-btn', { hasText: 'Map' }).click()
   await expect(page.locator('.graph-view')).toBeVisible()
-  await expect(page.locator('.graph-title')).toContainText('welcome')
+  await expect(page.locator('.graph-insp-title')).toContainText('welcome')
 
   // Focus (welcome) + its two neighbours; the neighbours are themselves linked
   // (Roadmap → Graph Model), so the local slice shows all three edges.
@@ -62,11 +62,11 @@ test('chrome is consistent: controls sit at the bottom, no blank right column', 
 
 test('Global toggle and depth control change the slice (then restore)', async () => {
   await page.locator('.graph-ctl', { hasText: 'Global' }).click()
-  await expect(page.locator('.graph-title')).toContainText('whole vault')
+  await expect(page.locator('.graph-insp-title')).toContainText(/whole vault/i)
   await expect(page.locator('.graph-node').first()).toBeVisible()
 
   await page.locator('.graph-ctl', { hasText: 'Local' }).click()
-  await expect(page.locator('.graph-title')).toContainText('welcome')
+  await expect(page.locator('.graph-insp-title')).toContainText('welcome')
 
   await expect(page.locator('.graph-depth')).toContainText('depth 1')
   await page.locator('.graph-depth .graph-ctl').last().click() // +
@@ -77,7 +77,7 @@ test('Global toggle and depth control change the slice (then restore)', async ()
 
 test('clicking a neighbour node recenters the map on it', async () => {
   await page.locator('.graph-node', { hasText: 'Graph Model' }).click()
-  await expect(page.locator('.graph-title')).toContainText('Graph Model')
+  await expect(page.locator('.graph-insp-title')).toContainText('Graph Model')
   // Graph Model is linked from welcome and projects/Roadmap → at least those appear.
   await expect(page.locator('.graph-node.is-focus')).toHaveText(/Graph Model/)
 })

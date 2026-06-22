@@ -596,25 +596,75 @@ body {
 }
 
 /* Knowledge map (GraphView). */
+/* Map pane = a canvas column (with bottom toolbar) + a right inspector, so the
+   chrome matches the editor: a bottom status bar and a right-hand panel. */
 .graph-view {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   min-height: 0;
 }
-/* The map's controls live at the *bottom* (order: 1, after the canvas) to match
-   the editor's bottom status bar — consistent chrome placement across views. */
+.graph-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.graph-inspector {
+  flex: none;
+  width: 260px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-elev);
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 12px;
+}
+.graph-insp-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.graph-insp-stat {
+  color: var(--muted);
+  margin: 4px 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+.graph-insp-label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.graph-insp-hint {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.graph-inspector .graph-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* The map's controls sit at the bottom of the canvas column to match the
+   editor's bottom status bar — consistent chrome placement across views. */
 .graph-toolbar {
-  order: 1;
   flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 6px 12px;
   border-top: 1px solid var(--border);
   background: var(--bg-elev);
   font-size: 13px;
+}
+.graph-toolbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.graph-toolbar-right .telemetry {
+  margin-right: 0; /* override the editor-status-bar left-float in this context */
 }
 .graph-title {
   font-weight: 600;

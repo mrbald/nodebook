@@ -608,6 +608,18 @@ export default function App() {
             onOpen={openPathInGraph}
             onClose={() => setGraphOpen(false)}
             reloadKey={graphEpoch}
+            statusSlot={
+              <>
+                <StatusSelect
+                  kind="theme"
+                  title="App theme"
+                  value={themeMode}
+                  options={THEME_OPTIONS}
+                  onChange={pickThemeMode}
+                />
+                <TelemetryWidget enabled={telemetryOn} />
+              </>
+            }
           />
         ) : active && doc !== null ? (
           active.rel.endsWith('.map.md') ? (

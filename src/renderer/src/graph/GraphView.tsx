@@ -78,7 +78,8 @@ export function GraphView({
   talkReady,
   onOpen,
   onClose,
-  reloadKey
+  reloadKey,
+  statusSlot
 }: {
   focusPath: string | null
   focusName: string
@@ -87,6 +88,9 @@ export function GraphView({
   onOpen: (path: string) => void
   onClose: () => void
   reloadKey?: number
+  /** Global status controls (theme, telemetry) rendered in the toolbar, so they
+   *  persist across the editor and the map. */
+  statusSlot?: React.ReactNode
 }): React.JSX.Element {
   const [base, setBase] = useState<GraphData | null>(null)
   const [related, setRelated] = useState<TalkNeighbor[]>([])
@@ -275,156 +279,183 @@ export function GraphView({
   const hidden = byFolder ? hiddenFolders : hiddenRels
   const setHidden = byFolder ? setHiddenFolders : setHiddenRels
 
+  // Inspector stats.
+  const nodeCount = visible?.nodes.length ?? 0
+  const edgeCount = visible?.edges.length ?? 0
+  const clusterCount = byFolder
+    ? folderColors.size
+    : new Set([...(colorMode === 'meaning' ? meaningCluster : comm).values()]).size
+
   return (
     <div className="graph-view">
-      <div className="graph-toolbar">
-        <span className="graph-title">⊹ Map — {global ? 'whole vault' : focusName}</span>
-        <div className="graph-controls">
-          <button className="graph-ctl" onClick={() => setGlobal((g) => !g)}>
-            {global ? 'Local' : 'Global'}
-          </button>
-          {!global && (
-            <span className="graph-depth">
-              <button
-                className="graph-ctl"
-                disabled={depth <= 1}
-                onClick={() => setDepth((d) => Math.max(1, d - 1))}
-              >
-                −
-              </button>
-              depth {depth}
-              <button
-                className="graph-ctl"
-                disabled={depth >= 3}
-                onClick={() => setDepth((d) => Math.min(3, d + 1))}
-              >
-                +
-              </button>
-            </span>
-          )}
-          <button className="graph-ctl" title="Colour the dots by…" onClick={cycleColor}>
-            colour: {colorMode}
-          </button>
-          <button
-            className="graph-ctl"
-            title="Layout: organic web, or hierarchical tree (dagre)"
-            onClick={() => setLayoutMode((m) => (m === 'force' ? 'tree' : 'force'))}
+      <div className="graph-main">
+        {visible && layout && visible.nodes.length > 0 ? (
+          <svg
+            ref={svgRef}
+            className="graph-canvas"
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="xMidYMid meet"
+            onWheel={onWheel}
+            onPointerDown={onBgPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerLeave={onPointerUp}
           >
-            layout: {layoutMode}
-          </button>
-          {talkReady && !global && (
-            <button
-              className={`graph-ctl${showRelated ? ' is-on' : ''}`}
-              title="Show semantically-related (but unlinked) notes"
-              onClick={() => setShowRelated((s) => !s)}
-            >
-              ✨ Related
+            <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
+              {visible.edges.map((e, i) => {
+                const a = posOf(e.source)
+                const b = posOf(e.target)
+                if (!a || !b) return null
+                return (
+                  <line
+                    key={i}
+                    className={`graph-edge${e.relation === RELATED ? ' graph-edge-related' : ''}`}
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke={colors.get(e.relation) ?? 'var(--muted)'}
+                  />
+                )
+              })}
+              {visible.nodes.map((node) => {
+                const p = posOf(node.id)
+                if (!p) return null
+                const r = radius(node.id)
+                const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}`
+                const fill = nodeFill(node)
+                return (
+                  <g
+                    key={node.id}
+                    className={cls}
+                    transform={`translate(${p.x},${p.y})`}
+                    onPointerDown={(ev) => onNodePointerDown(ev, node)}
+                    onContextMenu={(ev) => {
+                      ev.preventDefault()
+                      if (!node.focus) setHiddenNodes((s) => new Set(s).add(node.id))
+                    }}
+                  >
+                    <circle r={r} style={fill ? { fill } : undefined} />
+                    <text y={r + 13}>{node.label}</text>
+                  </g>
+                )
+              })}
+            </g>
+          </svg>
+        ) : (
+          <div className="graph-empty">
+            {data
+              ? 'Nothing to show — clear the filters, or add a [[link]] to this note.'
+              : 'Loading…'}
+          </div>
+        )}
+
+        <div className="graph-toolbar">
+          <div className="graph-controls">
+            <button className="graph-ctl" onClick={() => setGlobal((g) => !g)}>
+              {global ? 'Local' : 'Global'}
             </button>
-          )}
-          {filtered > 0 && (
+            {!global && (
+              <span className="graph-depth">
+                <button
+                  className="graph-ctl"
+                  disabled={depth <= 1}
+                  onClick={() => setDepth((d) => Math.max(1, d - 1))}
+                >
+                  −
+                </button>
+                depth {depth}
+                <button
+                  className="graph-ctl"
+                  disabled={depth >= 3}
+                  onClick={() => setDepth((d) => Math.min(3, d + 1))}
+                >
+                  +
+                </button>
+              </span>
+            )}
+            <button className="graph-ctl" title="Colour the dots by…" onClick={cycleColor}>
+              colour: {colorMode}
+            </button>
             <button
               className="graph-ctl"
-              title="Show everything again"
+              title="Layout: organic web, or hierarchical tree (dagre)"
+              onClick={() => setLayoutMode((m) => (m === 'force' ? 'tree' : 'force'))}
+            >
+              layout: {layoutMode}
+            </button>
+            {talkReady && !global && (
+              <button
+                className={`graph-ctl${showRelated ? ' is-on' : ''}`}
+                title="Show semantically-related (but unlinked) notes"
+                onClick={() => setShowRelated((s) => !s)}
+              >
+                ✨ Related
+              </button>
+            )}
+            {filtered > 0 && (
+              <button
+                className="graph-ctl"
+                title="Show everything again"
+                onClick={() => {
+                  setHiddenRels(new Set())
+                  setHiddenNodes(new Set())
+                  setHiddenFolders(new Set())
+                }}
+              >
+                show all ({filtered})
+              </button>
+            )}
+            <button
+              className="graph-ctl"
+              title="Reset the view — zoom, pan, and any nodes you've dragged"
               onClick={() => {
-                setHiddenRels(new Set())
-                setHiddenNodes(new Set())
-                setHiddenFolders(new Set())
+                setView({ x: 0, y: 0, k: 1 })
+                setDragged(new Map())
               }}
             >
-              show all ({filtered})
+              ⟲ reset view
             </button>
-          )}
-          <button
-            className="graph-ctl"
-            title="Reset the view — zoom, pan, and any nodes you've dragged"
-            onClick={() => {
-              setView({ x: 0, y: 0, k: 1 })
-              setDragged(new Map())
-            }}
-          >
-            ⟲ reset view
-          </button>
-        </div>
-        {legend.length > 1 && (
-          <span
-            className="graph-legend"
-            title={byFolder ? 'Click a folder to show/hide it' : 'Click a link type to show/hide it'}
-          >
-            {legend.map(([key, c]) => (
-              <button
-                key={key}
-                className={`graph-legend-item${hidden.has(key) ? ' is-off' : ''}`}
-                onClick={() => setHidden((s) => toggle(s, key))}
-              >
-                <span className="graph-legend-dot" style={{ background: c }} />
-                {byFolder ? key : relLabel(key)}
-              </button>
-            ))}
+          </div>
+          <span className="graph-toolbar-right">
+            {statusSlot}
+            <button className="graph-close" onClick={onClose}>
+              ✕ Close
+            </button>
           </span>
-        )}
-        <button className="graph-close" onClick={onClose}>
-          ✕ Close
-        </button>
+        </div>
       </div>
 
-      {visible && layout && visible.nodes.length > 0 ? (
-        <svg
-          ref={svgRef}
-          className="graph-canvas"
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="xMidYMid meet"
-          onWheel={onWheel}
-          onPointerDown={onBgPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
-        >
-          <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
-            {visible.edges.map((e, i) => {
-              const a = posOf(e.source)
-              const b = posOf(e.target)
-              if (!a || !b) return null
-              return (
-                <line
-                  key={i}
-                  className={`graph-edge${e.relation === RELATED ? ' graph-edge-related' : ''}`}
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  stroke={colors.get(e.relation) ?? 'var(--muted)'}
-                />
-              )
-            })}
-            {visible.nodes.map((node) => {
-              const p = posOf(node.id)
-              if (!p) return null
-              const r = radius(node.id)
-              const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}`
-              const fill = nodeFill(node)
-              return (
-                <g
-                  key={node.id}
-                  className={cls}
-                  transform={`translate(${p.x},${p.y})`}
-                  onPointerDown={(ev) => onNodePointerDown(ev, node)}
-                  onContextMenu={(ev) => {
-                    ev.preventDefault()
-                    if (!node.focus) setHiddenNodes((s) => new Set(s).add(node.id))
-                  }}
-                >
-                  <circle r={r} style={fill ? { fill } : undefined} />
-                  <text y={r + 13}>{node.label}</text>
-                </g>
-              )
-            })}
-          </g>
-        </svg>
-      ) : (
-        <div className="graph-empty">
-          {data ? 'Nothing to show — clear the filters, or add a [[link]] to this note.' : 'Loading…'}
+      <aside className="graph-inspector">
+        <div className="graph-insp-title">⊹ {global ? 'Whole vault' : focusName}</div>
+        <div className="graph-insp-stat">
+          {nodeCount} {nodeCount === 1 ? 'note' : 'notes'} · {edgeCount}{' '}
+          {edgeCount === 1 ? 'link' : 'links'}
+          {clusterCount > 1 ? ` · ${clusterCount} clusters` : ''}
         </div>
-      )}
+        {legend.length > 1 && (
+          <div className="graph-insp-section">
+            <div className="graph-insp-label">
+              {byFolder ? 'Folders' : 'Link types'} — click to show / hide
+            </div>
+            <div className="graph-legend">
+              {legend.map(([key, c]) => (
+                <button
+                  key={key}
+                  className={`graph-legend-item${hidden.has(key) ? ' is-off' : ''}`}
+                  onClick={() => setHidden((s) => toggle(s, key))}
+                >
+                  <span className="graph-legend-dot" style={{ background: c }} />
+                  {byFolder ? key : relLabel(key)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <p className="graph-insp-hint">
+          Drag a note to arrange · click to open · right-click to hide.
+        </p>
+      </aside>
     </div>
   )
 }
