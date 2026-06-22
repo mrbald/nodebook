@@ -68,4 +68,32 @@ describe('buildGraph', () => {
     expect(g.nodes).toHaveLength(1)
     expect(g.edges).toHaveLength(0)
   })
+
+  it('drops self-loops (a note that references itself)', () => {
+    const g = buildGraph(files, [{ subject: 'A', relation: 'links_to', object: 'A' }], null)
+    expect(g.edges).toHaveLength(0)
+    // `[[sub/C]]` from C resolves to C itself → also a self-loop, dropped.
+    const g2 = buildGraph(files, [{ subject: 'C', relation: 'links_to', object: 'sub/C' }], null)
+    expect(g2.edges).toHaveLength(0)
+  })
+
+  it('a typed relation supersedes the bare links_to for the same pair', () => {
+    // A both `[[B]]`s in prose and declares `cites:: [[B]]` → one typed edge, no dup.
+    const g = buildGraph(files, [
+      { subject: 'A', relation: 'links_to', object: 'B' },
+      { subject: 'A', relation: 'cites', object: 'B' }
+    ])
+    expect(g.edges).toEqual([{ source: 'A', target: 'B', relation: 'cites' }])
+  })
+
+  it('keeps links_to to a *different* target than the typed one', () => {
+    const g = buildGraph(files, [
+      { subject: 'A', relation: 'links_to', object: 'B' },
+      { subject: 'A', relation: 'cites', object: 'C' }
+    ])
+    expect(g.edges.map((e) => `${e.source}-${e.relation}->${e.target}`).sort()).toEqual([
+      'A-cites->C',
+      'A-links_to->B'
+    ])
+  })
 })

@@ -24,6 +24,8 @@ export function BacklinksPanel({ active, files, onOpen }: Props) {
       const seen = new Set<string>()
       const merged: Backlink[] = []
       for (const item of [...byName, ...byRel]) {
+        // Drop self-references — a note linking to itself is noise, not navigation.
+        if (item.source_file === active.path) continue
         const key = item.source_file + '|' + item.relation
         if (!seen.has(key)) {
           seen.add(key)
@@ -31,7 +33,8 @@ export function BacklinksPanel({ active, files, onOpen }: Props) {
         }
       }
       setBacklinks(merged)
-      setOutbound(out)
+      // …and a self-link in the body (`[[Self]]`) or a self-targeting field.
+      setOutbound(out.filter((o) => o.object !== active.name && o.object !== relNoExt))
     })
 
     return () => {
