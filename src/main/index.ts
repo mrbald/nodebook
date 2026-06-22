@@ -390,6 +390,29 @@ function registerIpc(): void {
     }
   })
 
+  // Relation-typing bridge: name an untyped link by appending a `key:: value`
+  // field to the *source note* (the source of truth), then re-index. Editing the
+  // map edits the notes — never a separate map file.
+  ipcMain.handle(
+    'index:typeRelation',
+    async (_e, sourcePath: string, relation: string, target: string) => {
+      if (!isAccessibleFile(sourcePath)) throw new Error('Access denied: path outside the vault')
+      const rel = relation.trim()
+      if (!/^[A-Za-z][\w -]*$/.test(rel)) throw new Error('Invalid relation name')
+      const current = readFileSync(sourcePath, 'utf8')
+      const sep = current.length === 0 || current.endsWith('\n') ? '' : '\n'
+      const content = `${current}${sep}${rel}:: [[${target}]]\n`
+      atomicWrite(sourcePath, content)
+      if (index && withinVault(sourcePath)) {
+        const { mtimeMs } = await fs.stat(sourcePath)
+        index.indexFile(sourcePath, content, Math.floor(mtimeMs))
+        notifyTalkDirty()
+        notifyIndexChanged()
+      }
+      return true
+    }
+  )
+
   // Synchronous save used on window close (beforeunload can't await async IPC).
   ipcMain.on('file:save-now', (e, path: string, content: string) => {
     try {

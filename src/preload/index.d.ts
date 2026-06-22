@@ -28,6 +28,7 @@ export interface NodebookApi {
   search: (query: string) => Promise<SearchHit[]>
   noteNames: () => Promise<string[]>
   graph: (focusPath: string | null, opts?: { depth?: number; cap?: number }) => Promise<GraphData>
+  typeRelation: (sourcePath: string, relation: string, target: string) => Promise<boolean>
   talkStatus: () => Promise<TalkStatus>
   talkEnable: (dims: number) => Promise<TalkStatus>
   talkDisable: () => Promise<TalkStatus>

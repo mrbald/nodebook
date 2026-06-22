@@ -73,6 +73,10 @@ it by hand, and nothing here changes your notes.
   **⟲ reset view** undoes your zoom, pan, and any drags.
 - **The panel on the right** — with nothing selected it shows the map's totals and the
   colour legend. **Click a note** and it shows that note's links — out and in.
+- **Naming a link** — for a plain `[[link]]`, the **+ name** button in the panel lets
+  you label the relationship (say `cites` or `author`). It's written straight back into
+  the note as a `key:: value` field, so the map and your notes never disagree — and the
+  link is redrawn in its new colour.
 - **Layout** — switch between an **organic web** (force) and a tidy **hierarchical
   tree** that reads like a mind map.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);

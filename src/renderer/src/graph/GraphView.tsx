@@ -109,6 +109,9 @@ export function GraphView({
   const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
   const [dragged, setDragged] = useState<Map<string, Point>>(new Map())
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Relation-typing: which outbound target is being named, and the typed-in name.
+  const [typingTarget, setTypingTarget] = useState<string | null>(null)
+  const [relInput, setRelInput] = useState('')
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
   const svgRef = useRef<SVGSVGElement>(null)
   const gesture = useRef<Gesture | null>(null)
@@ -150,6 +153,12 @@ export function GraphView({
 
   // A new layout invalidates hand-placed positions.
   useEffect(() => setDragged(new Map()), [layoutMode])
+
+  // Selecting a different node closes any open relation-typing input.
+  useEffect(() => {
+    setTypingTarget(null)
+    setRelInput('')
+  }, [selectedId])
 
   const data = useMemo(
     () => (base ? mergeRelated(base, related, focusName) : null),
@@ -317,6 +326,22 @@ export function GraphView({
   const selectedNode = selectedId ? (data?.nodes.find((n) => n.id === selectedId) ?? null) : null
   const selOut = selectedNode && data ? data.edges.filter((e) => e.source === selectedNode.id) : []
   const selIn = selectedNode && data ? data.edges.filter((e) => e.target === selectedNode.id) : []
+
+  // Relation-typing: existing relation names for autocomplete; a valid field key.
+  const knownRelations = useMemo(
+    () => [
+      ...new Set((data?.edges ?? []).map((e) => e.relation).filter((r) => r !== 'links_to' && r !== RELATED))
+    ],
+    [data]
+  )
+  const validRel = (r: string): boolean => /^[A-Za-z][\w -]*$/.test(r.trim())
+  const submitRelation = (target: string): void => {
+    const rel = relInput.trim()
+    if (!validRel(rel) || !selectedNode?.path) return
+    void window.nodebook.typeRelation(selectedNode.path, rel, target).catch(() => {})
+    setTypingTarget(null)
+    setRelInput('')
+  }
 
   return (
     <div className="graph-view">
@@ -499,12 +524,62 @@ export function GraphView({
             {selOut.length > 0 && (
               <div className="graph-insp-section">
                 <div className="graph-insp-label">Links out</div>
-                {selOut.map((e, i) => (
-                  <div key={`o${i}`} className="graph-insp-edge">
-                    <span className="graph-insp-rel">{relLabel(e.relation)}</span>
-                    {e.target}
-                  </div>
-                ))}
+                {selOut.map((e, i) => {
+                  const typeable = e.relation === 'links_to' && !!selectedNode.path
+                  return (
+                    <div key={`o${i}`} className="graph-insp-edge">
+                      <span className="graph-insp-rel">{relLabel(e.relation)}</span>
+                      <span className="graph-insp-target">{e.target}</span>
+                      {typeable && typingTarget !== e.target && (
+                        <button
+                          className="graph-insp-name"
+                          title="Name this link — writes a key:: value to the note"
+                          onClick={() => {
+                            setTypingTarget(e.target)
+                            setRelInput('')
+                          }}
+                        >
+                          + name
+                        </button>
+                      )}
+                      {typeable && typingTarget === e.target && (
+                        <form
+                          className="graph-insp-nameform"
+                          onSubmit={(ev) => {
+                            ev.preventDefault()
+                            submitRelation(e.target)
+                          }}
+                        >
+                          <input
+                            list="graph-relations"
+                            className="graph-insp-input"
+                            autoFocus
+                            placeholder="relation…"
+                            value={relInput}
+                            onChange={(ev) => setRelInput(ev.target.value)}
+                            onKeyDown={(ev) => {
+                              if (ev.key === 'Escape') setTypingTarget(null)
+                            }}
+                          />
+                          <button
+                            type="submit"
+                            className="graph-insp-name"
+                            disabled={!validRel(relInput)}
+                          >
+                            ✓
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )
+                })}
+                {knownRelations.length > 0 && (
+                  <datalist id="graph-relations">
+                    {knownRelations.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
+                )}
               </div>
             )}
             {selIn.length > 0 && (

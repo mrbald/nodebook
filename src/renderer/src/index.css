@@ -681,16 +681,55 @@ body {
   margin: 4px 0 12px;
 }
 .graph-insp-edge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 2px 0;
   line-height: 1.4;
+}
+.graph-insp-target {
+  flex: 1;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 .graph-insp-rel {
+  flex: none;
   color: var(--muted);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-right: 6px;
+}
+.graph-insp-name {
+  flex: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.graph-insp-name:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.graph-insp-name:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.graph-insp-nameform {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.graph-insp-input {
+  width: 92px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 1px 5px;
 }
 /* The clicked node gets a ring — distinct from the focus node's fill emphasis. */
 .graph-node.is-selected circle {

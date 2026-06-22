@@ -38,6 +38,9 @@ const api = {
   noteNames: (): Promise<string[]> => ipcRenderer.invoke('index:noteNames'),
   graph: (focusPath: string | null, opts?: { depth?: number; cap?: number }): Promise<GraphData> =>
     ipcRenderer.invoke('index:graph', focusPath, opts),
+  // Name an untyped link: append `relation:: [[target]]` to the source note + re-index.
+  typeRelation: (sourcePath: string, relation: string, target: string): Promise<boolean> =>
+    ipcRenderer.invoke('index:typeRelation', sourcePath, relation, target),
   // Talk to docs (semantic search). The embedder lives in the renderer (WASM);
   // main owns the vector store + retrieval.
   talkStatus: (): Promise<TalkStatus> => ipcRenderer.invoke('talk:status'),
