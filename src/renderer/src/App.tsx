@@ -598,7 +598,7 @@ export default function App() {
               <span className="settings-title">Settings</span>
               <div className="settings-actions">
                 <button
-                  className="settings-reset"
+                  className="settings-reveal"
                   onClick={revealDefaults}
                   title="Show every option with its default value, read-only, for reference"
                 >

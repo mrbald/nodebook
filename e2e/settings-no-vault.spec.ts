@@ -35,16 +35,17 @@ test('Settings open with no vault opened', async () => {
 test('Reveal defaults shows a read-only reference; Hide closes it', async () => {
   // Settings is open from the previous test.
   await expect(page.locator('.settings-defaults')).toHaveCount(0)
-  await page.locator('.settings-reset', { hasText: 'Reveal defaults' }).click()
+  await page.locator('.settings-reveal').click()
 
   const ref = page.locator('.settings-defaults')
   await expect(ref).toBeVisible()
+  await expect(page.locator('.settings-reveal')).toHaveText('Hide defaults')
   await expect(ref.locator('.settings-defaults-label')).toContainText('read-only')
   // The defaults TOML header (top of the doc, reliably in the CM viewport).
   await expect(ref.locator('.cm-content')).toContainText('every option with its default')
   // The reference is read-only, never editable.
   await expect(ref.locator('.cm-content')).toHaveAttribute('contenteditable', 'false')
 
-  await page.locator('.settings-reset', { hasText: 'Hide defaults' }).click()
+  await page.locator('.settings-reveal').click() // now "Hide defaults"
   await expect(page.locator('.settings-defaults')).toHaveCount(0)
 })

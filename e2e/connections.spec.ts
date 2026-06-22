@@ -14,6 +14,10 @@ let app: ElectronApplication
 let page: Page
 
 test.beforeAll(async () => {
+  // This spec sorts first, so its beforeAll pays the cold electron-launch +
+  // index-build cost; give the *setup* hook headroom (the test itself still
+  // runs under the 10s ceiling).
+  test.setTimeout(45_000)
   const vaultDir = mkdtempSync(join(tmpdir(), 'nodebook-conn-'))
   cpSync(fixtureVault, vaultDir, {
     recursive: true,

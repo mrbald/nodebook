@@ -261,7 +261,8 @@ body {
   font-size: 12px;
   color: var(--muted);
 }
-.settings-reset {
+.settings-reset,
+.settings-reveal {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -270,7 +271,8 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
-.settings-reset:hover {
+.settings-reset:hover,
+.settings-reveal:hover {
   color: var(--text);
   background: rgba(127, 127, 127, 0.12);
 }
