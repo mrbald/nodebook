@@ -23,7 +23,8 @@ const MODES = ['code', 'live', 'reading'] as const
 const RUNTIMES = ['wasm', 'native'] as const
 
 export const DEFAULT_TOML = `# Nodebook settings — every option with its default. Edit and save; changes
-# apply live (⌘S to save now). "Reset to defaults" restores this file verbatim.
+# apply live (⌘S to save now). "Reveal defaults" shows this reference next to
+# your settings; "Reset to defaults" overwrites your file with it.
 
 [editor]
 # Editor font size, in pixels.

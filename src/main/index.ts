@@ -492,6 +492,8 @@ function registerIpc(): void {
     atomicWrite(settingsFilePath(), DEFAULT_TOML)
     return DEFAULT_TOML
   })
+  // Read-only: the documented defaults for "Reveal defaults" (no file write).
+  ipcMain.handle('settings:defaults', () => DEFAULT_TOML)
 
   // Open external links in the system browser. Restricted to http(s) so a
   // crafted note can't launch file:// or other schemes.

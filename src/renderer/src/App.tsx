@@ -66,6 +66,8 @@ export default function App() {
   // Bumped on "reset to defaults" to force the settings editor to remount with
   // the restored text (and reset its dirty baseline).
   const [settingsEpoch, setSettingsEpoch] = useState(0)
+  // Non-null while "Reveal defaults" is showing the read-only defaults reference.
+  const [defaultsDoc, setDefaultsDoc] = useState<string | null>(null)
   const [editorTheme, setEditorTheme] = useState('dark')
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [autosave, setAutosave] = useState({ delayMs: 0, onSwitch: true })
@@ -319,6 +321,7 @@ export default function App() {
     const content = await window.nodebook.readFile(p)
     setSettingsPath(p)
     setSettingsDoc(content)
+    setDefaultsDoc(null) // start with the defaults reference hidden
     setSettingsOpen(true)
     setHelpOpen(false)
     setGraphOpen(false)
@@ -355,6 +358,13 @@ export default function App() {
     // applySettings only closes over stable setters + module helpers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Toggle the read-only defaults reference beside the editable config. Purely a
+  // view — it never writes the file (that's what "Reset to defaults" is for).
+  const revealDefaults = useCallback(() => {
+    if (defaultsDoc !== null) setDefaultsDoc(null)
+    else void window.nodebook.defaultSettings().then(setDefaultsDoc)
+  }, [defaultsDoc])
 
   // Render the note's *current* (possibly unsaved) text into the off-screen
   // print container. CodeMirror virtualizes off-screen lines, so we can't print
@@ -586,17 +596,32 @@ export default function App() {
           <div className="settings-pane">
             <div className="settings-header">
               <span className="settings-title">Settings</span>
-              <button className="settings-reset" onClick={resetSettingsToDefaults}>
-                Reset to defaults
-              </button>
+              <div className="settings-actions">
+                <button
+                  className="settings-reset"
+                  onClick={revealDefaults}
+                  title="Show every option with its default value, read-only, for reference"
+                >
+                  {defaultsDoc !== null ? 'Hide defaults' : 'Reveal defaults'}
+                </button>
+                <button className="settings-reset" onClick={resetSettingsToDefaults}>
+                  Reset to defaults
+                </button>
+              </div>
             </div>
-            <div className="settings-body">
+            <div className={`settings-body${defaultsDoc !== null ? ' settings-body--split' : ''}`}>
               <ConfigEditor
                 key={`settings-${settingsEpoch}`}
                 initialDoc={settingsDoc}
                 onChange={configSaver.onChange}
                 theme={editorTheme}
               />
+              {defaultsDoc !== null && (
+                <aside className="settings-defaults">
+                  <div className="settings-defaults-label">Defaults — read-only reference</div>
+                  <ConfigEditor initialDoc={defaultsDoc} theme={editorTheme} readOnly />
+                </aside>
+              )}
             </div>
           </div>
         ) : graphOpen && active ? (

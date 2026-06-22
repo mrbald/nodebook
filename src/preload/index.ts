@@ -71,6 +71,8 @@ const api = {
   setThemeMode: (mode: 'system' | 'dark' | 'light'): Promise<Settings> =>
     ipcRenderer.invoke('settings:setThemeMode', mode),
   resetSettings: (): Promise<string> => ipcRenderer.invoke('settings:reset'),
+  // The documented default config, for read-only reference (never written).
+  defaultSettings: (): Promise<string> => ipcRenderer.invoke('settings:defaults'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
   exportPdf: (name: string): Promise<boolean> => ipcRenderer.invoke('pdf:export', name),
   /** Subscribe to vault file/dir changes; returns an unsubscribe function. */

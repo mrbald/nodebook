@@ -79,18 +79,26 @@ describe('buildGraph', () => {
 
   it('a typed relation supersedes the bare links_to for the same pair', () => {
     // A both `[[B]]`s in prose and declares `cites:: [[B]]` → one typed edge, no dup.
-    const g = buildGraph(files, [
-      { subject: 'A', relation: 'links_to', object: 'B' },
-      { subject: 'A', relation: 'cites', object: 'B' }
-    ])
+    const g = buildGraph(
+      files,
+      [
+        { subject: 'A', relation: 'links_to', object: 'B' },
+        { subject: 'A', relation: 'cites', object: 'B' }
+      ],
+      null
+    )
     expect(g.edges).toEqual([{ source: 'A', target: 'B', relation: 'cites' }])
   })
 
   it('keeps links_to to a *different* target than the typed one', () => {
-    const g = buildGraph(files, [
-      { subject: 'A', relation: 'links_to', object: 'B' },
-      { subject: 'A', relation: 'cites', object: 'C' }
-    ])
+    const g = buildGraph(
+      files,
+      [
+        { subject: 'A', relation: 'links_to', object: 'B' },
+        { subject: 'A', relation: 'cites', object: 'C' }
+      ],
+      null
+    )
     expect(g.edges.map((e) => `${e.source}-${e.relation}->${e.target}`).sort()).toEqual([
       'A-cites->C',
       'A-links_to->B'

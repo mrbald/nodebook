@@ -43,6 +43,7 @@ export interface NodebookApi {
   readSettings: () => Promise<Settings>
   setThemeMode: (mode: 'system' | 'dark' | 'light') => Promise<Settings>
   resetSettings: () => Promise<string>
+  defaultSettings: () => Promise<string>
   openExternal: (url: string) => Promise<void>
   exportPdf: (name: string) => Promise<boolean>
   onVaultChanged: (cb: () => void) => () => void
