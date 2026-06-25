@@ -152,7 +152,7 @@ test('pinning a node anchors it in place across a relayout', async () => {
   await page.locator('.graph-depth .graph-ctl').first().click() // depth −
 })
 
-test('layout dropdown picks tree / radial / groups; reset view re-fits', async () => {
+test('layout dropdown picks tree / radial / groups / blocks; reset view re-fits', async () => {
   const sel = page.locator('.status-select-layout')
   await expect(sel.locator('.status-btn')).toContainText('force')
 
@@ -163,6 +163,11 @@ test('layout dropdown picks tree / radial / groups; reset view re-fits', async (
   await sel.locator('.status-btn').click()
   await sel.locator('.status-menu-item', { hasText: 'groups' }).click()
   await expect(sel.locator('.status-btn')).toContainText('groups')
+  await expect(page.locator('.graph-node').first()).toBeVisible()
+
+  await sel.locator('.status-btn').click()
+  await sel.locator('.status-menu-item', { hasText: 'blocks' }).click()
+  await expect(sel.locator('.status-btn')).toContainText('blocks')
   await expect(page.locator('.graph-node').first()).toBeVisible()
 
   await page.locator('.graph-ctl', { hasText: 'reset view' }).click()

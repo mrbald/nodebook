@@ -110,3 +110,99 @@ export function community(
   }
   return result
 }
+
+/**
+ * Balanced minimum-cut bisection via Kernighan–Lin: split `ids` into two
+ * roughly-equal halves minimising the number of edges that cross between them
+ * (sizes differ by ≤ 1). Pure + deterministic — sorted-id initial split,
+ * sorted iteration so the first max-gain pair (lexicographically smallest) wins
+ * ties, no RNG — so it golden-tests and lays out the same graph identically each
+ * time. Exact min-bisection is NP-hard; KL is the classic local-search
+ * heuristic. Integer edge weights mean each applied pass lowers the cut by ≥ 1,
+ * so it always converges.
+ */
+export function minCutBisect(ids: string[], edges: EdgeLike[]): [string[], string[]] {
+  const sorted = [...ids].sort()
+  const m = sorted.length
+  if (m <= 1) return [sorted, []]
+
+  const present = new Set(sorted)
+  // Undirected adjacency weights among the given ids (parallel edges add up).
+  const adj = new Map<string, Map<string, number>>(sorted.map((id) => [id, new Map()]))
+  for (const e of edges) {
+    if (e.source === e.target || !present.has(e.source) || !present.has(e.target)) continue
+    const a = adj.get(e.source)!
+    a.set(e.target, (a.get(e.target) ?? 0) + 1)
+    const b = adj.get(e.target)!
+    b.set(e.source, (b.get(e.source) ?? 0) + 1)
+  }
+  const w = (x: string, y: string): number => adj.get(x)?.get(y) ?? 0
+
+  // Initial balanced partition by sorted id (0 = side A, 1 = side B).
+  const half = Math.ceil(m / 2)
+  const side = new Map<string, 0 | 1>()
+  sorted.forEach((id, i) => side.set(id, i < half ? 0 : 1))
+
+  for (;;) {
+    // D[v] = external − internal edge weight for v's current side.
+    const dsim = new Map<string, number>()
+    for (const v of sorted) {
+      let internal = 0
+      let external = 0
+      for (const [u, wt] of adj.get(v)!) {
+        if (side.get(u) === side.get(v)) internal += wt
+        else external += wt
+      }
+      dsim.set(v, external - internal)
+    }
+
+    const locked = new Set<string>()
+    const swaps: { a: string; b: string; gain: number }[] = []
+    const aPool = sorted.filter((id) => side.get(id) === 0)
+    const bPool = sorted.filter((id) => side.get(id) === 1)
+    const rounds = Math.min(aPool.length, bPool.length)
+
+    for (let s = 0; s < rounds; s++) {
+      // Best unlocked cross-pair by gain; sorted iteration → deterministic ties.
+      let best: { a: string; b: string; gain: number } | null = null
+      for (const a of aPool) {
+        if (locked.has(a)) continue
+        for (const b of bPool) {
+          if (locked.has(b)) continue
+          const gain = dsim.get(a)! + dsim.get(b)! - 2 * w(a, b)
+          if (!best || gain > best.gain) best = { a, b, gain }
+        }
+      }
+      if (!best) break
+      locked.add(best.a)
+      locked.add(best.b)
+      swaps.push(best)
+      // Update D for remaining unlocked nodes as if a↔b were swapped.
+      for (const x of sorted) {
+        if (locked.has(x)) continue
+        const da = 2 * w(x, best.a)
+        const db = 2 * w(x, best.b)
+        dsim.set(x, dsim.get(x)! + (side.get(x) === 0 ? da - db : db - da))
+      }
+    }
+
+    // Apply the swap prefix with the best cumulative gain (KL's hill-climb).
+    let bestK = 0
+    let bestSum = 0
+    let sum = 0
+    for (let k = 0; k < swaps.length; k++) {
+      sum += swaps[k].gain
+      if (sum > bestSum) {
+        bestSum = sum
+        bestK = k + 1
+      }
+    }
+    if (bestSum <= 0) break // converged — no improving prefix
+    for (let k = 0; k < bestK; k++) {
+      side.set(swaps[k].a, 1)
+      side.set(swaps[k].b, 0)
+    }
+  }
+
+  return [sorted.filter((id) => side.get(id) === 0), sorted.filter((id) => side.get(id) === 1)]
+}

@@ -88,9 +88,12 @@ Incremental slices (each independently shippable):
    (embedding kNN clusters via `talk:semanticEdges`, talk only); the legend is
    contextual and filters (relations, or folders — "select folders"). e2e-covered.
 7. ✅ **Layout modes + reset view — shipped.** `layout: force | tree | radial |
-   groups` — dagre (`@dagrejs/dagre`) hierarchical, a focus-centric radial layout,
-   and a **community "groups"** layout (min-cut-flavoured: reuse the label-propagation
-   communities, give each its own region) — all pure, golden-tested. **⟲ reset view**
+   groups | blocks` — dagre (`@dagrejs/dagre`) hierarchical, a focus-centric radial
+   layout, a **community "groups"** layout (min-cut-flavoured: reuse the
+   label-propagation communities, give each its own region), and a **"blocks"
+   recursive minimum-cut bisection** (deterministic Kernighan–Lin balanced min-cut
+   in `structure.ts`, recursed geometrically along each region's longer side →
+   nested 2D blocks; `blocksLayout.ts`) — all pure, golden-tested. **⟲ reset view**
    clears zoom, pan, drags, and pins.
 8. ✅ **Inspector + relation-typing — shipped.** Click a node to select it; the
    right panel shows its links in/out with **Expand** (pull in its neighbourhood),
@@ -106,9 +109,11 @@ Incremental slices (each independently shippable):
 artifact from [docs/state-and-scopes.md](docs/state-and-scopes.md)), **promote**
 (skipped — fights "size = connectedness"), **Louvain** (deferred polish),
 super-node collapsing + Barnes-Hut/culling for very large vaults, a principled
-**spectral / Fiedler** layout engine (the proper min-cut relaxation, if the
-community "groups" layout proves too coarse), and polish (edge labels per theme,
-hover preview, ⌘G / View-menu entry).
+**spectral / Fiedler** layout engine (the eigenvector min-cut relaxation — the
+shipped **"blocks"** layout already does recursive min-cut bisection via the
+pragmatic Kernighan–Lin heuristic; spectral is the "proper eigen" upgrade if KL
+proves too coarse), and polish (edge labels per theme, hover preview, ⌘G /
+View-menu entry).
 
 ### Automatic structure (centers, clusters, semantic graph)
 
