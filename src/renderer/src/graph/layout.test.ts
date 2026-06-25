@@ -38,4 +38,31 @@ describe('forceLayout', () => {
       dist(apart.get('A') as Point, apart.get('B') as Point)
     )
   })
+
+  it('starts from the seed positions (stability across relayouts)', () => {
+    const seed = new Map<string, Point>([
+      ['A', { x: 100, y: 100 }],
+      ['B', { x: 700, y: 500 }]
+    ])
+    // iterations: 0 → no relaxation, so the output is exactly the seed.
+    const p = forceLayout([{ id: 'A' }, { id: 'B' }], [{ source: 'A', target: 'B' }], {
+      seed,
+      iterations: 0
+    })
+    expect(p.get('A')).toEqual({ x: 100, y: 100 })
+    expect(p.get('B')).toEqual({ x: 700, y: 500 })
+  })
+
+  it('never moves a fixed (pinned) node — it anchors the layout', () => {
+    const seed = new Map<string, Point>([['A', { x: 123, y: 456 }]])
+    const p = forceLayout(
+      [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+      [
+        { source: 'A', target: 'B' },
+        { source: 'A', target: 'C' }
+      ],
+      { seed, fixed: new Set(['A']) }
+    )
+    expect(p.get('A')).toEqual({ x: 123, y: 456 }) // unmoved after full relaxation
+  })
 })

@@ -109,6 +109,7 @@ export function GraphView({
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
   const [dragged, setDragged] = useState<Map<string, Point>>(new Map())
+  const [pinned, setPinned] = useState<Map<string, Point>>(new Map())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // Relation-typing: which outbound target is being named, and the typed-in name.
   const [typingTarget, setTypingTarget] = useState<string | null>(null)
@@ -117,6 +118,8 @@ export function GraphView({
   const svgRef = useRef<SVGSVGElement>(null)
   const gesture = useRef<Gesture | null>(null)
   const movedRef = useRef(false)
+  // Last computed force layout — seeds the next one so unchanged nodes barely move.
+  const layoutRef = useRef<Map<string, Point>>(new Map())
   // Manual double-click detection (more reliable than onDoubleClick alongside
   // pointer-capture dragging): same node clicked twice within the threshold.
   const lastClick = useRef<{ id: string; t: number }>({ id: '', t: 0 })
@@ -199,8 +202,25 @@ export function GraphView({
     const o = { width: W, height: H }
     if (layoutMode === 'tree') return dagreLayout(visible.nodes, visible.edges, o)
     if (layoutMode === 'radial') return radialLayout(visible.nodes, visible.edges, o)
-    return forceLayout(visible.nodes, visible.edges, o)
-  }, [visible, layoutMode])
+    // Force: seed from the previous layout (+ pinned anchors) so adding/removing a
+    // node nudges rather than reshuffles; pinned nodes are fixed.
+    const seed = new Map(layoutRef.current)
+    for (const [id, p] of pinned) seed.set(id, p)
+    return forceLayout(visible.nodes, visible.edges, {
+      ...o,
+      seed,
+      fixed: new Set(pinned.keys())
+    })
+  }, [visible, layoutMode, pinned])
+
+  // Remember the force layout to seed the next relayout; a new graph or a new
+  // layout algorithm starts fresh (depth changes keep the seed for stability).
+  useEffect(() => {
+    if (layout) layoutRef.current = layout
+  }, [layout])
+  useEffect(() => {
+    layoutRef.current = new Map()
+  }, [focusPath, global, layoutMode])
   const colors = useMemo(() => (data ? relationColors(data.edges) : new Map()), [data])
   const pr = useMemo(() => (visible ? pageRank(visible.nodes, visible.edges) : new Map()), [visible])
   const comm = useMemo(
@@ -225,7 +245,8 @@ export function GraphView({
 
   const maxPr = useMemo(() => Math.max(1e-9, ...[...pr.values()]), [pr])
   const radius = (id: string): number => 7 + Math.sqrt((pr.get(id) ?? 0) / maxPr) * 14
-  const posOf = (id: string): Point | undefined => dragged.get(id) ?? layout?.get(id)
+  const posOf = (id: string): Point | undefined =>
+    pinned.get(id) ?? dragged.get(id) ?? layout?.get(id)
   const nodeFill = (node: GraphNode): string | undefined => {
     if (node.ghost) return undefined
     if (colorMode === 'folder') return folderColors.get(folderOf(node.path, vaultRoot))
@@ -313,6 +334,19 @@ export function GraphView({
   }
   const cycleColor = (): void => setColorMode((m) => modes[(modes.indexOf(m) + 1) % modes.length])
 
+  // Pin a node at its current spot so it anchors the layout; unpin to release it.
+  const togglePin = (id: string): void => {
+    setPinned((m) => {
+      const next = new Map(m)
+      if (next.has(id)) next.delete(id)
+      else {
+        const p = posOf(id)
+        if (p) next.set(id, { x: p.x, y: p.y })
+      }
+      return next
+    })
+  }
+
   const byFolder = colorMode === 'folder'
   const legend: [string, string][] = byFolder ? [...folderColors.entries()] : [...colors.entries()]
   const hidden = byFolder ? hiddenFolders : hiddenRels
@@ -382,7 +416,7 @@ export function GraphView({
                 const p = posOf(node.id)
                 if (!p) return null
                 const r = radius(node.id)
-                const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}${node.id === selectedId ? ' is-selected' : ''}`
+                const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}${node.id === selectedId ? ' is-selected' : ''}${pinned.has(node.id) ? ' is-pinned' : ''}`
                 const fill = nodeFill(node)
                 return (
                   <g
@@ -470,10 +504,11 @@ export function GraphView({
             )}
             <button
               className="graph-ctl"
-              title="Reset the view — zoom, pan, and any nodes you've dragged"
+              title="Reset the view — zoom, pan, and any nodes you've dragged or pinned"
               onClick={() => {
                 setView({ x: 0, y: 0, k: 1 })
                 setDragged(new Map())
+                setPinned(new Map())
               }}
             >
               ⟲ reset view
@@ -522,6 +557,13 @@ export function GraphView({
                   </button>
                 </>
               )}
+              <button
+                className={`graph-ctl${pinned.has(selectedNode.id) ? ' is-on' : ''}`}
+                title="Pin this note in place so it anchors the layout"
+                onClick={() => togglePin(selectedNode.id)}
+              >
+                {pinned.has(selectedNode.id) ? 'Unpin' : 'Pin'}
+              </button>
               <button className="graph-ctl" onClick={() => setSelectedId(null)}>
                 Deselect
               </button>

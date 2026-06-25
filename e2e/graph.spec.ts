@@ -135,6 +135,21 @@ test('colour mode cycles to folder and the legend switches to folders', async ()
   await expect(page.locator('.graph-legend-item', { hasText: '(root)' })).toBeVisible()
 })
 
+test('pinning a node anchors it in place across a relayout', async () => {
+  const node = page.locator('.graph-node', { hasText: 'Graph Model' })
+  await node.click() // select
+  await page.getByRole('button', { name: 'Pin', exact: true }).click()
+  await expect(page.locator('.graph-node.is-pinned')).toHaveText(/Graph Model/)
+
+  const before = await node.getAttribute('transform')
+  await page.locator('.graph-depth .graph-ctl').last().click() // depth + → relayout
+  await expect(node).toHaveAttribute('transform', before ?? '') // pinned ⇒ unmoved
+
+  // Tidy up for the following tests: release the pin and restore depth.
+  await page.locator('.graph-ctl', { hasText: 'reset view' }).click()
+  await page.locator('.graph-depth .graph-ctl').first().click() // depth −
+})
+
 test('layout cycles force → tree → radial; reset view re-fits', async () => {
   await page.locator('.graph-ctl', { hasText: 'layout: force' }).click()
   await expect(page.locator('.graph-ctl', { hasText: 'layout: tree' })).toBeVisible()

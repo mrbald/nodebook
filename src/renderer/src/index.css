@@ -736,6 +736,12 @@ body {
   stroke: var(--accent);
   stroke-width: 2.5px;
 }
+/* A pinned node is anchored — a dashed ring marks it as held in place. */
+.graph-node.is-pinned circle {
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  stroke-dasharray: 3 2;
+}
 .graph-inspector .graph-legend {
   display: flex;
   flex-direction: column;

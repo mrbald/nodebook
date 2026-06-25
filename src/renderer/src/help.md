@@ -70,9 +70,10 @@ it by hand, and nothing here changes your notes.
   the right; **double-click** to recentre the map on it, or use **Open ↗** in the
   panel to open it in the editor. **−/+** show fewer or more steps out from the note;
   **Global** shows the whole vault instead of just this note's neighbourhood;
-  **⟲ reset view** undoes your zoom, pan, and any drags.
+  **⟲ reset view** undoes your zoom, pan, and any drags or pins.
 - **The panel on the right** — with nothing selected it shows the map's totals and the
-  colour legend. **Click a note** and it shows that note's links — out and in.
+  colour legend. **Click a note** and it shows that note's links — out and in, plus
+  **Pin** (keep the note fixed so it anchors the map while the rest rearranges).
 - **Naming a link** — for a plain `[[link]]`, the **+ name** button in the panel lets
   you label the relationship (say `cites` or `author`). It's written straight back into
   the note as a `key:: value` field, so the map and your notes never disagree — and the

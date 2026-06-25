@@ -14,11 +14,21 @@ export interface Point {
 export function forceLayout(
   nodes: { id: string }[],
   edges: { source: string; target: string }[],
-  opts: { width?: number; height?: number; iterations?: number } = {}
+  opts: {
+    width?: number
+    height?: number
+    iterations?: number
+    /** Initial positions to start from (stability: unchanged nodes barely move). */
+    seed?: Map<string, Point>
+    /** Nodes that must not move — anchors the layout (pinned landmarks). */
+    fixed?: Set<string>
+  } = {}
 ): Map<string, Point> {
   const W = opts.width ?? 800
   const H = opts.height ?? 600
   const iterations = opts.iterations ?? 300
+  const seed = opts.seed
+  const fixed = opts.fixed ?? new Set<string>()
   const n = nodes.length
   const cx = W / 2
   const cy = H / 2
@@ -26,13 +36,18 @@ export function forceLayout(
   const pos = new Map<string, Point>()
   if (n === 0) return pos
   if (n === 1) {
-    pos.set(nodes[0].id, { x: cx, y: cy })
+    const s = seed?.get(nodes[0].id)
+    pos.set(nodes[0].id, s ? { x: s.x, y: s.y } : { x: cx, y: cy })
     return pos
   }
   const radius = Math.min(W, H) * 0.3
   nodes.forEach((node, i) => {
-    const a = (2 * Math.PI * i) / n
-    pos.set(node.id, { x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius })
+    const s = seed?.get(node.id)
+    if (s) pos.set(node.id, { x: s.x, y: s.y })
+    else {
+      const a = (2 * Math.PI * i) / n
+      pos.set(node.id, { x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius })
+    }
   })
 
   const ids = nodes.map((node) => node.id)
@@ -83,7 +98,9 @@ export function forceLayout(
     }
 
     // Apply, bounded by the cooling temperature, with a weak pull to centre.
+    // Fixed nodes are anchors — they exert force on others but never move.
     for (const id of ids) {
+      if (fixed.has(id)) continue
       const d = disp.get(id) as Point
       const p = pos.get(id) as Point
       const len = Math.hypot(d.x, d.y) || 0.01
