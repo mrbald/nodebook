@@ -87,10 +87,11 @@ Incremental slices (each independently shippable):
    dots by **links** (clusters), **folder** (top-level vault folder), or **meaning**
    (embedding kNN clusters via `talk:semanticEdges`, talk only); the legend is
    contextual and filters (relations, or folders — "select folders"). e2e-covered.
-7. ✅ **Layout modes + reset view — shipped.** `layout: force | tree | radial` —
-   dagre (`@dagrejs/dagre`) hierarchical + a focus-centric radial layout (all pure,
-   golden-tested; our SVG renders them). **⟲ reset view** clears zoom, pan, drags,
-   and pins.
+7. ✅ **Layout modes + reset view — shipped.** `layout: force | tree | radial |
+   groups` — dagre (`@dagrejs/dagre`) hierarchical, a focus-centric radial layout,
+   and a **community "groups"** layout (min-cut-flavoured: reuse the label-propagation
+   communities, give each its own region) — all pure, golden-tested. **⟲ reset view**
+   clears zoom, pan, drags, and pins.
 8. ✅ **Inspector + relation-typing — shipped.** Click a node to select it; the
    right panel shows its links in/out with **Expand** (pull in its neighbourhood),
    **Pin** (anchor it), **Focus here** / **Open ↗**, and **+ name** an untyped link
@@ -104,8 +105,10 @@ Incremental slices (each independently shippable):
 *Still open (small / optional):* **Save view → `.map.md`** (needs the saved-view
 artifact from [docs/state-and-scopes.md](docs/state-and-scopes.md)), **promote**
 (skipped — fights "size = connectedness"), **Louvain** (deferred polish),
-super-node collapsing + Barnes-Hut/culling for very large vaults, and polish
-(edge labels per theme, hover preview, ⌘G / View-menu entry).
+super-node collapsing + Barnes-Hut/culling for very large vaults, a principled
+**spectral / Fiedler** layout engine (the proper min-cut relaxation, if the
+community "groups" layout proves too coarse), and polish (edge labels per theme,
+hover preview, ⌘G / View-menu entry).
 
 ### Automatic structure (centers, clusters, semantic graph)
 
