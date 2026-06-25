@@ -153,7 +153,9 @@ Verified end-to-end (stub-embedder e2e + a real-model run): enable → chunk →
   embed pipeline + sqlite-vec store + hybrid FTS⊕vector (RRF) in the sidebar. Off by
   default; zero cloud/keys.
 - **P2 — "Ask" chat ✅ SHIPPED:** the Ask panel + pluggable LLM (anthropic +
-  openai-compat, key in env/settings) + cited, streamed answers.
+  openai-compat, key in env/settings) + cited, streamed answers. The answer
+  **renders as markdown** with **clickable inline `[[citations]]`**, and grounding
+  is **hybrid** (chunk-level FTS⊕vector fused with the same RRF as the search box).
 - **P3 — lean slices ✅ SHIPPED:** a ✨-relatedness **distance threshold**
   (`relatedMinScore`) so sparse vaults don't flag unrelated notes; a **model-
   download progress** bar (real % from transformers.js); and a first-class

@@ -34,8 +34,10 @@ export interface PendingChunk {
   text: string
 }
 
-/** A vector-search hit: the best-matching chunk of a file, in rank order. */
+/** A chunk hit (vector or keyword), in rank order. `id` is the chunk's stable id
+ *  so vector and FTS hit lists can be RRF-fused by chunk. */
 export interface VectorHit {
+  id: number
   file: string
   text: string
   rank: number
@@ -70,7 +72,17 @@ export class VectorStore {
       CREATE INDEX IF NOT EXISTS idx_chunks_pending ON chunks(embedded);
       CREATE TABLE IF NOT EXISTS chunk_file (file TEXT PRIMARY KEY, hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS talk_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text);
     `)
+    // Backfill the chunk FTS index for vaults chunked before it existed (it's
+    // keyword-only, independent of embeddings, so no re-embed is needed).
+    const ftsEmpty =
+      (this.db.prepare(`SELECT COUNT(*) AS n FROM chunks_fts`).get() as { n: number }).n === 0
+    const hasChunks =
+      (this.db.prepare(`SELECT COUNT(*) AS n FROM chunks`).get() as { n: number }).n > 0
+    if (ftsEmpty && hasChunks) {
+      this.db.exec(`INSERT INTO chunks_fts(rowid, text) SELECT id, text FROM chunks`)
+    }
     const row = this.db.prepare(`SELECT v FROM talk_meta WHERE k = 'dims'`).get() as
       | { v: string }
       | undefined
@@ -127,7 +139,12 @@ export class VectorStore {
       const ins = this.db.prepare(
         `INSERT INTO chunks(file, heading, start, "end", text, embedded) VALUES (?, ?, ?, ?, ?, 0)`
       )
-      for (const c of chunks) ins.run(file, c.heading, c.start, c.end, embedText(c))
+      const insFts = this.db.prepare(`INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)`)
+      for (const c of chunks) {
+        const text = embedText(c)
+        const info = ins.run(file, c.heading, c.start, c.end, text)
+        insFts.run(info.lastInsertRowid, text)
+      }
       this.db
         .prepare(`INSERT INTO chunk_file(file, hash) VALUES(?, ?)
                   ON CONFLICT(file) DO UPDATE SET hash = excluded.hash`)
@@ -144,12 +161,14 @@ export class VectorStore {
   }
 
   private deleteFileRows(file: string): void {
-    if (this.dims > 0) {
-      const ids = this.db.prepare(`SELECT id FROM chunks WHERE file = ?`).all(file) as {
-        id: number
-      }[]
-      const delVec = this.db.prepare(`DELETE FROM chunk_vec WHERE rowid = ?`)
-      for (const r of ids) delVec.run(BigInt(r.id))
+    const ids = this.db.prepare(`SELECT id FROM chunks WHERE file = ?`).all(file) as {
+      id: number
+    }[]
+    const delFts = this.db.prepare(`DELETE FROM chunks_fts WHERE rowid = ?`)
+    const delVec = this.dims > 0 ? this.db.prepare(`DELETE FROM chunk_vec WHERE rowid = ?`) : null
+    for (const r of ids) {
+      delFts.run(r.id)
+      delVec?.run(BigInt(r.id))
     }
     this.db.prepare(`DELETE FROM chunks WHERE file = ?`).run(file)
   }
@@ -261,11 +280,33 @@ export class VectorStore {
            SELECT rowid, distance FROM chunk_vec
            WHERE embedding MATCH ? ORDER BY distance LIMIT ?
          )
-         SELECT c.file AS file, c.text AS text, knn.distance AS distance
+         SELECT c.id AS id, c.file AS file, c.text AS text, knn.distance AS distance
          FROM knn JOIN chunks c ON c.id = knn.rowid
          ORDER BY knn.distance`
       )
-      .all(f32ToBlob(queryVec), k) as { file: string; text: string; distance: number }[]
-    return rows.map((r, i) => ({ file: r.file, text: r.text, rank: i }))
+      .all(f32ToBlob(queryVec), k) as {
+      id: number
+      file: string
+      text: string
+      distance: number
+    }[]
+    return rows.map((r, i) => ({ id: r.id, file: r.file, text: r.text, rank: i }))
+  }
+
+  /** Chunk-level keyword (FTS5) hits for a query — same shape as `vectorHits`, so
+   *  the two can be RRF-fused for grounding. Catches exact names/terms/IDs that
+   *  embeddings miss. */
+  chunkSearch(query: string, k = 30): VectorHit[] {
+    const tokens = query.match(/[\p{L}\p{N}]+/gu)
+    if (!tokens || tokens.length === 0) return []
+    const match = tokens.map((t) => `${t}*`).join(' ')
+    const rows = this.db
+      .prepare(
+        `SELECT c.id AS id, c.file AS file, c.text AS text
+         FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
+         WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`
+      )
+      .all(match, k) as { id: number; file: string; text: string }[]
+    return rows.map((r, i) => ({ id: r.id, file: r.file, text: r.text, rank: i }))
   }
 }

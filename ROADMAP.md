@@ -159,8 +159,11 @@ for local embeddings, hybrid FTS5+vector retrieval, pluggable chat LLM).
   provider via `provider.ts`: **anthropic** (Claude) + **openai-compat** (OpenAI / Groq
   / Ollama / LM Studio by `baseUrl`); key from env/settings, never sent to the renderer;
   only retrieved passages go to the model. Off until a provider is set; e2e-covered with
-  a stub chat model. *Open: local in-process model (P3); blending FTS into the grounding
-  context; rendering the answer through reading-mode.*
+  a stub chat model. The answer now **renders as markdown** with **clickable inline
+  `[[citations]]`** (via `renderMarkdown`, shared `.md-rendered` styling), and grounding
+  is **hybrid** — chunk-level FTS⊕vector fused with the same RRF as the search box
+  (`src/main/rag/rrf.ts`), so exact names/terms reach the model too. *Open: local
+  in-process model (deferred — Ollama covers private chat).*
 - ✅ **P3 (lean slices) — shipped:** a ✨-relatedness **distance threshold**
   (`[talk] relatedMinScore`, default 0.5) so sparse vaults stop flagging unrelated
   notes; a **model-download progress** bar (real % from transformers.js, replacing

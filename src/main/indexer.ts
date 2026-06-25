@@ -3,6 +3,7 @@ import { mkdirSync } from 'fs'
 import { basename, dirname } from 'path'
 import { harvest } from './harvest'
 import { VectorStore, type PendingChunk } from './rag/store'
+import { rrfRank } from './rag/rrf'
 import { buildGraph, noteName, type FileRow, type TripleRow } from './graph'
 import type { Backlink, GraphData, Outbound, SearchHit } from '../shared/types'
 
@@ -244,15 +245,11 @@ export class VaultIndex {
     const vec = this.vec && queryVec ? this.vec.vectorHits(queryVec) : []
     if (vec.length === 0) return fts
 
-    const RRF_K = 60
-    const score = new Map<string, number>()
+    // Build per-file hits (vector-only files get a synthetic snippet + ✨ flag);
+    // order by fusing the keyword and vector rankings (RRF).
     const hit = new Map<string, SearchHit>()
-    fts.forEach((h, i) => {
-      score.set(h.path, (score.get(h.path) ?? 0) + 1 / (RRF_K + i + 1))
-      hit.set(h.path, h)
-    })
+    for (const h of fts) hit.set(h.path, h)
     for (const v of vec) {
-      score.set(v.file, (score.get(v.file) ?? 0) + 1 / (RRF_K + v.rank + 1))
       const existing = hit.get(v.file)
       if (existing) existing.semantic = true
       else
@@ -263,21 +260,28 @@ export class VaultIndex {
           semantic: true
         })
     }
-    return [...score.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([path]) => hit.get(path) as SearchHit)
+    return rrfRank([fts.map((h) => h.path), vec.map((v) => v.file)])
+      .map((path) => hit.get(path) as SearchHit)
       .slice(0, 50)
   }
 
-  /** Top chunks (with their text) for grounding an "Ask" answer — the semantic
-   *  matches carry full chunk text, which the snippet-based search hits don't. */
+  /** Top chunks (with their text) for grounding an "Ask" answer. Hybrid like the
+   *  search box: fuse vector (meaning) with chunk-level FTS (exact terms the
+   *  embeddings miss) via RRF, keyed by chunk id; returns full chunk text. */
   talkRetrieve(
     query: string,
     queryVec: Float32Array | null,
     k = 8
   ): { file: string; text: string }[] {
-    const vec = this.vec && queryVec ? this.vec.vectorHits(queryVec, k) : []
-    return vec.slice(0, k).map((v) => ({ file: v.file, text: v.text }))
+    if (!this.vec) return []
+    const vec = queryVec ? this.vec.vectorHits(queryVec, k) : []
+    const fts = this.vec.chunkSearch(query, k)
+    if (vec.length === 0 && fts.length === 0) return []
+    const byId = new Map<number, { file: string; text: string }>()
+    for (const h of [...vec, ...fts]) if (!byId.has(h.id)) byId.set(h.id, { file: h.file, text: h.text })
+    return rrfRank([vec.map((v) => String(v.id)), fts.map((f) => String(f.id))])
+      .slice(0, k)
+      .map((id) => byId.get(Number(id)) as { file: string; text: string })
   }
 
   stats(): { files: number; triples: number } {
