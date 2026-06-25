@@ -10,11 +10,32 @@ export interface Embedder {
   dispose(): void
 }
 
+/** Model-download progress: a 0..1 fraction, or null while no size is known. */
+export type ProgressFn = (fraction: number | null) => void
+
+/**
+ * Pure: combine the in-flight per-file download progress into one 0..1 fraction
+ * (byte-weighted), or null when no totals are known yet. Several model files
+ * (tokenizer, config, onnx weights) download at once, so we sum bytes rather
+ * than average percentages. Exported for unit tests.
+ */
+export function aggregateProgress(files: { loaded: number; total: number }[]): number | null {
+  let loaded = 0
+  let total = 0
+  for (const f of files) {
+    loaded += f.loaded
+    total += f.total
+  }
+  if (total <= 0) return null
+  return Math.min(1, loaded / total)
+}
+
 let pending: Promise<Embedder> | null = null
 
-/** Get (or lazily create) the singleton embedder for `model`. */
-export function getEmbedder(model: string): Promise<Embedder> {
-  if (!pending) pending = create(model)
+/** Get (or lazily create) the singleton embedder for `model`. `onProgress` is
+ *  called with download progress while the model is first fetched. */
+export function getEmbedder(model: string, onProgress?: ProgressFn): Promise<Embedder> {
+  if (!pending) pending = create(model, onProgress)
   return pending
 }
 
@@ -23,23 +44,29 @@ export function disposeEmbedder(): void {
   pending = null
 }
 
-function create(model: string): Promise<Embedder> {
+function create(model: string, onProgress?: ProgressFn): Promise<Embedder> {
   if ((window as unknown as Record<string, unknown>).__NODEBOOK_FAKE_EMBED__) {
     return Promise.resolve(fakeEmbedder())
   }
-  return workerEmbedder(model)
+  return workerEmbedder(model, onProgress)
 }
 
-function workerEmbedder(model: string): Promise<Embedder> {
+function workerEmbedder(model: string, onProgress?: ProgressFn): Promise<Embedder> {
   const worker = new Worker(new URL('./embed.worker.ts', import.meta.url), { type: 'module' })
   let seq = 0
   const waiters = new Map<number, (vs: Float32Array[]) => void>()
   const rejecters = new Map<number, (e: Error) => void>()
+  // Track each downloading file's byte progress so we can report one fraction.
+  const fileProgress = new Map<string, { loaded: number; total: number }>()
 
   return new Promise<Embedder>((resolve, reject) => {
     worker.onmessage = (e: MessageEvent): void => {
       const m = e.data
-      if (m.type === 'ready') {
+      if (m.type === 'progress') {
+        fileProgress.set(m.file, { loaded: m.loaded, total: m.total })
+        onProgress?.(aggregateProgress([...fileProgress.values()]))
+      } else if (m.type === 'ready') {
+        onProgress?.(1) // download complete (or served from cache)
         resolve({
           dims: m.dims,
           embed: (texts) =>

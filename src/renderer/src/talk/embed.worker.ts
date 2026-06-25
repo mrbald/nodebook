@@ -6,7 +6,12 @@
  * so subsequent launches are offline-capable. No note text ever leaves the
  * machine — embedding is fully local.
  */
-import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers'
+import {
+  pipeline,
+  env,
+  type FeatureExtractionPipeline,
+  type ProgressInfo
+} from '@huggingface/transformers'
 
 // We always pull models from the Hub (there's no local model dir in the app).
 env.allowLocalModels = false
@@ -30,7 +35,17 @@ self.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
   try {
     if (msg.type === 'init') {
-      extractor = (await pipeline('feature-extraction', msg.model)) as FeatureExtractionPipeline
+      // Forward transformers.js download progress so the UI can show a real bar
+      // instead of an indeterminate "Loading model…". Events that carry byte
+      // counts (one per file being fetched) are the ones worth surfacing; the
+      // model is cached after the first download, so later loads emit few/none.
+      extractor = (await pipeline('feature-extraction', msg.model, {
+        progress_callback: (p: ProgressInfo) => {
+          if (p.status === 'progress' && p.total > 0) {
+            self.postMessage({ type: 'progress', file: p.file, loaded: p.loaded, total: p.total })
+          }
+        }
+      })) as FeatureExtractionPipeline
       const { dims } = await embed(['probe'])
       self.postMessage({ type: 'ready', dims })
     } else if (msg.type === 'embed') {

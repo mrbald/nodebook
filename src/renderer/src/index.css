@@ -1016,6 +1016,32 @@ body {
 .talk-on {
   color: var(--accent);
 }
+.talk-progress {
+  flex: 1;
+  max-width: 140px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.talk-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+.talk-progress-bar.is-indeterminate {
+  width: 40%;
+  animation: talk-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes talk-indeterminate {
+  0% {
+    margin-left: -40%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
 .talk-link {
   background: none;
   border: none;

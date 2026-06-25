@@ -8,7 +8,7 @@ import type { UseTalk } from './useTalk'
  */
 export function TalkPanel({ talk }: { talk: UseTalk }): React.JSX.Element | null {
   const [setupOpen, setSetupOpen] = useState(false)
-  const { status, phase, progress } = talk
+  const { status, phase, progress, modelProgress } = talk
   if (!status) return null
 
   if (!status.enabled) {
@@ -44,7 +44,28 @@ export function TalkPanel({ talk }: { talk: UseTalk }): React.JSX.Element | null
     )
   }
 
-  if (phase === 'loading-model') return <div className="talk-status">✨ Loading model…</div>
+  if (phase === 'loading-model') {
+    // Determinate bar once we know the download size; indeterminate before that.
+    const pct = modelProgress != null ? Math.round(modelProgress * 100) : null
+    return (
+      <div className="talk-status">
+        <span>✨ Downloading model{pct != null ? ` ${pct}%` : '…'}</span>
+        <div
+          className="talk-progress"
+          role="progressbar"
+          aria-label="Downloading embedding model"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          {...(pct != null ? { 'aria-valuenow': pct } : {})}
+        >
+          <div
+            className={`talk-progress-bar${pct == null ? ' is-indeterminate' : ''}`}
+            style={pct != null ? { width: `${pct}%` } : undefined}
+          />
+        </div>
+      </div>
+    )
+  }
   if (phase === 'indexing')
     return (
       <div className="talk-status">

@@ -9,6 +9,8 @@ export interface UseTalk {
   phase: TalkPhase
   /** During indexing: how many chunks are embedded out of the total. */
   progress: { done: number; total: number } | null
+  /** During model download: a 0..1 fraction, or null when size is unknown. */
+  modelProgress: number | null
   /** Semantic retrieval is live (model loaded + enabled). */
   ready: boolean
   enable: () => Promise<void>
@@ -32,6 +34,7 @@ export function useTalk(): UseTalk {
   const [status, setStatus] = useState<TalkStatus | null>(null)
   const [phase, setPhase] = useState<TalkPhase>('off')
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [modelProgress, setModelProgress] = useState<number | null>(null)
   const [canAsk, setCanAsk] = useState(false)
   const embedderRef = useRef<Embedder | null>(null)
   const drainingRef = useRef(false)
@@ -39,9 +42,11 @@ export function useTalk(): UseTalk {
   const ensureEmbedder = useCallback(async (): Promise<Embedder> => {
     if (embedderRef.current) return embedderRef.current
     setPhase('loading-model')
+    setModelProgress(null)
     const settings = await window.nodebook.readSettings()
-    const e = await getEmbedder(settings.talk.embed.model)
+    const e = await getEmbedder(settings.talk.embed.model, (f) => setModelProgress(f))
     embedderRef.current = e
+    setModelProgress(null)
     return e
   }, [])
 
@@ -136,6 +141,7 @@ export function useTalk(): UseTalk {
     status,
     phase,
     progress,
+    modelProgress,
     ready: phase === 'ready' && !!status?.enabled,
     enable,
     disable,
