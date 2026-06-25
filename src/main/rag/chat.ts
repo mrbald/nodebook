@@ -101,13 +101,19 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
   }
 }
 
-/** Deterministic, network-free chat for e2e — echoes a short grounded answer. */
+/** Deterministic, network-free chat for e2e — echoes a short grounded answer
+ *  with an inline `[[wikilink]]` citation so the rendered-answer path is testable. */
 function stubChat(): ChatModel {
   return {
     id: 'stub',
     async *chat(req: ChatRequest): AsyncIterable<string> {
       const q = req.messages[req.messages.length - 1]?.content ?? ''
-      for (const tok of ['Based on your notes, ', `the answer to "${q}" `, 'is here.']) yield tok
+      for (const tok of [
+        'Based on your notes, ',
+        `the answer to "${q}" `,
+        'is here. See [[welcome]].'
+      ])
+        yield tok
     }
   }
 }

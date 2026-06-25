@@ -1,10 +1,15 @@
 import { useState } from 'react'
 import type { AskResult, Citation, MarkdownFile } from '@shared/types'
+import { renderMarkdown } from './markdownRender'
 
 interface Props {
   ask: (question: string, onToken: (t: string) => void) => Promise<AskResult>
   files: MarkdownFile[]
   onOpen: (f: MarkdownFile) => void
+  /** Resolve + open a `[[wikilink]]` citation inside the answer. */
+  openLink: (target: string) => void
+  /** Open an external URL in the answer. */
+  openExternal: (url: string) => void
   onClose: () => void
 }
 
@@ -13,13 +18,27 @@ interface Props {
  * notes it drew on (clickable). Only the retrieved passages are sent to the
  * model; the answer streams in token-by-token.
  */
-export function AskPanel({ ask, files, onOpen, onClose }: Props) {
+export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }: Props) {
   const [question, setQuestion] = useState('')
   const [asked, setAsked] = useState<string | null>(null)
   const [answer, setAnswer] = useState('')
   const [citations, setCitations] = useState<Citation[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // The rendered answer is markdown (html:false → safe). Delegate clicks:
+  // a [[wikilink]] citation opens the note; an external link opens in the OS.
+  const onAnswerClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    const a = (e.target as HTMLElement).closest('a')
+    if (!a) return
+    e.preventDefault()
+    const target = a.getAttribute('data-target')
+    if (a.classList.contains('wikilink') && target) openLink(target)
+    else {
+      const href = a.getAttribute('href')
+      if (href) openExternal(href)
+    }
+  }
 
   const submit = async (): Promise<void> => {
     const q = question.trim()
@@ -75,7 +94,19 @@ export function AskPanel({ ask, files, onOpen, onClose }: Props) {
           </div>
         ) : (
           <>
-            {(answer || busy) && <div className="ask-answer">{answer || '…'}</div>}
+            {busy ? (
+              // Live streaming: plain text (a half-formed markdown fence would
+              // render badly mid-stream). Settles into rendered markdown on done.
+              <div className="ask-answer">{answer || '…'}</div>
+            ) : (
+              answer && (
+                <div
+                  className="ask-answer ask-answer-rendered md-rendered"
+                  onClick={onAnswerClick}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(answer) }}
+                />
+              )
+            )}
             {citations.length > 0 && (
               <div className="ask-sources">
                 <div className="ask-sources-label">Sources</div>

@@ -1307,6 +1307,16 @@ body {
   white-space: pre-wrap;
   line-height: 1.6;
 }
+/* The rendered (markdown) answer flows as blocks, not preformatted text. */
+.ask-answer-rendered {
+  white-space: normal;
+}
+.ask-answer-rendered > :first-child {
+  margin-top: 0;
+}
+.ask-answer-rendered > :last-child {
+  margin-bottom: 0;
+}
 .ask-sources {
   margin-top: 18px;
   display: flex;
@@ -1482,43 +1492,45 @@ body {
   font-size: var(--editor-font-size, 15px);
 }
 
-.print-reader h1,
-.print-reader h2,
-.print-reader h3,
-.print-reader h4,
-.print-reader h5,
-.print-reader h6 {
+/* Rendered-markdown styling, shared by the off-screen print/PDF reader and the
+   on-screen "Ask" answer (both carry the `.md-rendered` class). */
+.md-rendered h1,
+.md-rendered h2,
+.md-rendered h3,
+.md-rendered h4,
+.md-rendered h5,
+.md-rendered h6 {
   font-weight: 700;
   line-height: 1.3;
   margin: 1em 0 0.4em;
 }
-.print-reader h1 { font-size: 1.8em; }
-.print-reader h2 { font-size: 1.55em; }
-.print-reader h3 { font-size: 1.35em; }
-.print-reader h4 { font-size: 1.15em; }
-.print-reader h5 { font-size: 1.05em; }
-.print-reader h6 { font-size: 1em; }
+.md-rendered h1 { font-size: 1.8em; }
+.md-rendered h2 { font-size: 1.55em; }
+.md-rendered h3 { font-size: 1.35em; }
+.md-rendered h4 { font-size: 1.15em; }
+.md-rendered h5 { font-size: 1.05em; }
+.md-rendered h6 { font-size: 1em; }
 
-.print-reader p {
+.md-rendered p {
   margin: 0.7em 0;
 }
 
-.print-reader ul,
-.print-reader ol {
+.md-rendered ul,
+.md-rendered ol {
   padding-left: 1.4em;
 }
 
-.print-reader li {
+.md-rendered li {
   margin: 2px 0;
 }
 
-.print-reader a {
+.md-rendered a {
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
 }
 
-.print-reader .wikilink {
+.md-rendered .wikilink {
   color: var(--accent);
   background: var(--accent-bg);
   border-radius: 4px;
@@ -1527,7 +1539,7 @@ body {
   font-size: 0.95em;
 }
 
-.print-reader code {
+.md-rendered code {
   font-family: 'SF Mono', ui-monospace, Menlo, monospace;
   background: var(--code-bg);
   border-radius: 4px;
@@ -1535,7 +1547,7 @@ body {
   font-size: 0.9em;
 }
 
-.print-reader pre {
+.md-rendered pre {
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1543,39 +1555,39 @@ body {
   overflow-x: auto;
 }
 
-.print-reader pre code {
+.md-rendered pre code {
   background: none;
   padding: 0;
 }
 
-.print-reader blockquote {
+.md-rendered blockquote {
   margin: 0.7em 0;
   padding-left: 14px;
   border-left: 3px solid var(--border);
   color: var(--muted);
 }
 
-.print-reader table {
+.md-rendered table {
   border-collapse: collapse;
 }
 
-.print-reader th,
-.print-reader td {
+.md-rendered th,
+.md-rendered td {
   border: 1px solid var(--border);
   padding: 5px 10px;
 }
 
-.print-reader th {
+.md-rendered th {
   background: var(--bg-elev);
 }
 
-.print-reader hr {
+.md-rendered hr {
   border: none;
   border-top: 1px solid var(--border);
   margin: 1.2em 0;
 }
 
-.print-reader img {
+.md-rendered img {
   max-width: 100%;
 }
 

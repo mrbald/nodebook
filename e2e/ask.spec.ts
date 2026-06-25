@@ -60,4 +60,11 @@ test('Ask streams a grounded answer and lists its sources', async () => {
 
   await expect(page.locator('.ask-answer')).toContainText('Based on your notes')
   await expect(page.locator('.ask-source').first()).toBeVisible() // a cited source note
+
+  // The completed answer renders as markdown, and an inline [[wikilink]] citation
+  // becomes a clickable link that opens the cited note (leaving the Ask panel).
+  const cite = page.locator('.ask-answer-rendered .wikilink')
+  await expect(cite).toBeVisible()
+  await cite.click()
+  await expect(page.locator('.ask-pane')).toHaveCount(0)
 })

@@ -615,6 +615,8 @@ export default function App() {
             ask={talk.ask}
             files={files}
             onOpen={openFile}
+            openLink={openLink}
+            openExternal={(url) => void window.nodebook.openExternal(url)}
             onClose={() => setAskOpen(false)}
           />
         ) : helpOpen ? (
@@ -741,7 +743,7 @@ export default function App() {
                 <TelemetryWidget enabled={telemetryOn} />
               </div>
               {/* Off-screen; populated only for Print / Export-PDF. */}
-              <div className="print-reader" ref={printRef} />
+              <div className="print-reader md-rendered" ref={printRef} />
             </div>
           )
         ) : (
