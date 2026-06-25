@@ -69,6 +69,17 @@ describe('buildGraph', () => {
     expect(g.edges).toHaveLength(0)
   })
 
+  it('reports total candidates so the global cap can be surfaced honestly', () => {
+    // Global with a tight cap: 4 distinct nodes are referenced (A, B, C, Ghost),
+    // but only the top 2 by degree are kept — `total` still reports 4.
+    const capped = buildGraph(files, triples, null, { cap: 2 })
+    expect(capped.nodes).toHaveLength(2)
+    expect(capped.total).toBe(4)
+    // Local slices are never capped → total equals the shown count.
+    const local = buildGraph(files, triples, 'A', { depth: 1 })
+    expect(local.total).toBe(local.nodes.length)
+  })
+
   it('drops self-loops (a note that references itself)', () => {
     const g = buildGraph(files, [{ subject: 'A', relation: 'links_to', object: 'A' }], null)
     expect(g.edges).toHaveLength(0)

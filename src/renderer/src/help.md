@@ -73,7 +73,10 @@ it by hand, and nothing here changes your notes.
   **⟲ reset view** undoes your zoom, pan, and any drags or pins.
 - **The panel on the right** — with nothing selected it shows the map's totals and the
   colour legend. **Click a note** and it shows that note's links — out and in, plus
+  **Expand** (pull in that note's own links without growing the rest of the map) and
   **Pin** (keep the note fixed so it anchors the map while the rest rearranges).
+- **Big vaults** — **Global** shows the most-connected notes first; a **show more**
+  appears in the panel when there are extra notes beyond what's drawn.
 - **Naming a link** — for a plain `[[link]]`, the **+ name** button in the panel lets
   you label the relationship (say `cites` or `author`). It's written straight back into
   the note as a `key:: value` field, so the map and your notes never disagree — and the

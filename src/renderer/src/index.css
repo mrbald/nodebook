@@ -674,6 +674,15 @@ body {
   font-size: 11px;
   line-height: 1.5;
 }
+.graph-insp-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -6px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
 .graph-insp-actions {
   display: flex;
   flex-wrap: wrap;

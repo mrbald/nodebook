@@ -46,6 +46,9 @@ export interface GraphEdge {
 export interface GraphData {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /** Candidate nodes available before the global cap; equals `nodes.length`
+   *  unless the global view was capped to the highest-degree subset. */
+  total?: number
 }
 
 /** A full-text search result. */
