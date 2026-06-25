@@ -10,29 +10,28 @@ Items marked ✅ are already done.
   autosave-on-switch setting.
 - ✅ **Version + release gate** — `package.json` at `0.1.0`; release workflow
   verifies the tag matches the version and runs typecheck + unit tests.
-- **Accessibility** (next, high value, ~6 small components):
-  - Focus-trap + restore + `role="dialog"` for `Prompt`/`Confirm`/`ContextMenu`/
-    `StatusSelect` (a shared `useModal` hook).
-  - Keyboard operability: `role`/`tabIndex`/Enter on file-tree rows, search
-    results, context-menu items, backlink/map links.
-- **Error/empty states** — handle a failed vault open / index build; `file:read`
-  on a missing file should not surface a raw rejection.
-- **CI lint** — add a `lint` script and run it in CI (ESLint is configured but
-  unscripted).
-- Minor: drop the `undefined!` non-null assertions on `mainWindow` in dialogs;
-  confirm `@codemirror/legacy-modes` is actually used (drop if dead).
+- ✅ **Accessibility** — shared `useModal` hook (focus-trap, focus-restore,
+  `role="dialog"`/`aria-modal`) for `Prompt`/`Confirm`; keyboard-operable
+  `ContextMenu` (`role=menu`, arrow nav) and `StatusSelect` (`aria-haspopup`/
+  `aria-expanded`); file-tree rows, search results, and backlink/outbound links
+  are buttons to the keyboard (Tab + Enter/Space, focus-visible). e2e-covered.
+- ✅ **Error/empty states** — `file:read` on a vanished note shows a calm
+  `role="alert"` banner + refreshes the tree (no raw rejection); an empty vault
+  shows an instructive empty state.
+- ✅ **CI lint** — a `lint` script runs in CI.
+- Minor (open): drop the `undefined!` non-null assertions on `mainWindow` in
+  dialogs. (`@codemirror/legacy-modes` *is* used — the TOML settings editor.)
 
 ## Surface the knowledge graph (the differentiator)
 
 The triple store (`subject, relation, object`) is the product's edge, but it's
 barely visible in the UI today.
 
-- **Slice 0 — Outbound/Properties panel.** `index:outbound`
-  (`SELECT object, relation FROM triples WHERE source_file = ?`) → show the
-  current note's *outbound* links and `key:: value` properties next to Backlinks.
-  One query + one panel section; do this even if mindmap slips.
-- **Onboarding/empty state** that introduces `[[links]]`, `key:: value`,
-  backlinks, and maps.
+- ✅ **Slice 0 — Outbound/Properties panel.** The right-side **Connections** panel
+  shows the note's outbound links + `key:: value` properties (`index:outbound`)
+  alongside backlinks; self-references are filtered out.
+- **Onboarding** that introduces `[[links]]`, `key:: value`, backlinks, and maps
+  (the empty-vault state is in; a first-run intro is not).
 
 ## Knowledge features — committed vs research (read before building)
 
@@ -88,20 +87,25 @@ Incremental slices (each independently shippable):
    dots by **links** (clusters), **folder** (top-level vault folder), or **meaning**
    (embedding kNN clusters via `talk:semanticEdges`, talk only); the legend is
    contextual and filters (relations, or folders — "select folders"). e2e-covered.
-7. ✅ **Layout modes + reset view — shipped.** `layout: force | tree` — dagre
-   (`@dagrejs/dagre`) gives a layered, mind-map-style hierarchical layout (layout-only
-   lib → our SVG renders it; pure, golden-tested). **⟲ reset view** clears zoom, pan,
-   and dragged positions. *Open: radial layout; super-node collapsing for huge global
-   maps.*
-2. **Curation** — relation filter (the killer feature the typed triples unlock),
-   focus/expand/collapse, stable relayout (seed from previous positions).
-3. **Pin / hide / promote + global map** — view-state curation; degree-threshold
-   scale guard + "showing N of M" + empty states.
-4. **Save view → `.map.md`; relation-typing bridge** — "Save view" writes a
-   `.map.md` snapshot (reuses `parseMap`/`MapView`); inspector "type this
-   relation" edits the source note's `key:: value` and re-indexes.
-5. **Polish** — edge labels/legend per theme, hover preview, ⌘G/View-menu entry,
-   large-vault perf (Barnes-Hut, culling).
+7. ✅ **Layout modes + reset view — shipped.** `layout: force | tree | radial` —
+   dagre (`@dagrejs/dagre`) hierarchical + a focus-centric radial layout (all pure,
+   golden-tested; our SVG renders them). **⟲ reset view** clears zoom, pan, drags,
+   and pins.
+8. ✅ **Inspector + relation-typing — shipped.** Click a node to select it; the
+   right panel shows its links in/out with **Expand** (pull in its neighbourhood),
+   **Pin** (anchor it), **Focus here** / **Open ↗**, and **+ name** an untyped link
+   → writes `relation:: [[target]]` back to the source note + re-indexes (the
+   design's "editing the map edits the notes"). Self-references/self-loops are
+   filtered, and a typed relation supersedes the bare `links_to` for a pair.
+9. ✅ **Stability + scale — shipped.** The force relayout seeds from the previous
+   layout, so unchanged nodes barely move as nodes come and go; the global view
+   shows the "N most-connected of M" with **show more** rather than a silent cap.
+
+*Still open (small / optional):* **Save view → `.map.md`** (needs the saved-view
+artifact from [docs/state-and-scopes.md](docs/state-and-scopes.md)), **promote**
+(skipped — fights "size = connectedness"), **Louvain** (deferred polish),
+super-node collapsing + Barnes-Hut/culling for very large vaults, and polish
+(edge labels per theme, hover preview, ⌘G / View-menu entry).
 
 ### Automatic structure (centers, clusters, semantic graph)
 
