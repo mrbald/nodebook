@@ -150,11 +150,13 @@ test('pinning a node anchors it in place across a relayout', async () => {
   await page.locator('.graph-depth .graph-ctl').first().click() // depth −
 })
 
-test('layout cycles force → tree → radial; reset view re-fits', async () => {
+test('layout cycles force → tree → radial → groups; reset view re-fits', async () => {
   await page.locator('.graph-ctl', { hasText: 'layout: force' }).click()
   await expect(page.locator('.graph-ctl', { hasText: 'layout: tree' })).toBeVisible()
   await page.locator('.graph-ctl', { hasText: 'layout: tree' }).click()
   await expect(page.locator('.graph-ctl', { hasText: 'layout: radial' })).toBeVisible()
+  await page.locator('.graph-ctl', { hasText: 'layout: radial' }).click()
+  await expect(page.locator('.graph-ctl', { hasText: 'layout: groups' })).toBeVisible()
   await expect(page.locator('.graph-node').first()).toBeVisible()
   await page.locator('.graph-ctl', { hasText: 'reset view' }).click()
   await expect(page.locator('.graph-node').first()).toBeVisible()
