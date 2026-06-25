@@ -1199,6 +1199,38 @@ body {
   outline: none;
 }
 
+/* A calm, dismissible error notice (e.g. a note that vanished under us). */
+.error-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 70%;
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid #d9534f;
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  color: var(--text);
+}
+.error-banner-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.error-banner-close:hover {
+  color: var(--text);
+}
+
 /* --- Modal / Prompt ------------------------------------------------------- */
 
 .modal-overlay {

@@ -72,6 +72,7 @@ export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('system')
   const [autosave, setAutosave] = useState({ delayMs: 0, onSwitch: true })
   const [dirs, setDirs] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
   const [prompt, setPrompt] = useState<{
     title: string
@@ -268,13 +269,21 @@ export default function App() {
   const openFile = useCallback(
     async (f: MarkdownFile) => {
       flushCurrent() // save the editor we're leaving
-      const content = await window.nodebook.readFile(f.path)
-      setActive(f)
-      setDoc(content)
-      setSettingsOpen(false)
-      setHelpOpen(false)
+      try {
+        const content = await window.nodebook.readFile(f.path)
+        setActive(f)
+        setDoc(content)
+        setSettingsOpen(false)
+        setHelpOpen(false)
+        setError(null)
+      } catch {
+        // The file was moved/deleted out from under us — surface it calmly and
+        // refresh the tree rather than letting a raw rejection bubble up.
+        setError(`Couldn't open "${f.name}" — it may have been moved or deleted.`)
+        void relist()
+      }
     },
-    [flushCurrent]
+    [flushCurrent, relist]
   )
 
   const { ready: talkReady, searchSemantic } = talk
@@ -711,7 +720,13 @@ export default function App() {
             </div>
           )
         ) : (
-          <div className="empty">{vault ? 'Select a note' : 'Open a vault to begin'}</div>
+          <div className="empty">
+            {!vault
+              ? 'Open a vault to begin'
+              : files.length === 0
+                ? 'This vault has no notes yet — right-click in the sidebar to create one.'
+                : 'Select a note'}
+          </div>
         )}
       </main>
 
@@ -735,6 +750,18 @@ export default function App() {
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
         />
+      )}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button
+            className="error-banner-close"
+            aria-label="Dismiss"
+            onClick={() => setError(null)}
+          >
+            ✕
+          </button>
+        </div>
       )}
     </div>
   )
