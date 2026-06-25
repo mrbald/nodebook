@@ -129,9 +129,11 @@ test('right-clicking a node hides it; reset brings it back', async () => {
   expect(await page.locator('.graph-node').count()).toBe(before)
 })
 
-test('colour mode cycles to folder and the legend switches to folders', async () => {
-  await page.locator('.graph-ctl', { hasText: 'colour' }).click() // links → folder
-  await expect(page.locator('.graph-ctl', { hasText: 'colour: folder' })).toBeVisible()
+test('colour dropdown switches to folder and the legend shows folders', async () => {
+  const sel = page.locator('.status-select-colour')
+  await sel.locator('.status-btn').click()
+  await sel.locator('.status-menu-item', { hasText: 'folder' }).click()
+  await expect(sel.locator('.status-btn')).toContainText('folder')
   await expect(page.locator('.graph-legend-item', { hasText: '(root)' })).toBeVisible()
 })
 
@@ -150,14 +152,19 @@ test('pinning a node anchors it in place across a relayout', async () => {
   await page.locator('.graph-depth .graph-ctl').first().click() // depth −
 })
 
-test('layout cycles force → tree → radial → groups; reset view re-fits', async () => {
-  await page.locator('.graph-ctl', { hasText: 'layout: force' }).click()
-  await expect(page.locator('.graph-ctl', { hasText: 'layout: tree' })).toBeVisible()
-  await page.locator('.graph-ctl', { hasText: 'layout: tree' }).click()
-  await expect(page.locator('.graph-ctl', { hasText: 'layout: radial' })).toBeVisible()
-  await page.locator('.graph-ctl', { hasText: 'layout: radial' }).click()
-  await expect(page.locator('.graph-ctl', { hasText: 'layout: groups' })).toBeVisible()
+test('layout dropdown picks tree / radial / groups; reset view re-fits', async () => {
+  const sel = page.locator('.status-select-layout')
+  await expect(sel.locator('.status-btn')).toContainText('force')
+
+  await sel.locator('.status-btn').click()
+  await sel.locator('.status-menu-item', { hasText: 'tree' }).click()
+  await expect(sel.locator('.status-btn')).toContainText('tree')
+
+  await sel.locator('.status-btn').click()
+  await sel.locator('.status-menu-item', { hasText: 'groups' }).click()
+  await expect(sel.locator('.status-btn')).toContainText('groups')
   await expect(page.locator('.graph-node').first()).toBeVisible()
+
   await page.locator('.graph-ctl', { hasText: 'reset view' }).click()
   await expect(page.locator('.graph-node').first()).toBeVisible()
 })

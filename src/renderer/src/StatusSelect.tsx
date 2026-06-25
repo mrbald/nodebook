@@ -12,6 +12,8 @@ interface Props {
   options: SelectOption[]
   onChange: (value: string) => void
   title?: string
+  /** Optional label shown before the value on the trigger, e.g. "layout: ". */
+  prefix?: string
 }
 
 /**
@@ -19,7 +21,7 @@ interface Props {
  * current value and opens an upward popup to pick another. Used for both the
  * view-mode and app-theme selectors in the bottom-right status bar.
  */
-export function StatusSelect({ kind, value, options, onChange, title }: Props) {
+export function StatusSelect({ kind, value, options, onChange, title, prefix }: Props) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -96,6 +98,7 @@ export function StatusSelect({ kind, value, options, onChange, title }: Props) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
+        {prefix}
         {current?.label ?? value} ▾
       </button>
     </div>

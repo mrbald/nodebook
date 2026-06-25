@@ -57,8 +57,9 @@ test('the map overlays a "related but not linked" dashed edge to a similar note'
 })
 
 test('colour-by-meaning is available with talk on and renders', async () => {
-  await page.locator('.graph-ctl', { hasText: 'colour' }).click() // links → folder
-  await page.locator('.graph-ctl', { hasText: 'colour' }).click() // folder → meaning
-  await expect(page.locator('.graph-ctl', { hasText: 'colour: meaning' })).toBeVisible()
+  const sel = page.locator('.status-select-colour')
+  await sel.locator('.status-btn').click()
+  await sel.locator('.status-menu-item', { hasText: 'meaning' }).click() // talk-only option
+  await expect(sel.locator('.status-btn')).toContainText('meaning')
   await expect(page.locator('.graph-node', { hasText: 'Alpha' })).toBeVisible()
 })

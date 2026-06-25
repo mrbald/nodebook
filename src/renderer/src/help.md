@@ -81,9 +81,10 @@ it by hand, and nothing here changes your notes.
   you label the relationship (say `cites` or `author`). It's written straight back into
   the note as a `key:: value` field, so the map and your notes never disagree — and the
   link is redrawn in its new colour.
-- **Layout** — cycle between an **organic web** (force), a tidy **hierarchical tree**
-  that reads like a mind map, a **radial** view that rings notes around the one in
-  focus, and **groups**, which gathers each cluster of related notes into its own area.
+- **Layout** — the **layout** dropdown chooses an **organic web** (force), a tidy
+  **hierarchical tree** that reads like a mind map, a **radial** view that rings notes
+  around the one in focus, or **groups**, which gathers each cluster of related notes
+  into its own area.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);
   **line colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a
   **dashed outline** is a note you've linked to but haven't created yet.
