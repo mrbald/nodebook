@@ -14,6 +14,7 @@ import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
 import { useTalk } from './talk/useTalk'
 import { TalkPanel } from './talk/TalkPanel'
+import { AskPanel } from './AskPanel'
 import { TelemetryWidget } from './telemetry/TelemetryWidget'
 import { GraphView } from './graph/GraphView'
 import HELP_DOC from './help.md?raw'
@@ -61,6 +62,7 @@ export default function App() {
   const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [askOpen, setAskOpen] = useState(false)
   const [settingsPath, setSettingsPath] = useState<string | null>(null)
   const [settingsDoc, setSettingsDoc] = useState<string | null>(null)
   // Bumped on "reset to defaults" to force the settings editor to remount with
@@ -275,6 +277,7 @@ export default function App() {
         setDoc(content)
         setSettingsOpen(false)
         setHelpOpen(false)
+        setAskOpen(false)
         setError(null)
       } catch {
         // The file was moved/deleted out from under us — surface it calmly and
@@ -334,6 +337,7 @@ export default function App() {
     setSettingsOpen(true)
     setHelpOpen(false)
     setGraphOpen(false)
+    setAskOpen(false)
   }, [flushCurrent])
 
   // Open a note clicked in the graph, keeping the map open so it recenters.
@@ -349,7 +353,16 @@ export default function App() {
     flushCurrent()
     setGraphOpen(false)
     setSettingsOpen(false)
+    setAskOpen(false)
     setHelpOpen(true)
+  }, [flushCurrent])
+
+  const openAsk = useCallback(() => {
+    flushCurrent()
+    setGraphOpen(false)
+    setSettingsOpen(false)
+    setHelpOpen(false)
+    setAskOpen(true)
   }, [flushCurrent])
 
   const resetSettingsToDefaults = useCallback(() => {
@@ -507,7 +520,7 @@ export default function App() {
   // The right panel (backlinks) only shows when editing a note; collapse the grid
   // to two columns otherwise (map / settings / help / empty) so the centre fills
   // the width instead of leaving a blank third column.
-  const showRightPanel = !!active && !settingsOpen && !helpOpen && !graphOpen
+  const showRightPanel = !!active && !settingsOpen && !helpOpen && !graphOpen && !askOpen
   return (
     <div className={`app${showRightPanel ? '' : ' app--no-right'}`}>
       <aside className="sidebar">
@@ -533,6 +546,11 @@ export default function App() {
           />
         )}
         {vault && <TalkPanel talk={talk} />}
+        {vault && talk.canAsk && (
+          <button className="ask-open-btn" onClick={openAsk}>
+            💬 Ask your notes
+          </button>
+        )}
         {query.trim() ? (
           <ul className="search-results">
             {results.length === 0 ? (
@@ -592,7 +610,14 @@ export default function App() {
       </aside>
 
       <main className="editor-pane">
-        {helpOpen ? (
+        {askOpen ? (
+          <AskPanel
+            ask={talk.ask}
+            files={files}
+            onOpen={openFile}
+            onClose={() => setAskOpen(false)}
+          />
+        ) : helpOpen ? (
           <div className="settings-pane">
             <div className="settings-header">
               <span className="settings-title">Help — Markdown &amp; Syntax</span>

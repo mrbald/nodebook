@@ -154,7 +154,13 @@ for local embeddings, hybrid FTS5+vector retrieval, pluggable chat LLM).
 - ✅ **P1 — semantic search (shipped)** — renderer WASM embedder (worker) +
   sqlite-vec store + hybrid FTS⊕vector (RRF), surfaced in the sidebar. Fully local,
   off by default, no LLM/keys. e2e-covered (stub embedder) + real-model verified.
-- **P2** — "Ask" chat panel + pluggable LLM (Claude default) + citations.
+- ✅ **P2 — "Ask" chat (shipped):** a dedicated Ask panel — question → retrieve
+  grounding chunks → **streamed, cited answer** (sources listed + clickable). Pluggable
+  provider via `provider.ts`: **anthropic** (Claude) + **openai-compat** (OpenAI / Groq
+  / Ollama / LM Studio by `baseUrl`); key from env/settings, never sent to the renderer;
+  only retrieved passages go to the model. Off until a provider is set; e2e-covered with
+  a stub chat model. *Open: local in-process model (P3); blending FTS into the grounding
+  context; rendering the answer through reading-mode.*
 - **P3** — local-LLM option, bundle-vs-download model management, move the embedder
   to a renderer Web Worker tuning / distance-threshold for the ✨ marker.
 

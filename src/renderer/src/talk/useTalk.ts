@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { SearchHit, TalkStatus } from '@shared/types'
+import type { AskResult, SearchHit, TalkStatus } from '@shared/types'
 import { getEmbedder, disposeEmbedder, type Embedder } from './embedder'
 
 export type TalkPhase = 'off' | 'loading-model' | 'indexing' | 'ready' | 'error'
@@ -15,6 +15,10 @@ export interface UseTalk {
   disable: () => Promise<void>
   /** Embed the query and run hybrid search; falls back to keyword if not ready. */
   searchSemantic: (query: string) => Promise<SearchHit[]>
+  /** An "Ask" chat provider is configured (provider ≠ none). */
+  canAsk: boolean
+  /** Ask a grounded question; answer tokens arrive via `onToken`. */
+  ask: (question: string, onToken: (t: string) => void) => Promise<AskResult>
   /** Call after a vault is (re)opened to resume indexing for the new vault. */
   onVaultOpened: () => void
 }
@@ -28,6 +32,7 @@ export function useTalk(): UseTalk {
   const [status, setStatus] = useState<TalkStatus | null>(null)
   const [phase, setPhase] = useState<TalkPhase>('off')
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [canAsk, setCanAsk] = useState(false)
   const embedderRef = useRef<Embedder | null>(null)
   const drainingRef = useRef(false)
 
@@ -91,7 +96,21 @@ export function useTalk(): UseTalk {
     return window.nodebook.talkSearch(query, Array.from(vec))
   }, [])
 
+  const ask = useCallback(
+    async (question: string, onToken: (t: string) => void): Promise<AskResult> => {
+      const e = embedderRef.current
+      let vec: number[] = []
+      if (e) {
+        const [v] = await e.embed([question])
+        vec = Array.from(v)
+      }
+      return window.nodebook.ask(question, vec, onToken)
+    },
+    []
+  )
+
   const resume = useCallback(async (): Promise<void> => {
+    setCanAsk(await window.nodebook.canAsk())
     const st = await window.nodebook.talkStatus()
     setStatus(st)
     if (st.enabled) await enable()
@@ -121,6 +140,8 @@ export function useTalk(): UseTalk {
     enable,
     disable,
     searchSemantic,
+    canAsk,
+    ask,
     onVaultOpened
   }
 }

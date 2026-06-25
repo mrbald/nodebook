@@ -3,6 +3,7 @@ import { join } from 'path'
 import { existsSync, writeFileSync, readFileSync } from 'fs'
 import { parse as parseToml } from 'smol-toml'
 import type { Settings } from '../shared/types'
+import type { ProviderConfig } from './rag/provider'
 
 /**
  * App-level settings, stored as hand-editable TOML at
@@ -15,12 +16,17 @@ import type { Settings } from '../shared/types'
 export const DEFAULTS: Settings = {
   editor: { fontSize: 15, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
   theme: { followSystem: true, dark: 'dark', light: 'light', name: 'dark' },
-  talk: { enabled: false, embed: { runtime: 'wasm', model: 'Xenova/all-MiniLM-L6-v2' } },
+  talk: {
+    enabled: false,
+    embed: { runtime: 'wasm', model: 'Xenova/all-MiniLM-L6-v2' },
+    chat: { provider: 'none', model: 'claude-sonnet-4-6', baseUrl: '' }
+  },
   telemetry: { enabled: false }
 }
 
 const MODES = ['code', 'live', 'reading'] as const
 const RUNTIMES = ['wasm', 'native'] as const
+const CHAT_PROVIDERS = ['none', 'anthropic', 'openai-compat'] as const
 
 export const DEFAULT_TOML = `# Nodebook settings — every option with its default. Edit and save; changes
 # apply live (⌘S to save now). "Reveal defaults" shows this reference next to
@@ -61,6 +67,19 @@ runtime = "wasm"
 # Embedding model (a transformers.js repo). Downloaded on first enable.
 model = "Xenova/all-MiniLM-L6-v2"
 
+[talk.chat]
+# "Ask" chat over your notes. "none" = search-only (no LLM, fully local).
+# "anthropic" = Claude (cloud); "openai-compat" = any OpenAI-style endpoint,
+# including a *local* server like Ollama or LM Studio (set baseUrl). Only the
+# retrieved note passages are sent to the model, never your whole vault.
+provider = "none"
+model = "claude-sonnet-4-6"
+# For openai-compat only, e.g. "http://localhost:11434/v1" for Ollama.
+baseUrl = ""
+# API key: prefer the ANTHROPIC_API_KEY / OPENAI_API_KEY environment variable.
+# You may instead set it here, but it is stored in plain text — env is safer.
+# apiKey = ""
+
 [telemetry]
 # Show a tiny status-bar widget with event-loop lag (a log-bucketed histogram),
 # plus rolling CPU and memory — "measure everything". Off by default.
@@ -79,10 +98,14 @@ export function parseSettings(raw: string): Settings {
   const theme = (data.theme ?? {}) as Record<string, unknown>
   const talk = (data.talk ?? {}) as Record<string, unknown>
   const embed = (talk.embed ?? {}) as Record<string, unknown>
+  const chat = (talk.chat ?? {}) as Record<string, unknown>
   const telemetry = (data.telemetry ?? {}) as Record<string, unknown>
   const runtime = RUNTIMES.includes(embed.runtime as (typeof RUNTIMES)[number])
     ? (embed.runtime as (typeof RUNTIMES)[number])
     : DEFAULTS.talk.embed.runtime
+  const chatProvider = CHAT_PROVIDERS.includes(chat.provider as (typeof CHAT_PROVIDERS)[number])
+    ? (chat.provider as (typeof CHAT_PROVIDERS)[number])
+    : DEFAULTS.talk.chat.provider
   const fontSize = Number(editor.fontSize)
   const delay = Number(editor.autosaveDelayMs)
   const mode = MODES.includes(editor.defaultMode as (typeof MODES)[number])
@@ -114,7 +137,12 @@ export function parseSettings(raw: string): Settings {
     },
     talk: {
       enabled: typeof talk.enabled === 'boolean' ? talk.enabled : DEFAULTS.talk.enabled,
-      embed: { runtime, model: str(embed.model, DEFAULTS.talk.embed.model) }
+      embed: { runtime, model: str(embed.model, DEFAULTS.talk.embed.model) },
+      chat: {
+        provider: chatProvider,
+        model: str(chat.model, DEFAULTS.talk.chat.model),
+        baseUrl: str(chat.baseUrl, DEFAULTS.talk.chat.baseUrl)
+      }
     },
     telemetry: {
       enabled:
@@ -179,5 +207,35 @@ export function readSettings(): Settings {
     return parseSettings(readFileSync(settingsPath(), 'utf8'))
   } catch {
     return structuredClone(DEFAULTS)
+  }
+}
+
+/**
+ * The chat ProviderConfig for "Ask", including the API key — read from the
+ * environment first (ANTHROPIC_API_KEY / OPENAI_API_KEY), then the settings file.
+ * Stays in main: the key is never returned to the renderer. `null` when chat is
+ * off (`provider = "none"`).
+ */
+export function chatProviderConfig(): ProviderConfig | null {
+  const s = readSettings()
+  if (s.talk.chat.provider === 'none') return null
+  let chatRaw: Record<string, unknown> = {}
+  try {
+    const raw = parseToml(readFileSync(settingsPath(), 'utf8')) as Record<string, unknown>
+    const talkRaw = (raw.talk ?? {}) as Record<string, unknown>
+    chatRaw = (talkRaw.chat ?? {}) as Record<string, unknown>
+  } catch {
+    /* fall through to env-only */
+  }
+  const tomlKey = typeof chatRaw.apiKey === 'string' ? chatRaw.apiKey : ''
+  const envKey =
+    s.talk.chat.provider === 'anthropic'
+      ? process.env.ANTHROPIC_API_KEY
+      : process.env.OPENAI_API_KEY
+  return {
+    kind: s.talk.chat.provider,
+    model: s.talk.chat.model,
+    baseUrl: s.talk.chat.baseUrl || undefined,
+    apiKey: envKey || tomlKey || undefined
   }
 }

@@ -79,6 +79,17 @@ export interface TalkChunk {
   text: string
 }
 
+/** A note an "Ask" answer was grounded in (the retrieved sources). */
+export interface Citation {
+  path: string
+  title: string
+}
+
+/** Returned when an "Ask" stream completes (the answer itself streams as tokens). */
+export interface AskResult {
+  citations: Citation[]
+}
+
 /** A semantically-similar note (cosine over per-note embedding centroids). */
 export interface TalkNeighbor {
   path: string
@@ -145,6 +156,15 @@ export interface Settings {
       runtime: 'wasm' | 'native'
       /** Embedding model id (transformers.js repo, e.g. Xenova/all-MiniLM-L6-v2). */
       model: string
+    }
+    /** "Ask" chat provider. 'none' = search-only (no LLM). The API key is read
+     *  from the env/settings in main and never sent to the renderer. */
+    chat: {
+      provider: 'none' | 'anthropic' | 'openai-compat'
+      /** Chat model id (e.g. claude-sonnet-4-6, or an OpenAI-compat model name). */
+      model: string
+      /** OpenAI-compatible base URL (Ollama, LM Studio, a gateway) — openai-compat only. */
+      baseUrl: string
     }
   }
   /** Main-process telemetry (event-loop lag + CPU/RAM). Off by default; when on,

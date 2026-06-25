@@ -65,12 +65,26 @@ describe('parseSettings', () => {
     )
     expect(s.talk).toEqual({
       enabled: true,
-      embed: { runtime: 'native', model: 'Xenova/bge-small-en-v1.5' }
+      embed: { runtime: 'native', model: 'Xenova/bge-small-en-v1.5' },
+      chat: DEFAULTS.talk.chat // no [talk.chat] in the input → defaults
     })
     // defaults off; unknown runtime + non-boolean enabled fall back
     expect(parseSettings('').talk.enabled).toBe(false)
     expect(parseSettings('[talk.embed]\nruntime = "cuda"').talk.embed.runtime).toBe('wasm')
     expect(parseSettings('[talk]\nenabled = "yes"').talk.enabled).toBe(false)
+  })
+
+  it('reads [talk.chat] config and validates the provider', () => {
+    const s = parseSettings(
+      '[talk.chat]\nprovider = "anthropic"\nmodel = "claude-x"\nbaseUrl = "http://h/v1"'
+    )
+    expect(s.talk.chat).toEqual({
+      provider: 'anthropic',
+      model: 'claude-x',
+      baseUrl: 'http://h/v1'
+    })
+    // unknown provider falls back to "none" (search-only)
+    expect(parseSettings('[talk.chat]\nprovider = "bogus"').talk.chat.provider).toBe('none')
   })
 
   it('keeps followSystem default unless it is a real boolean', () => {

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AskResult,
   Backlink,
   GraphData,
   Outbound,
@@ -58,6 +59,32 @@ const api = {
     k?: number
   ): Promise<{ source: string; target: string }[]> =>
     ipcRenderer.invoke('talk:semanticEdges', paths, k),
+  /** True when an "Ask" chat provider is configured. */
+  canAsk: (): Promise<boolean> => ipcRenderer.invoke('talk:canAsk'),
+  /** Ask a grounded question: answer tokens arrive via `onToken`; resolves with
+   *  the source citations on completion. Tokens + done/error are ordered events
+   *  on one channel, so the answer never races the completion signal. */
+  ask: (question: string, vector: number[], onToken: (t: string) => void): Promise<AskResult> =>
+    new Promise<AskResult>((resolve, reject) => {
+      const onTok = (_e: unknown, token: string): void => onToken(token)
+      const onDone = (_e: unknown, res: AskResult): void => {
+        cleanup()
+        resolve(res)
+      }
+      const onErr = (_e: unknown, message: string): void => {
+        cleanup()
+        reject(new Error(message))
+      }
+      const cleanup = (): void => {
+        ipcRenderer.removeListener('talk:ask:token', onTok)
+        ipcRenderer.removeListener('talk:ask:done', onDone)
+        ipcRenderer.removeListener('talk:ask:error', onErr)
+      }
+      ipcRenderer.on('talk:ask:token', onTok)
+      ipcRenderer.once('talk:ask:done', onDone)
+      ipcRenderer.once('talk:ask:error', onErr)
+      ipcRenderer.send('talk:ask', question, vector)
+    }),
   /** Notifies the renderer that saved/changed notes need (re)embedding. */
   onTalkDirty: (cb: () => void): (() => void) => {
     const listener = (): void => cb()

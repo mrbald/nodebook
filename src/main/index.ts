@@ -23,10 +23,12 @@ import {
   setThemeMode,
   setTalkEnabled,
   settingsPath as settingsFilePath,
+  chatProviderConfig,
   DEFAULT_TOML,
   type ThemeMode
 } from './settings'
-import type { TalkStatus } from '../shared/types'
+import { makeChatModel } from './rag/chat'
+import type { Citation, TalkStatus } from '../shared/types'
 
 // Name the app so the macOS menu bar / dialogs say "Nodebook", not "Electron".
 // (In `npm run dev` the bold app-menu title is still read from the Electron.app
@@ -484,6 +486,54 @@ function registerIpc(): void {
   ipcMain.handle('talk:neighbors', (_e, focusPath: string, k?: number) =>
     index?.talkNeighbors(focusPath, k) ?? []
   )
+
+  // True when an "Ask" chat provider is configured (provider ≠ none).
+  ipcMain.handle('talk:canAsk', () => chatProviderConfig() !== null)
+
+  // "Ask": retrieve grounding chunks → stream a cited answer. Only the retrieved
+  // passages are sent to the model (never the whole vault). Everything goes back
+  // as ordered events on the sender (tokens → done/error) so the answer can't
+  // race the completion signal.
+  ipcMain.on('talk:ask', async (e, question: string, vector: number[]) => {
+    const noteName = (f: string): string => f.split(/[/\\]/).pop()!.replace(/\.md$/i, '')
+    try {
+      const cfg = chatProviderConfig()
+      if (!cfg) throw new Error('Ask is off — set [talk.chat] provider in Settings.')
+      if (!index) throw new Error('Open a vault first.')
+      const chunks = index.talkRetrieve(
+        question,
+        vector?.length ? Float32Array.from(vector) : null,
+        8
+      )
+      const context = chunks
+        .map((c, i) => `[${i + 1}] (${noteName(c.file)})\n${c.text}`)
+        .join('\n\n')
+      const system =
+        "You answer the user's question using ONLY the notes provided below. Cite the" +
+        ' notes you draw on inline as [[Note Name]]. If the notes do not contain the' +
+        ` answer, say so plainly.\n\nNOTES:\n${context || '(no relevant notes found)'}`
+
+      const model = makeChatModel(cfg)
+      for await (const token of model.chat({
+        system,
+        messages: [{ role: 'user', content: question }]
+      })) {
+        e.sender.send('talk:ask:token', token)
+      }
+
+      const seen = new Set<string>()
+      const citations: Citation[] = []
+      for (const c of chunks) {
+        if (!seen.has(c.file)) {
+          seen.add(c.file)
+          citations.push({ path: c.file, title: noteName(c.file) })
+        }
+      }
+      e.sender.send('talk:ask:done', { citations })
+    } catch (err) {
+      e.sender.send('talk:ask:error', err instanceof Error ? err.message : String(err))
+    }
+  })
 
   ipcMain.handle('talk:semanticEdges', (_e, paths: string[], k?: number) =>
     index?.talkSemanticEdges(paths, k) ?? []

@@ -1,4 +1,5 @@
 import type {
+  AskResult,
   Backlink,
   GraphData,
   Outbound,
@@ -37,6 +38,8 @@ export interface NodebookApi {
   talkSearch: (query: string, vector: number[]) => Promise<SearchHit[]>
   talkNeighbors: (focusPath: string, k?: number) => Promise<TalkNeighbor[]>
   talkSemanticEdges: (paths: string[], k?: number) => Promise<{ source: string; target: string }[]>
+  canAsk: () => Promise<boolean>
+  ask: (question: string, vector: number[], onToken: (t: string) => void) => Promise<AskResult>
   onTalkDirty: (cb: () => void) => () => void
   telemetryApply: (enabled: boolean) => Promise<void>
   telemetrySnapshot: () => Promise<TelemetrySnapshot | null>

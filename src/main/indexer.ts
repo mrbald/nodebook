@@ -263,6 +263,17 @@ export class VaultIndex {
       .slice(0, 50)
   }
 
+  /** Top chunks (with their text) for grounding an "Ask" answer — the semantic
+   *  matches carry full chunk text, which the snippet-based search hits don't. */
+  talkRetrieve(
+    query: string,
+    queryVec: Float32Array | null,
+    k = 8
+  ): { file: string; text: string }[] {
+    const vec = this.vec && queryVec ? this.vec.vectorHits(queryVec, k) : []
+    return vec.slice(0, k).map((v) => ({ file: v.file, text: v.text }))
+  }
+
   stats(): { files: number; triples: number } {
     const files = (this.db.prepare('SELECT COUNT(*) AS n FROM files').get() as { n: number }).n
     const triples = (this.db.prepare('SELECT COUNT(*) AS n FROM triples').get() as { n: number }).n

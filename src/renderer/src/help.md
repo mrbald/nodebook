@@ -112,6 +112,21 @@ search box.
 - Fully **reversible** — *Turn off* drops the embeddings (they live in
   `<vault>/.nodebook/`, rebuildable by re-enabling).
 
+## Ask your notes
+
+A chat that **answers questions from your notes**, with the source notes listed. It
+appears as **💬 Ask your notes** in the sidebar once you've set a chat provider in
+Settings (`[talk.chat]`).
+
+- **Set a provider** — `anthropic` (Claude) or `openai-compat` (any OpenAI-style
+  endpoint, *including a local one* like Ollama or LM Studio via `baseUrl`). Set the
+  key in the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` environment variable (preferred)
+  or, less safely, in the settings file. `none` keeps things search-only.
+- **Grounded + cited** — only the most relevant passages from your notes are sent to
+  the model (never your whole vault); the answer streams in, and the notes it used are
+  listed as **Sources** you can click to open.
+- Best with Talk-to-docs **on** (its embeddings power the retrieval).
+
 ## Performance telemetry
 
 Set `[telemetry] enabled = true` in Settings to show a tiny widget at the left of
