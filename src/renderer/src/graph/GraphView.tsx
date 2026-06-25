@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GraphData, GraphEdge, GraphNode, TalkNeighbor } from '@shared/types'
 import { forceLayout, type Point } from './layout'
 import { dagreLayout } from './dagreLayout'
+import { radialLayout } from './radialLayout'
 import { pageRank, community } from './structure'
 
 const W = 800
@@ -103,7 +104,7 @@ export function GraphView({
   const [global, setGlobal] = useState(false)
   const [showRelated, setShowRelated] = useState(true)
   const [colorMode, setColorMode] = useState<ColorMode>('links')
-  const [layoutMode, setLayoutMode] = useState<'force' | 'tree'>('force')
+  const [layoutMode, setLayoutMode] = useState<'force' | 'tree' | 'radial'>('force')
   const [hiddenRels, setHiddenRels] = useState<Set<string>>(new Set())
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
@@ -195,8 +196,10 @@ export function GraphView({
 
   const layout = useMemo(() => {
     if (!visible) return null
-    const fn = layoutMode === 'tree' ? dagreLayout : forceLayout
-    return fn(visible.nodes, visible.edges, { width: W, height: H })
+    const o = { width: W, height: H }
+    if (layoutMode === 'tree') return dagreLayout(visible.nodes, visible.edges, o)
+    if (layoutMode === 'radial') return radialLayout(visible.nodes, visible.edges, o)
+    return forceLayout(visible.nodes, visible.edges, o)
   }, [visible, layoutMode])
   const colors = useMemo(() => (data ? relationColors(data.edges) : new Map()), [data])
   const pr = useMemo(() => (visible ? pageRank(visible.nodes, visible.edges) : new Map()), [visible])
@@ -436,8 +439,10 @@ export function GraphView({
             </button>
             <button
               className="graph-ctl"
-              title="Layout: organic web, or hierarchical tree (dagre)"
-              onClick={() => setLayoutMode((m) => (m === 'force' ? 'tree' : 'force'))}
+              title="Layout: organic web (force), hierarchical tree (dagre), or focus-centric radial"
+              onClick={() =>
+                setLayoutMode((m) => (m === 'force' ? 'tree' : m === 'tree' ? 'radial' : 'force'))
+              }
             >
               layout: {layoutMode}
             </button>

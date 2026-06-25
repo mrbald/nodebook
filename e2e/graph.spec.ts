@@ -135,9 +135,11 @@ test('colour mode cycles to folder and the legend switches to folders', async ()
   await expect(page.locator('.graph-legend-item', { hasText: '(root)' })).toBeVisible()
 })
 
-test('layout switches to a hierarchical tree (dagre); reset view re-fits', async () => {
+test('layout cycles force → tree → radial; reset view re-fits', async () => {
   await page.locator('.graph-ctl', { hasText: 'layout: force' }).click()
   await expect(page.locator('.graph-ctl', { hasText: 'layout: tree' })).toBeVisible()
+  await page.locator('.graph-ctl', { hasText: 'layout: tree' }).click()
+  await expect(page.locator('.graph-ctl', { hasText: 'layout: radial' })).toBeVisible()
   await expect(page.locator('.graph-node').first()).toBeVisible()
   await page.locator('.graph-ctl', { hasText: 'reset view' }).click()
   await expect(page.locator('.graph-node').first()).toBeVisible()
