@@ -535,7 +535,18 @@ export default function App() {
                   <li
                     key={hit.path}
                     className={active?.path === hit.path ? 'active' : ''}
-                    onClick={() => { if (f) void openFile(f) }}
+                    role="button"
+                    tabIndex={0}
+                    aria-current={active?.path === hit.path ? 'page' : undefined}
+                    onClick={() => {
+                      if (f) void openFile(f)
+                    }}
+                    onKeyDown={(e) => {
+                      if ((e.key === 'Enter' || e.key === ' ') && f) {
+                        e.preventDefault()
+                        void openFile(f)
+                      }
+                    }}
                   >
                     <div className="search-result-title">
                       {hit.semantic && (

@@ -84,7 +84,15 @@ export function BacklinksPanel({ active, files, onOpen }: Props) {
                         key={relation + '|' + item.object}
                         className={`outbound-item${target ? ' is-link' : ''}`}
                         title={target ? `Open ${item.object}` : undefined}
+                        role={target ? 'button' : undefined}
+                        tabIndex={target ? 0 : undefined}
                         onClick={() => target && onOpen(target)}
+                        onKeyDown={(e) => {
+                          if (target && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault()
+                            onOpen(target)
+                          }
+                        }}
                       >
                         {item.object}
                       </div>
@@ -114,7 +122,15 @@ export function BacklinksPanel({ active, files, onOpen }: Props) {
                       <div
                         key={item.source_file + '|' + item.relation}
                         className="backlinks-item"
+                        role={target ? 'button' : undefined}
+                        tabIndex={target ? 0 : undefined}
                         onClick={() => target && onOpen(target)}
+                        onKeyDown={(e) => {
+                          if (target && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault()
+                            onOpen(target)
+                          }
+                        }}
                       >
                         {baseName}
                       </div>

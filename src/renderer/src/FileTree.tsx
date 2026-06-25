@@ -33,8 +33,17 @@ function FolderNode({ node, active, dirty, onOpen, depth, onContextMenu }: Folde
     <li>
       <div
         className="tree-folder"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
         style={{ paddingLeft: depth * 12 + 10 }}
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setOpen((o) => !o)
+          }
+        }}
         onContextMenu={(e) => {
           e.preventDefault()
           e.stopPropagation()
@@ -83,8 +92,17 @@ function TreeItem({ node, active, dirty, onOpen, depth, onContextMenu }: TreeIte
     <li>
       <div
         className={`tree-file${isActive ? ' active' : ''}`}
+        role="button"
+        tabIndex={0}
+        aria-current={isActive ? 'page' : undefined}
         style={{ paddingLeft: depth * 12 + 10 }}
         onClick={() => onOpen(node.file)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onOpen(node.file)
+          }
+        }}
         onContextMenu={(e) => {
           e.preventDefault()
           e.stopPropagation()

@@ -99,3 +99,18 @@ test('the status-bar selector is an accessible menu button', async () => {
   await expect(menu).toHaveCount(0)
   await expect(trigger).toBeFocused()
 })
+
+test('list rows are focusable and open with Enter (tree + search)', async () => {
+  const row = page.locator('.tree-file', { hasText: 'Graph Model' })
+  await row.focus()
+  await expect(row).toBeFocused()
+  await row.press('Enter')
+  await expect(page.locator('.tree-file.active')).toHaveText('Graph Model')
+
+  await page.locator('.search-box').fill('claim') // only welcome contains "claim"
+  await expect(page.locator('.search-result-title')).toBeVisible() // a real result, not "No matches"
+  const hit = page.locator('.search-results li').first()
+  await hit.press('Enter')
+  await expect(page.locator('.cm-content')).toContainText('claim')
+  await page.locator('.search-box').fill('') // restore the tree
+})

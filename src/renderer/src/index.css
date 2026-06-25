@@ -115,6 +115,17 @@ body {
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* Visible keyboard focus on the interactive list rows (tree, search, links). */
+.tree-folder:focus-visible,
+.tree-file:focus-visible,
+.search-results li:focus-visible,
+.outbound-item:focus-visible,
+.backlinks-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
 .tree-folder {
   color: var(--text);
 }
