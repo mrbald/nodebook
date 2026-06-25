@@ -475,6 +475,12 @@ body {
   z-index: 50;
 }
 .status-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
   padding: 5px 10px;
   font-size: 12px;
   color: var(--text);
@@ -482,8 +488,10 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
-.status-menu-item:hover {
+.status-menu-item:hover,
+.status-menu-item:focus-visible {
   background: rgba(127, 127, 127, 0.15);
+  outline: none;
 }
 .status-menu-item.active {
   color: var(--accent);
@@ -1160,6 +1168,12 @@ body {
 }
 
 .context-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
   padding: 6px 10px;
   border-radius: 4px;
   cursor: pointer;
@@ -1167,9 +1181,11 @@ body {
   white-space: nowrap;
 }
 
-.context-menu-item:hover {
+.context-menu-item:hover,
+.context-menu-item:focus-visible {
   background: var(--accent-bg);
   color: var(--accent);
+  outline: none;
 }
 
 /* --- Modal / Prompt ------------------------------------------------------- */

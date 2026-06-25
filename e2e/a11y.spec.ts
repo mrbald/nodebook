@@ -71,3 +71,31 @@ test('a prompt dialog is a labelled dialog that focuses its input; Escape cancel
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
 })
+
+test('the context menu is a keyboard-operable menu', async () => {
+  await page.locator('.tree-file', { hasText: 'welcome' }).click({ button: 'right' })
+  const menu = page.locator('.context-menu')
+  await expect(menu).toBeVisible()
+  await expect(menu).toHaveAttribute('role', 'menu')
+  await expect(menu.locator('.context-menu-item').first()).toBeFocused() // opens focused
+  await page.keyboard.press('ArrowDown') // arrows move focus between items
+  await expect(menu.locator('.context-menu-item').nth(1)).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.context-menu')).toHaveCount(0)
+})
+
+test('the status-bar selector is an accessible menu button', async () => {
+  const trigger = page.locator('.status-select-mode .status-btn')
+  await expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+
+  await trigger.click()
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  const menu = page.locator('.status-select-mode .status-menu')
+  await expect(menu.getByRole('menuitemradio')).toHaveCount(3) // code / live / reading
+
+  // Escape closes and restores focus to the trigger button.
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+})
