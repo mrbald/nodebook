@@ -174,6 +174,16 @@ for local embeddings, hybrid FTS5+vector retrieval, pluggable chat LLM).
   node-llama-cpp (the `local` kind) — Ollama covers private chat without the heavy
   native dependency, keeping the WASM-over-native, lean-installer discipline;
   bundling the embedding model in the installer.*
+- **In-process local model (deferred — tracked):** an optional `local` provider
+  kind (the slot is reserved in `provider.ts`'s `ProviderKind`) that runs the chat
+  model *inside the app* via **node-llama-cpp** — fully offline with **no separate
+  server** (the shipped `ollama` preset needs Ollama running alongside). The cost
+  is why it's not built: a per-OS **native addon** (the better-sqlite3 cross-build
+  pain, ×N), a **multi-GB model download**, and **model management** UX — all of
+  which reverse the deliberate WASM-over-native, lean-installer discipline. Revisit
+  if "works with zero extra install" becomes a real, asked-for user need; until
+  then `ollama`/`openai-compat` cover private, local chat. Would pair naturally
+  with bundling/downloading the **embedding** model too (same model-management UX).
 
 ## Event-loop telemetry ("measure everything") — ✅ shipped
 
