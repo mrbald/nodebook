@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useModal } from './useModal'
 
 interface PromptProps {
   title: string
@@ -19,6 +20,7 @@ export function Prompt({
 }: PromptProps) {
   const [value, setValue] = useState(initialValue ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
+  const modalRef = useModal()
 
   useEffect(() => {
     if (inputRef.current) {
@@ -44,8 +46,17 @@ export function Prompt({
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">{title}</div>
+      <div
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prompt-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-title" id="prompt-title">
+          {title}
+        </div>
         <input
           ref={inputRef}
           className="modal-input"
