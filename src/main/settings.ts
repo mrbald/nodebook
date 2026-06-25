@@ -18,6 +18,7 @@ export const DEFAULTS: Settings = {
   theme: { followSystem: true, dark: 'dark', light: 'light', name: 'dark' },
   talk: {
     enabled: false,
+    relatedMinScore: 0.5,
     embed: { runtime: 'wasm', model: 'Xenova/all-MiniLM-L6-v2' },
     chat: { provider: 'none', model: 'claude-sonnet-4-6', baseUrl: '' }
   },
@@ -26,7 +27,7 @@ export const DEFAULTS: Settings = {
 
 const MODES = ['code', 'live', 'reading'] as const
 const RUNTIMES = ['wasm', 'native'] as const
-const CHAT_PROVIDERS = ['none', 'anthropic', 'openai-compat'] as const
+const CHAT_PROVIDERS = ['none', 'anthropic', 'openai-compat', 'ollama'] as const
 
 export const DEFAULT_TOML = `# Nodebook settings — every option with its default. Edit and save; changes
 # apply live (⌘S to save now). "Reveal defaults" shows this reference next to
@@ -59,6 +60,10 @@ name = "dark"
 # local: when enabled, a small embedding model downloads once and your notes are
 # indexed on-device — they never leave your machine. Nothing loads until enabled.
 enabled = false
+# How alike two notes must be (0..1) for the map's ✨ "related" overlay and
+# "colour by meaning" to connect them. Higher = stricter (fewer, surer hints);
+# lower = more suggestions. Raise it if a small vault flags unrelated notes.
+relatedMinScore = 0.5
 
 [talk.embed]
 # Embedding runtime: "wasm" (lean, cross-platform, no native binary) or
@@ -69,12 +74,15 @@ model = "Xenova/all-MiniLM-L6-v2"
 
 [talk.chat]
 # "Ask" chat over your notes. "none" = search-only (no LLM, fully local).
-# "anthropic" = Claude (cloud); "openai-compat" = any OpenAI-style endpoint,
-# including a *local* server like Ollama or LM Studio (set baseUrl). Only the
-# retrieved note passages are sent to the model, never your whole vault.
+# "ollama" = a local model via Ollama (free, private, no key — install Ollama,
+# run e.g. "ollama pull llama3.2", then set model below). "anthropic" = Claude
+# (cloud). "openai-compat" = any OpenAI-style endpoint (set baseUrl), e.g. LM
+# Studio or a remote/gateway. Only the retrieved note passages are sent to the
+# model, never your whole vault.
 provider = "none"
 model = "claude-sonnet-4-6"
-# For openai-compat only, e.g. "http://localhost:11434/v1" for Ollama.
+# Base URL for "openai-compat". Optional for "ollama" (defaults to the local
+# server, http://localhost:11434/v1) — set it only for a non-default host/port.
 baseUrl = ""
 # API key: prefer the ANTHROPIC_API_KEY / OPENAI_API_KEY environment variable.
 # You may instead set it here, but it is stored in plain text — env is safer.
@@ -137,6 +145,12 @@ export function parseSettings(raw: string): Settings {
     },
     talk: {
       enabled: typeof talk.enabled === 'boolean' ? talk.enabled : DEFAULTS.talk.enabled,
+      relatedMinScore:
+        Number.isFinite(Number(talk.relatedMinScore)) &&
+        Number(talk.relatedMinScore) >= 0 &&
+        Number(talk.relatedMinScore) <= 1
+          ? Number(talk.relatedMinScore)
+          : DEFAULTS.talk.relatedMinScore,
       embed: { runtime, model: str(embed.model, DEFAULTS.talk.embed.model) },
       chat: {
         provider: chatProvider,

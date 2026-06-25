@@ -6,6 +6,28 @@ import { chunkMarkdown, embedText } from './chunk'
 /** sqlite-vec stores a `float[N]` vector as a BLOB of N little-endian float32s. */
 const f32ToBlob = (v: Float32Array): Buffer => Buffer.from(v.buffer, v.byteOffset, v.byteLength)
 
+/**
+ * Pure: rank `others` by cosine similarity to `focus` (a dot product, since the
+ * centroids are L2-normalized), drop anything below `minScore`, and return the
+ * top `k`. The threshold is what stops a sparse vault from reporting unrelated
+ * notes as "related" just to fill the top-k. Exported for golden tests.
+ */
+export function topCosine(
+  focus: Float32Array,
+  others: { id: string; vec: Float32Array }[],
+  k: number,
+  minScore = 0
+): { id: string; score: number }[] {
+  const scored: { id: string; score: number }[] = []
+  for (const o of others) {
+    let dot = 0
+    for (let i = 0; i < focus.length; i++) dot += focus[i] * o.vec[i]
+    if (dot >= minScore) scored.push({ id: o.id, score: dot })
+  }
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, k)
+}
+
 /** A chunk awaiting embedding. */
 export interface PendingChunk {
   id: number
@@ -200,41 +222,32 @@ export class VectorStore {
     return map
   }
 
-  /** The k notes most semantically similar to `focusFile` (cosine over centroids). */
-  neighbors(focusFile: string, k: number): { file: string; score: number }[] {
+  /** The k notes most semantically similar to `focusFile` (cosine over centroids).
+   *  `minScore` drops pairs below that cosine, so a sparse vault doesn't flag
+   *  unrelated notes as "related" just to fill the top-k. */
+  neighbors(focusFile: string, k: number, minScore = 0): { file: string; score: number }[] {
     const cents = this.centroids()
     const f = cents.get(focusFile)
     if (!f) return []
-    const scored: { file: string; score: number }[] = []
-    for (const [file, vec] of cents) {
-      if (file === focusFile) continue
-      let dot = 0
-      for (let i = 0; i < this.dims; i++) dot += f[i] * vec[i]
-      scored.push({ file, score: dot })
-    }
-    scored.sort((a, b) => b.score - a.score)
-    return scored.slice(0, k)
+    const others = [...cents]
+      .filter(([file]) => file !== focusFile)
+      .map(([file, vec]) => ({ id: file, vec }))
+    return topCosine(f, others, k, minScore).map((r) => ({ file: r.id, score: r.score }))
   }
 
   /** Semantic kNN edges among the given notes (each → its k nearest by centroid
-   *  cosine), for colouring the map by meaning. */
-  semanticEdges(files: string[], k: number): { source: string; target: string }[] {
+   *  cosine), for colouring the map by meaning. `minScore` drops weak pairs (see
+   *  `neighbors`), so sparse vaults aren't fully connected by noise. */
+  semanticEdges(files: string[], k: number, minScore = 0): { source: string; target: string }[] {
     const cents = this.centroids()
     const present = files.filter((f) => cents.has(f))
     const edges: { source: string; target: string }[] = []
     for (const f of present) {
       const fv = cents.get(f) as Float32Array
-      const scored = present
+      const others = present
         .filter((g) => g !== f)
-        .map((g) => {
-          const gv = cents.get(g) as Float32Array
-          let dot = 0
-          for (let i = 0; i < this.dims; i++) dot += fv[i] * gv[i]
-          return { g, dot }
-        })
-        .sort((a, b) => b.dot - a.dot)
-        .slice(0, k)
-      for (const s of scored) edges.push({ source: f, target: s.g })
+        .map((g) => ({ id: g, vec: cents.get(g) as Float32Array }))
+      for (const s of topCosine(fv, others, k, minScore)) edges.push({ source: f, target: s.id })
     }
     return edges
   }

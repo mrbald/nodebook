@@ -161,8 +161,16 @@ for local embeddings, hybrid FTS5+vector retrieval, pluggable chat LLM).
   only retrieved passages go to the model. Off until a provider is set; e2e-covered with
   a stub chat model. *Open: local in-process model (P3); blending FTS into the grounding
   context; rendering the answer through reading-mode.*
-- **P3** — local-LLM option, bundle-vs-download model management, move the embedder
-  to a renderer Web Worker tuning / distance-threshold for the ✨ marker.
+- ✅ **P3 (lean slices) — shipped:** a ✨-relatedness **distance threshold**
+  (`[talk] relatedMinScore`, default 0.5) so sparse vaults stop flagging unrelated
+  notes; a **model-download progress** bar (real % from transformers.js, replacing
+  the silent "Loading model…"); and a first-class **Ollama** local-LLM preset
+  (`[talk.chat] provider = "ollama"` — zero-config private chat, no key, via the
+  openai-compat adapter at the default Ollama URL). *Incremental re-embed was
+  already shipped in P1 (content-hash gated). Deferred by choice: in-process
+  node-llama-cpp (the `local` kind) — Ollama covers private chat without the heavy
+  native dependency, keeping the WASM-over-native, lean-installer discipline;
+  bundling the embedding model in the installer.*
 
 ## Event-loop telemetry ("measure everything") — ✅ shipped
 

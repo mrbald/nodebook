@@ -38,8 +38,12 @@ export interface ChatModel {
  * separate `DocumentConverter` subsystem, and exposing Nodebook *as* an MCP
  * server is a separate outbound feature — neither is a `ProviderKind`. `'mcp'`
  * here means Nodebook as an MCP *client* of a model/tool server.
+ *
+ * `'ollama'` is a zero-config convenience over `'openai-compat'`: a local Ollama
+ * server at its default URL, no key. (`'local'` is reserved for a future
+ * in-process model — not the same thing as talking to a local server.)
  */
-export type ProviderKind = 'local' | 'openai-compat' | 'anthropic' | 'mcp'
+export type ProviderKind = 'local' | 'ollama' | 'openai-compat' | 'anthropic' | 'mcp'
 
 export interface ProviderConfig {
   kind: ProviderKind

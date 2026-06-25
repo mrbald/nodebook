@@ -193,18 +193,24 @@ export class VaultIndex {
     this.vec?.putEmbeddings(rows)
   }
 
-  /** Notes semantically similar to the focus note (for the map's "related" overlay). */
-  talkNeighbors(focusPath: string, k = 5): { path: string; name: string; score: number }[] {
-    return (this.vec?.neighbors(focusPath, k) ?? []).map((n) => ({
+  /** Notes semantically similar to the focus note (for the map's "related" overlay).
+   *  `minScore` drops weak matches so sparse vaults don't flag everything. */
+  talkNeighbors(
+    focusPath: string,
+    k = 5,
+    minScore = 0
+  ): { path: string; name: string; score: number }[] {
+    return (this.vec?.neighbors(focusPath, k, minScore) ?? []).map((n) => ({
       path: n.file,
       name: noteName(n.file),
       score: n.score
     }))
   }
 
-  /** Semantic kNN edges (by note name) among `paths`, for "colour by meaning". */
-  talkSemanticEdges(paths: string[], k = 4): { source: string; target: string }[] {
-    return (this.vec?.semanticEdges(paths, k) ?? []).map((e) => ({
+  /** Semantic kNN edges (by note name) among `paths`, for "colour by meaning".
+   *  `minScore` drops weak pairs (see `talkNeighbors`). */
+  talkSemanticEdges(paths: string[], k = 4, minScore = 0): { source: string; target: string }[] {
+    return (this.vec?.semanticEdges(paths, k, minScore) ?? []).map((e) => ({
       source: noteName(e.source),
       target: noteName(e.target)
     }))

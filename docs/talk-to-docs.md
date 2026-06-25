@@ -152,9 +152,17 @@ Verified end-to-end (stub-embedder e2e + a real-model run): enable → chunk →
 - **P1 — semantic search ✅ SHIPPED (fully local, no LLM):** chunk + renderer-WASM
   embed pipeline + sqlite-vec store + hybrid FTS⊕vector (RRF) in the sidebar. Off by
   default; zero cloud/keys.
-- **P2 — "Ask" chat:** the Ask panel + pluggable LLM (Claude default, key in
-  settings) + citations. *Deferred by choice ("search-only for now").*
-- **P3:** local-LLM option (node-llama-cpp), incremental re-embed, model management.
+- **P2 — "Ask" chat ✅ SHIPPED:** the Ask panel + pluggable LLM (anthropic +
+  openai-compat, key in env/settings) + cited, streamed answers.
+- **P3 — lean slices ✅ SHIPPED:** a ✨-relatedness **distance threshold**
+  (`relatedMinScore`) so sparse vaults don't flag unrelated notes; a **model-
+  download progress** bar (real % from transformers.js); and a first-class
+  **Ollama** local-LLM preset (`provider = "ollama"` → openai-compat at the
+  default local URL, no key). Incremental re-embed shipped back in P1 (content-
+  hash gated). *Deferred: in-process **node-llama-cpp** (the `local` kind) —
+  leaning on Ollama gives private/offline chat without the heavy per-OS native
+  dependency, keeping the WASM-over-native discipline; bundling the embedding
+  model in the installer.*
 
 ## Resolved decisions (for the record)
 

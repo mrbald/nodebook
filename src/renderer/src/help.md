@@ -118,10 +118,17 @@ A chat that **answers questions from your notes**, with the source notes listed.
 appears as **💬 Ask your notes** in the sidebar once you've set a chat provider in
 Settings (`[talk.chat]`).
 
-- **Set a provider** — `anthropic` (Claude) or `openai-compat` (any OpenAI-style
-  endpoint, *including a local one* like Ollama or LM Studio via `baseUrl`). Set the
-  key in the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` environment variable (preferred)
-  or, less safely, in the settings file. `none` keeps things search-only.
+- **Set a provider** — choose one in Settings (`[talk.chat] provider`):
+  - `ollama` — **local & private, no key.** A model on your own machine via
+    [Ollama](https://ollama.com): install it, run `ollama pull llama3.2`, set
+    `model = "llama3.2"`. Nothing leaves your computer.
+  - `anthropic` — Claude (cloud); set `ANTHROPIC_API_KEY` in your environment.
+  - `openai-compat` — any OpenAI-style endpoint (OpenAI, a gateway, or LM Studio)
+    via `baseUrl`; set `OPENAI_API_KEY` if it needs one.
+  - `none` keeps things search-only.
+
+  Prefer the environment variable for keys; you *can* put one in the settings
+  file, but it's stored in plain text.
 - **Grounded + cited** — only the most relevant passages from your notes are sent to
   the model (never your whole vault); the answer streams in, and the notes it used are
   listed as **Sources** you can click to open.

@@ -484,7 +484,7 @@ function registerIpc(): void {
   )
 
   ipcMain.handle('talk:neighbors', (_e, focusPath: string, k?: number) =>
-    index?.talkNeighbors(focusPath, k) ?? []
+    index?.talkNeighbors(focusPath, k, readSettings().talk.relatedMinScore) ?? []
   )
 
   // True when an "Ask" chat provider is configured (provider ≠ none).
@@ -536,7 +536,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('talk:semanticEdges', (_e, paths: string[], k?: number) =>
-    index?.talkSemanticEdges(paths, k) ?? []
+    index?.talkSemanticEdges(paths, k, readSettings().talk.relatedMinScore) ?? []
   )
 
   // --- Telemetry (measure everything) -------------------------------------

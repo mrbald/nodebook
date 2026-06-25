@@ -112,9 +112,15 @@ function stubChat(): ChatModel {
   }
 }
 
+/** Ollama's default local OpenAI-compatible endpoint. */
+const OLLAMA_DEFAULT_URL = 'http://localhost:11434/v1'
+
 export function makeChatModel(cfg: ProviderConfig): ChatModel {
   if (process.env.NODEBOOK_E2E) return stubChat()
   if (cfg.kind === 'anthropic') return anthropicChat(cfg)
   if (cfg.kind === 'openai-compat') return openaiCompatChat(cfg)
+  // Ollama is openai-compat pointed at the local server by default (no key).
+  if (cfg.kind === 'ollama')
+    return openaiCompatChat({ ...cfg, baseUrl: cfg.baseUrl ?? OLLAMA_DEFAULT_URL })
   throw new Error(`Unsupported chat provider: ${cfg.kind}`)
 }

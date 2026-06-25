@@ -65,6 +65,7 @@ describe('parseSettings', () => {
     )
     expect(s.talk).toEqual({
       enabled: true,
+      relatedMinScore: DEFAULTS.talk.relatedMinScore, // no key in input → default
       embed: { runtime: 'native', model: 'Xenova/bge-small-en-v1.5' },
       chat: DEFAULTS.talk.chat // no [talk.chat] in the input → defaults
     })
@@ -72,6 +73,21 @@ describe('parseSettings', () => {
     expect(parseSettings('').talk.enabled).toBe(false)
     expect(parseSettings('[talk.embed]\nruntime = "cuda"').talk.embed.runtime).toBe('wasm')
     expect(parseSettings('[talk]\nenabled = "yes"').talk.enabled).toBe(false)
+  })
+
+  it('reads [talk] relatedMinScore and clamps it to 0..1', () => {
+    expect(parseSettings('[talk]\nrelatedMinScore = 0.7').talk.relatedMinScore).toBe(0.7)
+    expect(parseSettings('[talk]\nrelatedMinScore = 0').talk.relatedMinScore).toBe(0)
+    // out-of-range / wrong-typed falls back to the default
+    expect(parseSettings('[talk]\nrelatedMinScore = 1.5').talk.relatedMinScore).toBe(
+      DEFAULTS.talk.relatedMinScore
+    )
+    expect(parseSettings('[talk]\nrelatedMinScore = -0.2').talk.relatedMinScore).toBe(
+      DEFAULTS.talk.relatedMinScore
+    )
+    expect(parseSettings('[talk]\nrelatedMinScore = "high"').talk.relatedMinScore).toBe(
+      DEFAULTS.talk.relatedMinScore
+    )
   })
 
   it('reads [talk.chat] config and validates the provider', () => {
@@ -85,6 +101,12 @@ describe('parseSettings', () => {
     })
     // unknown provider falls back to "none" (search-only)
     expect(parseSettings('[talk.chat]\nprovider = "bogus"').talk.chat.provider).toBe('none')
+  })
+
+  it('accepts the "ollama" local-LLM provider', () => {
+    const s = parseSettings('[talk.chat]\nprovider = "ollama"\nmodel = "llama3.2"')
+    expect(s.talk.chat.provider).toBe('ollama')
+    expect(s.talk.chat.model).toBe('llama3.2')
   })
 
   it('keeps followSystem default unless it is a real boolean', () => {

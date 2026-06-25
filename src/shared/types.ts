@@ -151,6 +151,10 @@ export interface Settings {
    *  loads until enabled (the model downloads on first enable). */
   talk: {
     enabled: boolean
+    /** Minimum cosine similarity (0..1) for the map's ✨ "related" overlay and
+     *  colour-by-meaning. Pairs below this are dropped, so sparse vaults don't
+     *  flag unrelated notes. */
+    relatedMinScore: number
     embed: {
       /** 'wasm' (lean, cross-platform, default) or 'native' (faster) runtime. */
       runtime: 'wasm' | 'native'
@@ -160,10 +164,13 @@ export interface Settings {
     /** "Ask" chat provider. 'none' = search-only (no LLM). The API key is read
      *  from the env/settings in main and never sent to the renderer. */
     chat: {
-      provider: 'none' | 'anthropic' | 'openai-compat'
-      /** Chat model id (e.g. claude-sonnet-4-6, or an OpenAI-compat model name). */
+      /** 'none' = search-only; 'ollama' = a local Ollama server (zero-config);
+       *  'openai-compat' = any OpenAI-style endpoint (set baseUrl); 'anthropic' = Claude. */
+      provider: 'none' | 'anthropic' | 'openai-compat' | 'ollama'
+      /** Chat model id (e.g. claude-sonnet-4-6, llama3.2, or an OpenAI-compat name). */
       model: string
-      /** OpenAI-compatible base URL (Ollama, LM Studio, a gateway) — openai-compat only. */
+      /** OpenAI-compatible base URL (Ollama, LM Studio, a gateway). Optional for
+       *  'ollama' (defaults to the local server); required for 'openai-compat'. */
       baseUrl: string
     }
   }
