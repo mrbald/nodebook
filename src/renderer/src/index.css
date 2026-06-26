@@ -484,6 +484,12 @@ body {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
   padding: 4px;
   z-index: 50;
+  /* Promote to its own compositing layer so the popup repaints reliably over the
+     editor's / map SVG's GPU-composited surface (fixes an intermittent blank-panel
+     paint artifact — the menu's geometry/contents are always correct). */
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
 }
 .status-menu-item {
   display: block;

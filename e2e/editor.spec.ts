@@ -392,6 +392,29 @@ test('theme selector (status bar) switches the whole-app theme', async () => {
   await switchTheme('System')
 })
 
+test('theme dropdown renders its options (not a blank panel) in editor and map', async () => {
+  await page.locator('.tree-file', { hasText: 'welcome' }).click()
+
+  // Editor view: the popup shows all three choices, visibly.
+  await page.locator('.status-select-theme .status-btn').click()
+  const menu = page.locator('.status-select-theme .status-menu')
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('.status-menu-item')).toHaveCount(3)
+  await expect(menu.getByText('System', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // Map view (the selector lives in the graph's status slot): same popup, visible.
+  await page.locator('.status-btn.graph-open-btn').click()
+  await expect(page.locator('.graph-view')).toBeVisible()
+  await page.locator('.status-select-theme .status-btn').click()
+  const mapMenu = page.locator('.status-select-theme .status-menu')
+  await expect(mapMenu).toBeVisible()
+  await expect(mapMenu.locator('.status-menu-item')).toHaveCount(3)
+  await page.keyboard.press('Escape')
+  await page.locator('.graph-close').click()
+  await expect(page.locator('.graph-view')).toHaveCount(0)
+})
+
 test('Export PDF writes a .pdf file', async () => {
   const pdfPath = join(tmpdir(), 'nodebook-e2e-export.pdf')
   await app.evaluate(async ({ dialog }, p) => {
