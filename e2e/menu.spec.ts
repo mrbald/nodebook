@@ -85,3 +85,8 @@ test('menu command: new-note prompts and creates a note', async () => {
   await page.locator('.modal-btn-primary').click()
   await expect(page.locator('.tree-file', { hasText: 'Menu Made Note' })).toBeVisible()
 })
+
+test('menu command: Ask falls back to Settings when no chat provider is configured', async () => {
+  await menuCmd('ask') // no [talk.chat] provider in this run → guide the user to Settings
+  await expect(page.locator('.settings-title')).toHaveText('Settings')
+})

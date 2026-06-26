@@ -59,6 +59,32 @@ text:
 - **Indentation = containment** — nested bullets become a tree
 - A `## Edges` section with `[[A]] relation [[B]]` lines declares relations
 
+## Vaults, notes & the file tree
+
+A **vault** is just a folder of Markdown files. Open one with **File ▸ Open
+Vault** (⌘O); ones you've opened before are under **File ▸ Open Recent**. Start a
+fresh one with **File ▸ New Vault…**.
+
+- **New note** — **File ▸ New Note** (⌘N), or right-click a folder in the tree.
+- **Organise** — right-click any file or folder in the sidebar tree to **rename**
+  or **delete** it, or make a **new note/folder** inside it. Edits made on disk
+  show up in the tree automatically.
+- **Save** — **File ▸ Save** (⌘S). Saving is explicit by default; a dot marks an
+  unsaved note (turn on autosave in Settings if you prefer).
+
+## Finding notes
+
+Type in the **search box** at the top of the sidebar to find notes by their text,
+then click a result to open it. With **Talk to docs** on (below), the same box
+also finds notes by *meaning* — those hits are marked with ✨.
+
+## Settings
+
+Open settings with **Preferences** (⌘,) or the **⚙ Settings** button. They're a
+small **TOML** file you edit in place; changes apply as soon as you save (⌘S).
+**Reveal defaults** shows every option with its default value next to yours, and
+**Reset to defaults** restores the original file.
+
 ## Knowledge map
 
 Click **⊹ Map** in the bottom bar to see the current note as a dot, with lines to
@@ -154,3 +180,18 @@ Switch from the bottom-right status bar, or with the keyboard:
 | **Reading** | ⌘3 | Fully styled, read-only |
 
 **⌘E** toggles Live ⇄ Reading · **⌘S** saves · **⌘P** prints / exports a PDF.
+
+## Keyboard shortcuts
+
+| Action | Shortcut |
+|---|---|
+| Open vault | ⌘O |
+| New note | ⌘N |
+| Save | ⌘S |
+| Code / Live / Reading mode | ⌘1 / ⌘2 / ⌘3 |
+| Toggle Live ⇄ Reading | ⌘E |
+| Knowledge map | ⌘G |
+| Settings (Preferences) | ⌘, |
+| Print / export PDF | ⌘P |
+
+On Windows and Linux, use **Ctrl** in place of **⌘**.
