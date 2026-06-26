@@ -117,9 +117,10 @@ const api = {
     ipcRenderer.on('index:changed', listener)
     return () => ipcRenderer.removeListener('index:changed', listener)
   },
-  /** Subscribe to application-menu commands (export-pdf, print, toggle-read). */
-  onMenuCommand: (cb: (cmd: string) => void): (() => void) => {
-    const listener = (_e: unknown, cmd: string): void => cb(cmd)
+  /** Subscribe to application-menu commands. Some carry a payload (e.g.
+   *  `open-vault` with a vault path). */
+  onMenuCommand: (cb: (cmd: string, arg?: string) => void): (() => void) => {
+    const listener = (_e: unknown, cmd: string, arg?: string): void => cb(cmd, arg)
     ipcRenderer.on('menu:command', listener)
     return () => ipcRenderer.removeListener('menu:command', listener)
   }

@@ -401,23 +401,6 @@ export default function App() {
     await window.nodebook.exportPdf(active?.name ?? 'note')
   }, [fillPrint, active])
 
-  // Application-menu commands (also drive the ⌘E / ⌘P accelerators).
-  useEffect(() => {
-    return window.nodebook.onMenuCommand((cmd) => {
-      // ⌘E toggles between writing (Live) and Reading; ⌘1/2/3 pick a mode.
-      if (cmd === 'toggle-read') setEditorMode((m) => (m === 'reading' ? 'live' : 'reading'))
-      else if (cmd === 'mode-code') setEditorMode('code')
-      else if (cmd === 'mode-live') setEditorMode('live')
-      else if (cmd === 'mode-reading') setEditorMode('reading')
-      else if (cmd === 'help') openHelp()
-      else if (cmd === 'export-pdf') void exportPdf()
-      else if (cmd === 'print') {
-        fillPrint()
-        window.print()
-      }
-    })
-  }, [exportPdf, fillPrint, openHelp])
-
   // Absolute directory a "new" action should create into.
   const dirOf = (target: ContextTarget): string => {
     if (!vault) return ''
@@ -434,20 +417,23 @@ export default function App() {
       ? target.file.name
       : (target as { path: string }).path.split('/').pop() ?? ''
 
-  const newNoteIn = (dir: string): void => {
-    setPrompt({
-      title: 'New note name',
-      onConfirm: (name) => {
-        setPrompt(null)
-        void window.nodebook.createFile(dir, name).then(async (p) => {
-          if (!p) return
-          const files = await relist()
-          const nf = files.find((f) => f.path === p)
-          if (nf) void openFile(nf)
-        })
-      }
-    })
-  }
+  const newNoteIn = useCallback(
+    (dir: string): void => {
+      setPrompt({
+        title: 'New note name',
+        onConfirm: (name) => {
+          setPrompt(null)
+          void window.nodebook.createFile(dir, name).then(async (p) => {
+            if (!p) return
+            const files = await relist()
+            const nf = files.find((f) => f.path === p)
+            if (nf) void openFile(nf)
+          })
+        }
+      })
+    },
+    [relist, openFile]
+  )
 
   const newFolderIn = (dir: string): void => {
     setPrompt({
@@ -516,6 +502,55 @@ export default function App() {
     }
     setMenu({ x, y, items })
   }
+
+  // Application-menu commands (also drive the ⌘E/⌘P/⌘S/⌘O/⌘N/⌘G/⌘, accelerators).
+  // Defined after the handlers it dispatches to so their identities are in scope.
+  useEffect(() => {
+    return window.nodebook.onMenuCommand((cmd, arg) => {
+      // ⌘E toggles writing (Live) ⇄ Reading; ⌘1/2/3 pick a mode.
+      if (cmd === 'toggle-read') setEditorMode((m) => (m === 'reading' ? 'live' : 'reading'))
+      else if (cmd === 'mode-code') setEditorMode('code')
+      else if (cmd === 'mode-live') setEditorMode('live')
+      else if (cmd === 'mode-reading') setEditorMode('reading')
+      else if (cmd === 'help') openHelp()
+      else if (cmd === 'export-pdf') void exportPdf()
+      else if (cmd === 'print') {
+        fillPrint()
+        window.print()
+      } else if (cmd === 'save') {
+        if (settingsOpen) configSaver.saveNow()
+        else noteSaver.saveNow()
+      } else if (cmd === 'settings') void openSettings()
+      else if (cmd === 'new-vault') void newVault()
+      else if (cmd === 'open-vault-dialog') void openVault()
+      else if (cmd === 'open-vault') {
+        if (arg) void enterVault(arg)
+      } else if (cmd === 'new-note') {
+        if (vault) newNoteIn(vault)
+      } else if (cmd === 'map') {
+        if (active) setGraphOpen(true)
+      } else if (cmd === 'ask') {
+        if (talk.canAsk) openAsk()
+        else void openSettings()
+      }
+    })
+  }, [
+    exportPdf,
+    fillPrint,
+    openHelp,
+    openSettings,
+    openVault,
+    newVault,
+    enterVault,
+    newNoteIn,
+    openAsk,
+    settingsOpen,
+    configSaver,
+    noteSaver,
+    vault,
+    active,
+    talk.canAsk
+  ])
 
   // The right panel (backlinks) only shows when editing a note; collapse the grid
   // to two columns otherwise (map / settings / help / empty) so the centre fills

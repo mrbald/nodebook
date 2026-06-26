@@ -1,5 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
-import type { MenuItemConstructorOptions } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, relative, dirname, sep } from 'path'
 import {
   promises as fs,
@@ -28,6 +27,8 @@ import {
   type ThemeMode
 } from './settings'
 import { makeChatModel } from './rag/chat'
+import { buildAppMenu } from './menu'
+import { addRecent } from './recents'
 import type { Citation, TalkStatus } from '../shared/types'
 
 // Name the app so the macOS menu bar / dialogs say "Nodebook", not "Electron".
@@ -285,7 +286,11 @@ function registerIpc(): void {
     return realpathSync(res.filePaths[0])
   })
 
-  ipcMain.handle('vault:open', (_e, root: string) => openVault(root))
+  ipcMain.handle('vault:open', (_e, root: string) => {
+    addRecent(root) // remember it for File ▸ Open Recent, then refresh the menu
+    refreshAppMenu()
+    return openVault(root)
+  })
 
   ipcMain.handle('vault:list', (_e, root: string) => scanVault(root))
 
@@ -588,52 +593,14 @@ function registerIpc(): void {
   })
 }
 
-function buildAppMenu(): void {
-  const isMac = process.platform === 'darwin'
-  const send = (cmd: string): void => mainWindow?.webContents.send('menu:command', cmd)
-  const template: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ role: 'appMenu' as const }] : []),
-    {
-      label: 'File',
-      submenu: [
-        { label: 'Export PDF…', click: () => send('export-pdf') },
-        { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => send('print') },
-        { type: 'separator' as const },
-        isMac ? { role: 'close' as const } : { role: 'quit' as const }
-      ]
-    },
-    { role: 'editMenu' },
-    {
-      label: 'View',
-      submenu: [
-        { label: 'Code', accelerator: 'CmdOrCtrl+1', click: () => send('mode-code') },
-        { label: 'Live Preview', accelerator: 'CmdOrCtrl+2', click: () => send('mode-live') },
-        { label: 'Reading', accelerator: 'CmdOrCtrl+3', click: () => send('mode-reading') },
-        { label: 'Toggle Reading', accelerator: 'CmdOrCtrl+E', click: () => send('toggle-read') },
-        { type: 'separator' as const },
-        { role: 'reload' as const },
-        { role: 'toggleDevTools' as const },
-        { type: 'separator' as const },
-        { role: 'resetZoom' as const },
-        { role: 'zoomIn' as const },
-        { role: 'zoomOut' as const },
-        { type: 'separator' as const },
-        // Native role → label flips "Enter Full Screen" / "Exit Full Screen".
-        { role: 'togglefullscreen' as const }
-      ]
-    },
-    { role: 'windowMenu' },
-    {
-      role: 'help',
-      submenu: [{ label: 'Markdown & Syntax', click: () => send('help') }]
-    }
-  ]
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+/** Rebuild + install the application menu (e.g. after the recents list changes). */
+function refreshAppMenu(): void {
+  buildAppMenu(() => mainWindow)
 }
 
 app.whenReady().then(() => {
   registerIpc()
-  buildAppMenu()
+  refreshAppMenu()
   createWindow()
   if (readSettings().telemetry.enabled) telemetry.start()
 

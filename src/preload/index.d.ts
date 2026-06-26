@@ -52,7 +52,7 @@ export interface NodebookApi {
   exportPdf: (name: string) => Promise<boolean>
   onVaultChanged: (cb: () => void) => () => void
   onIndexChanged: (cb: () => void) => () => void
-  onMenuCommand: (cb: (cmd: string) => void) => () => void
+  onMenuCommand: (cb: (cmd: string, arg?: string) => void) => () => void
 }
 
 declare global {
