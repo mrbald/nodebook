@@ -13,7 +13,7 @@ import {
   readFileSync
 } from 'fs'
 import chokidar, { type FSWatcher } from 'chokidar'
-import type { MarkdownFile, VaultListing } from '../shared/types'
+import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
 import { Telemetry } from './telemetry'
 import {
@@ -290,6 +290,20 @@ function registerIpc(): void {
     addRecent(root) // remember it for File ▸ Open Recent, then refresh the menu
     refreshAppMenu()
     return openVault(root)
+  })
+
+  // The renderer reports which actions apply so the menu can grey out the rest;
+  // rebuild only when the state actually changes (note switches are frequent).
+  ipcMain.on('menu:state', (_e, s: MenuState) => {
+    if (
+      s.hasVault === menuState.hasVault &&
+      s.hasNote === menuState.hasNote &&
+      s.canSave === menuState.canSave &&
+      s.canAsk === menuState.canAsk
+    )
+      return
+    menuState = s
+    refreshAppMenu()
   })
 
   ipcMain.handle('vault:list', (_e, root: string) => scanVault(root))
@@ -593,9 +607,13 @@ function registerIpc(): void {
   })
 }
 
-/** Rebuild + install the application menu (e.g. after the recents list changes). */
+// Which menu actions currently apply. The renderer reports this (it owns the UI
+// state); main greys out the rest. Conservative until the renderer first reports.
+let menuState: MenuState = { hasVault: false, hasNote: false, canSave: false, canAsk: false }
+
+/** Rebuild + install the application menu (after recents or enabled-state change). */
 function refreshAppMenu(): void {
-  buildAppMenu(() => mainWindow)
+  buildAppMenu(() => mainWindow, menuState)
 }
 
 app.whenReady().then(() => {

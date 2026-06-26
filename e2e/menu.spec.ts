@@ -90,3 +90,18 @@ test('menu command: Ask falls back to Settings when no chat provider is configur
   await menuCmd('ask') // no [talk.chat] provider in this run → guide the user to Settings
   await expect(page.locator('.settings-title')).toHaveText('Settings')
 })
+
+// Reads the real (native) menu item's enabled flag from the main process.
+function menuItemEnabled(menuLabel: string, itemLabel: string): Promise<boolean | undefined> {
+  return app.evaluate(({ Menu }, { menuLabel, itemLabel }) => {
+    const top = Menu.getApplicationMenu()?.items.find((i) => i.label === menuLabel)
+    return top?.submenu?.items.find((i) => i.label === itemLabel)?.enabled
+  }, { menuLabel, itemLabel })
+}
+
+test('the live menu enables note actions once a note is open (states wiring)', async () => {
+  await page.locator('.tree-file').first().click()
+  await expect.poll(() => menuItemEnabled('File', 'Export PDF…')).toBe(true)
+  await expect.poll(() => menuItemEnabled('File', 'Save')).toBe(true)
+  await expect.poll(() => menuItemEnabled('View', 'Knowledge Map')).toBe(true)
+})

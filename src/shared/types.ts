@@ -90,6 +90,19 @@ export interface AskResult {
   citations: Citation[]
 }
 
+/** Enabled-state inputs the renderer reports to the main process so the app menu
+ *  can grey out actions that don't apply (no vault/note open, no chat provider). */
+export interface MenuState {
+  /** A vault is open. */
+  hasVault: boolean
+  /** A note is open in the editor (drives Export/Print/Knowledge Map). */
+  hasNote: boolean
+  /** A savable document is open — a note, or the settings editor (drives Save). */
+  canSave: boolean
+  /** An "Ask" chat provider is configured (drives Ask Your Notes). */
+  canAsk: boolean
+}
+
 /** A semantically-similar note (cosine over per-note embedding centroids). */
 export interface TalkNeighbor {
   path: string

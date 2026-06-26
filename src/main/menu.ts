@@ -1,5 +1,6 @@
 import { app, dialog, shell, Menu } from 'electron'
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron'
+import type { MenuState } from '../shared/types'
 import { readRecents, clearRecents } from './recents'
 
 /** The project home, used by Help ▸ Learn More / About. A hard-coded constant. */
@@ -13,6 +14,8 @@ export function vaultLabel(path: string): string {
 export interface MenuDeps {
   isMac: boolean
   appName: string
+  /** Which actions currently apply (greys out the rest). */
+  state: MenuState
   /** Recent vault paths, most-recent-first. */
   recents: string[]
   /** Send a command (with optional payload) to the renderer. */
@@ -31,7 +34,7 @@ export interface MenuDeps {
  * *type*, so this is unit-testable without an Electron runtime.
  */
 export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
-  const { isMac, recents, send } = d
+  const { isMac, recents, send, state } = d
 
   const openRecentSubmenu: MenuItemConstructorOptions[] = recents.length
     ? [
@@ -81,16 +84,16 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
     {
       label: 'File',
       submenu: [
-        { label: 'New Note', accelerator: 'CmdOrCtrl+N', click: () => send('new-note') },
+        { label: 'New Note', accelerator: 'CmdOrCtrl+N', enabled: state.hasVault, click: () => send('new-note') },
         { label: 'New Vault…', click: () => send('new-vault') },
         { type: 'separator' },
         { label: 'Open Vault…', accelerator: 'CmdOrCtrl+O', click: () => send('open-vault-dialog') },
         { label: 'Open Recent', submenu: openRecentSubmenu },
         { type: 'separator' },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => send('save') },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', enabled: state.canSave, click: () => send('save') },
         { type: 'separator' },
-        { label: 'Export PDF…', click: () => send('export-pdf') },
-        { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => send('print') },
+        { label: 'Export PDF…', enabled: state.hasNote, click: () => send('export-pdf') },
+        { label: 'Print…', accelerator: 'CmdOrCtrl+P', enabled: state.hasNote, click: () => send('print') },
         { type: 'separator' },
         ...fileTail
       ]
@@ -104,8 +107,8 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
         { label: 'Reading', accelerator: 'CmdOrCtrl+3', click: () => send('mode-reading') },
         { label: 'Toggle Reading', accelerator: 'CmdOrCtrl+E', click: () => send('toggle-read') },
         { type: 'separator' },
-        { label: 'Knowledge Map', accelerator: 'CmdOrCtrl+G', click: () => send('map') },
-        { label: 'Ask Your Notes', click: () => send('ask') },
+        { label: 'Knowledge Map', accelerator: 'CmdOrCtrl+G', enabled: state.hasNote, click: () => send('map') },
+        { label: 'Ask Your Notes', enabled: state.canAsk, click: () => send('ask') },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -132,8 +135,9 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
 
 /** Build + install the application menu. Reads the live recents list; pass a
  *  getter for the window so the menu works regardless of build/create order and
- *  across window recreation. Call again whenever recents change. */
-export function buildAppMenu(getWin: () => BrowserWindow | null): void {
+ *  across window recreation, plus the current enabled-state. Call again whenever
+ *  recents or the state change. */
+export function buildAppMenu(getWin: () => BrowserWindow | null, state: MenuState): void {
   const showAbout = (): void => {
     void dialog.showMessageBox(getWin() ?? undefined!, {
       type: 'info',
@@ -146,13 +150,14 @@ export function buildAppMenu(getWin: () => BrowserWindow | null): void {
   const template = menuTemplate({
     isMac: process.platform === 'darwin',
     appName: app.name,
+    state,
     recents: readRecents(),
     send: (cmd, arg) => getWin()?.webContents.send('menu:command', cmd, arg),
     openExternal: (url) => void shell.openExternal(url),
     showAbout,
     clearRecents: () => {
       clearRecents()
-      buildAppMenu(getWin)
+      buildAppMenu(getWin, state)
     }
   })
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))

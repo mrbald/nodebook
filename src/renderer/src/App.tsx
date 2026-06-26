@@ -503,6 +503,18 @@ export default function App() {
     setMenu({ x, y, items })
   }
 
+  // Report which actions apply so the menu can grey out the rest (Save/Export/
+  // Print need a note or the settings editor; New Note needs a vault; Map needs a
+  // note; Ask needs a chat provider). main rebuilds the menu only on real changes.
+  useEffect(() => {
+    window.nodebook.setMenuState({
+      hasVault: vault !== null,
+      hasNote: active !== null,
+      canSave: active !== null || settingsOpen,
+      canAsk: talk.canAsk
+    })
+  }, [vault, active, settingsOpen, talk.canAsk])
+
   // Application-menu commands (also drive the ⌘E/⌘P/⌘S/⌘O/⌘N/⌘G/⌘, accelerators).
   // Defined after the handlers it dispatches to so their identities are in scope.
   useEffect(() => {

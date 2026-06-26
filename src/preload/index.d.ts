@@ -2,6 +2,7 @@ import type {
   AskResult,
   Backlink,
   GraphData,
+  MenuState,
   Outbound,
   SearchHit,
   Settings,
@@ -52,6 +53,7 @@ export interface NodebookApi {
   exportPdf: (name: string) => Promise<boolean>
   onVaultChanged: (cb: () => void) => () => void
   onIndexChanged: (cb: () => void) => () => void
+  setMenuState: (s: MenuState) => void
   onMenuCommand: (cb: (cmd: string, arg?: string) => void) => () => void
 }
 

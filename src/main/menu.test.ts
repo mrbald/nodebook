@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
 import { menuTemplate, vaultLabel, type MenuDeps } from './menu'
 
+const ALL_ON = { hasVault: true, hasNote: true, canSave: true, canAsk: true }
+
 const deps = (over: Partial<MenuDeps> = {}): MenuDeps => ({
   isMac: true,
   appName: 'Nodebook',
+  state: ALL_ON,
   recents: [],
   send: () => {},
   openExternal: () => {},
@@ -83,6 +86,28 @@ describe('menuTemplate', () => {
     expect(tpl[0].label).toBe('File') // no leading app menu
     expect(labels(sub(tpl, 'File'))).toContain('Preferences…')
     expect(labels(sub(tpl, 'help'))).toContain('About Nodebook')
+  })
+
+  it('greys out actions that do not apply (states hygiene)', () => {
+    const tpl = menuTemplate(deps({ state: { hasVault: false, hasNote: false, canSave: false, canAsk: false } }))
+    const file = sub(tpl, 'File')
+    const view = sub(tpl, 'View')
+    expect(item(file, 'New Note')?.enabled).toBe(false) // no vault
+    expect(item(file, 'Save')?.enabled).toBe(false) // nothing savable
+    expect(item(file, 'Export PDF…')?.enabled).toBe(false) // no note
+    expect(item(file, 'Print…')?.enabled).toBe(false)
+    expect(item(view, 'Knowledge Map')?.enabled).toBe(false)
+    expect(item(view, 'Ask Your Notes')?.enabled).toBe(false)
+    // Always-available actions are not gated.
+    expect(item(file, 'Open Vault…')?.enabled).toBeUndefined()
+    expect(item(file, 'New Vault…')?.enabled).toBeUndefined()
+  })
+
+  it('enables note/vault actions when their preconditions hold', () => {
+    const file = sub(menuTemplate(deps({ state: ALL_ON })), 'File')
+    expect(item(file, 'New Note')?.enabled).toBe(true)
+    expect(item(file, 'Save')?.enabled).toBe(true)
+    expect(item(file, 'Export PDF…')?.enabled).toBe(true)
   })
 })
 

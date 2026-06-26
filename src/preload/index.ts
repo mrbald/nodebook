@@ -3,6 +3,7 @@ import type {
   AskResult,
   Backlink,
   GraphData,
+  MenuState,
   Outbound,
   SearchHit,
   Settings,
@@ -117,6 +118,8 @@ const api = {
     ipcRenderer.on('index:changed', listener)
     return () => ipcRenderer.removeListener('index:changed', listener)
   },
+  /** Tell main which menu actions currently apply (greys out the rest). */
+  setMenuState: (s: MenuState): void => ipcRenderer.send('menu:state', s),
   /** Subscribe to application-menu commands. Some carry a payload (e.g.
    *  `open-vault` with a vault path). */
   onMenuCommand: (cb: (cmd: string, arg?: string) => void): (() => void) => {
