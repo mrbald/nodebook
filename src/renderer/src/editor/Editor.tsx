@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { EditorView, keymap, drawSelection, highlightActiveLine } from '@codemirror/view'
 import { EditorState, type Extension } from '@codemirror/state'
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
@@ -39,6 +39,8 @@ interface Props {
   theme: string
   /** Which of the three view modes to render; switches live. */
   mode: ViewMode
+  /** Scroll to + select this character range once (a citation jump). */
+  revealRange?: { from: number; to: number } | null
 }
 
 export function Editor({
@@ -49,7 +51,8 @@ export function Editor({
   onOpenUrl,
   linkExists,
   theme,
-  mode
+  mode,
+  revealRange
 }: Props) {
   // Live note list for autocomplete without rebuilding the editor.
   const namesRef = useRef(noteNames)
@@ -113,13 +116,28 @@ export function Editor({
     }
   }, [mode])
 
-  const { containerRef } = useCodeMirror({
+  const { containerRef, viewRef } = useCodeMirror({
     initialDoc,
     extensions,
     theme: getEditorTheme(theme),
     mode: modeExtension,
     onDocChange: (doc) => onChangeRef.current(doc)
   })
+
+  // Jump to a cited span: select + centre it once (a Sources-panel click). Runs
+  // after the view mounts because this effect is registered after useCodeMirror's.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !revealRange) return
+    const len = view.state.doc.length
+    const from = Math.max(0, Math.min(revealRange.from, len))
+    const to = Math.max(from, Math.min(revealRange.to, len))
+    view.dispatch({
+      selection: { anchor: from, head: to },
+      effects: EditorView.scrollIntoView(from, { y: 'center' })
+    })
+    view.focus()
+  }, [revealRange, viewRef])
 
   return <div className={`cm-host cm-mode-${mode}`} ref={containerRef} />
 }

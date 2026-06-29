@@ -225,6 +225,11 @@ body {
 .outbound-item.is-link:hover {
   background: var(--accent-bg);
 }
+/* Distilled-note provenance: the cited character range, muted. */
+.source-span {
+  color: var(--muted);
+  font-size: 11px;
+}
 
 /* --- Editor pane --------------------------------------------------------- */
 
