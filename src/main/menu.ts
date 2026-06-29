@@ -115,8 +115,11 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' }
+        // macOS auto-adds "Enter Full Screen" to the View menu, so only add our
+        // own on Windows/Linux — otherwise it shows twice.
+        ...((isMac
+          ? []
+          : [{ type: 'separator' }, { role: 'togglefullscreen' }]) as MenuItemConstructorOptions[])
       ]
     },
     { role: 'windowMenu' },
