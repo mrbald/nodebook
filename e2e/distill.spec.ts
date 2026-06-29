@@ -129,6 +129,13 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(page.locator('.graph-edge').first()).toBeVisible()
 })
 
+test('distills a PDF via pdf.js text extraction → cited notes', async () => {
+  const pdfPath = join(__dirname, 'fixtures', 'sample.pdf')
+  const res = await page.evaluate((p) => window.nodebook.distillRun(p), pdfPath)
+  expect(res.stats.chunks).toBeGreaterThan(0)
+  expect(res.stats.notes).toBeGreaterThan(0) // extracted text flowed through the pipeline
+})
+
 test('the run map toggles Standalone ⟷ Overlay (overlay adds the vault notes)', async () => {
   // The run map is open from the previous test.
   await expect(page.locator('.distill-view-toggle')).toContainText('Standalone')

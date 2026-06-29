@@ -18,6 +18,7 @@ import { VaultIndex } from './indexer'
 import { overlayGraph } from './graph'
 import { distill, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
+import { convertDocument } from './distill/convert'
 import { mergeRun, unmergeRun, readMergeManifest } from './distill/artifact'
 import { Telemetry } from './telemetry'
 import {
@@ -616,7 +617,7 @@ function registerIpc(): void {
     const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
       title: 'Distill a document',
       properties: ['openFile'],
-      filters: [{ name: 'Text & Markdown', extensions: ['md', 'markdown', 'txt', 'text'] }]
+      filters: [{ name: 'Documents', extensions: ['pdf', 'md', 'markdown', 'txt', 'text'] }]
     })
     if (res.canceled || res.filePaths.length === 0) return null
     return res.filePaths[0]
@@ -629,7 +630,9 @@ function registerIpc(): void {
     if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
     const cfg = chatProviderConfig()
     if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
-    const text = await fs.readFile(filePath, 'utf8')
+    // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
+    // rest of the pipeline is format-agnostic.
+    const text = await convertDocument(filePath)
     const source = { file: basename(filePath), text }
     const runId = distillRunId(filePath)
     const ctrl = new AbortController()
