@@ -90,6 +90,8 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
         { label: 'Open Vault…', accelerator: 'CmdOrCtrl+O', click: () => send('open-vault-dialog') },
         { label: 'Open Recent', submenu: openRecentSubmenu },
         { type: 'separator' },
+        { label: 'Distill a Document…', enabled: state.hasVault, click: () => send('distill') },
+        { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', enabled: state.canSave, click: () => send('save') },
         { type: 'separator' },
         { label: 'Export PDF…', enabled: state.hasNote, click: () => send('export-pdf') },
@@ -113,8 +115,11 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' }
+        // macOS auto-adds "Enter Full Screen" to the View menu, so only add our
+        // own on Windows/Linux — otherwise it shows twice.
+        ...((isMac
+          ? []
+          : [{ type: 'separator' }, { role: 'togglefullscreen' }]) as MenuItemConstructorOptions[])
       ]
     },
     { role: 'windowMenu' },

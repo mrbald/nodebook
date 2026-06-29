@@ -39,6 +39,7 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
       if (!cfg.apiKey) throw new Error('No API key — set ANTHROPIC_API_KEY or [talk.chat] apiKey.')
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
+        signal: req.signal,
         headers: {
           'content-type': 'application/json',
           'x-api-key': cfg.apiKey,
@@ -80,6 +81,7 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
         : req.messages
       const res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
+        signal: req.signal,
         headers: {
           'content-type': 'application/json',
           ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {})
@@ -101,12 +103,29 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
   }
 }
 
-/** Deterministic, network-free chat for e2e — echoes a short grounded answer
- *  with an inline `[[wikilink]]` citation so the rendered-answer path is testable. */
+/** Deterministic, network-free chat for e2e. For "Ask" it echoes a short grounded
+ *  answer with an inline `[[wikilink]]` citation; for a distill extraction prompt
+ *  it returns valid JSON quoting the first chunk shown, so the whole distill
+ *  vertical is testable without a key or network. */
 function stubChat(): ChatModel {
   return {
     id: 'stub',
     async *chat(req: ChatRequest): AsyncIterable<string> {
+      if ((req.system ?? '').includes('extract structured knowledge')) {
+        const user = req.messages.map((m) => m.content).join('\n')
+        const m = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)
+        if (m) {
+          const quote = m[2].split(/\s+/).slice(0, 5).join(' ')
+          yield JSON.stringify({
+            items: [
+              { kind: 'concept', title: quote, summary: 'Stubbed.', evidence: [{ chunkId: Number(m[1]), quote }], links: [] }
+            ]
+          })
+        } else {
+          yield '{"items":[]}'
+        }
+        return
+      }
       const q = req.messages[req.messages.length - 1]?.content ?? ''
       for (const tok of [
         'Based on your notes, ',

@@ -64,6 +64,11 @@ describe('menuTemplate', () => {
     expect(item(view, 'Knowledge Map')?.accelerator).toBe('CmdOrCtrl+G')
   })
 
+  it('no duplicate full-screen: macOS lets the system add it; other OSes add our own', () => {
+    expect(roles(sub(menuTemplate(deps({ isMac: true })), 'View'))).not.toContain('togglefullscreen')
+    expect(roles(sub(menuTemplate(deps({ isMac: false })), 'View'))).toContain('togglefullscreen')
+  })
+
   it('Help has Keyboard Shortcuts, Learn More, and DevTools moved here', () => {
     const help = sub(menuTemplate(deps()), 'help')
     expect(labels(help)).toEqual(

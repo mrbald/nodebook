@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AskResult,
   Backlink,
+  DistillMergeResult,
+  DistillMergeStatus,
+  DistillProgress,
+  DistillRunResult,
   GraphData,
   MenuState,
   Outbound,
@@ -117,6 +121,48 @@ const api = {
     const listener = (): void => cb()
     ipcRenderer.on('index:changed', listener)
     return () => ipcRenderer.removeListener('index:changed', listener)
+  },
+  // Distill a document → a staged, cited run of notes + its own map.
+  distillPick: (): Promise<string | null> => ipcRenderer.invoke('distill:pick'),
+  distillRun: (filePath: string): Promise<DistillRunResult> =>
+    ipcRenderer.invoke('distill:run', filePath),
+  distillCancel: (runId: string): Promise<void> => ipcRenderer.invoke('distill:cancel', runId),
+  distillGraph: (
+    runId: string,
+    focus?: string | null,
+    opts?: { depth?: number; cap?: number }
+  ): Promise<GraphData> => ipcRenderer.invoke('distill:graph', runId, focus ?? null, opts),
+  /** The vault + this run unioned live (overlay view; no writes). */
+  distillOverlayGraph: (
+    runId: string,
+    focus?: string | null,
+    opts?: { depth?: number; cap?: number }
+  ): Promise<GraphData> => ipcRenderer.invoke('distill:overlayGraph', runId, focus ?? null, opts),
+  distillListRuns: (): Promise<string[]> => ipcRenderer.invoke('distill:listRuns'),
+  distillRemove: (runId: string): Promise<void> => ipcRenderer.invoke('distill:remove', runId),
+  /** Merge a run into the vault (reversible). */
+  distillMerge: (runId: string): Promise<DistillMergeResult> =>
+    ipcRenderer.invoke('distill:merge', runId),
+  /** Undo a run's merge. */
+  distillUnmerge: (runId: string): Promise<boolean> => ipcRenderer.invoke('distill:unmerge', runId),
+  /** Whether a run has been merged into the vault. */
+  distillMergeStatus: (runId: string): Promise<DistillMergeStatus> =>
+    ipcRenderer.invoke('distill:mergeStatus', runId),
+  /** Subscribe to a distill run's progress. */
+  onDistillProgress: (cb: (runId: string, p: DistillProgress) => void): (() => void) => {
+    const listener = (_e: unknown, runId: string, p: DistillProgress): void => cb(runId, p)
+    ipcRenderer.on('distill:progress', listener)
+    return () => ipcRenderer.removeListener('distill:progress', listener)
+  },
+  /** Let the renderer's WASM embedder answer main's distill embed requests. */
+  onDistillEmbedRequest: (handler: (texts: string[]) => Promise<number[][]>): (() => void) => {
+    const listener = (_e: unknown, id: number, texts: string[]): void => {
+      void handler(texts)
+        .then((vectors) => ipcRenderer.send(`distill:embed:res:${id}`, vectors))
+        .catch((err: unknown) => ipcRenderer.send(`distill:embed:res:${id}`, [], String(err)))
+    }
+    ipcRenderer.on('distill:embed:req', listener)
+    return () => ipcRenderer.removeListener('distill:embed:req', listener)
   },
   /** Tell main which menu actions currently apply (greys out the rest). */
   setMenuState: (s: MenuState): void => ipcRenderer.send('menu:state', s),

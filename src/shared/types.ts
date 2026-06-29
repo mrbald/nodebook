@@ -33,6 +33,9 @@ export interface GraphNode {
   degree: number
   /** The note the slice is centred on (local map). */
   focus: boolean
+  /** In an overlay view, where this node's name came from: the vault, the
+   *  distilled run, or both (a same-name overlap). Absent in single-source views. */
+  source?: 'vault' | 'run' | 'both'
 }
 
 /** A directed edge: `source --relation--> target` (a harvested triple). */
@@ -192,4 +195,41 @@ export interface Settings {
   telemetry: {
     enabled: boolean
   }
+}
+
+/** The extraction funnel for a distill run — surfaced, never silently capped. */
+export interface DistillStats {
+  chunks: number
+  clusters: number
+  extracted: number
+  grounded: number
+  dropped: number
+  merged: number
+  notes: number
+  failedClusters: number
+}
+
+export interface DistillRunResult {
+  runId: string
+  stats: DistillStats
+}
+
+export interface DistillProgress {
+  phase: 'chunking' | 'embedding' | 'clustering' | 'extracting' | 'finalizing' | 'done'
+  done: number
+  total: number
+}
+
+/** Outcome of merging a run into the vault (reversible). */
+export interface DistillMergeResult {
+  /** Vault-relative folder the notes were written into. */
+  folder: string
+  count: number
+}
+
+/** Whether a run has been merged into the vault, for the UI's Merge/Undo state. */
+export interface DistillMergeStatus {
+  merged: boolean
+  folder?: string
+  count?: number
 }
