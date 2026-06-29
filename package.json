@@ -59,7 +59,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/turndown": "^5.0.6",
-    "@vitejs/plugin-react": "^5.2.0",
+    "@vitejs/plugin-react": "^6.0.3",
     "electron": "^42.5.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
