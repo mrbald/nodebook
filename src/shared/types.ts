@@ -193,3 +193,26 @@ export interface Settings {
     enabled: boolean
   }
 }
+
+/** The extraction funnel for a distill run — surfaced, never silently capped. */
+export interface DistillStats {
+  chunks: number
+  clusters: number
+  extracted: number
+  grounded: number
+  dropped: number
+  merged: number
+  notes: number
+  failedClusters: number
+}
+
+export interface DistillRunResult {
+  runId: string
+  stats: DistillStats
+}
+
+export interface DistillProgress {
+  phase: 'chunking' | 'embedding' | 'clustering' | 'extracting' | 'finalizing' | 'done'
+  done: number
+  total: number
+}

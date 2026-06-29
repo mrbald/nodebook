@@ -10,7 +10,7 @@
  * silently). Every claim passes the citation gate before becoming a note.
  */
 
-import type { Embedder, ChatModel, ChatRequest } from '../rag/provider'
+import type { ChatModel, ChatRequest } from '../rag/provider'
 import { chunkMarkdown, embedText, type Chunk } from '../rag/chunk'
 import { chooseK, kmeans, type Point } from './cluster'
 import {
@@ -51,8 +51,14 @@ export interface DistillSource {
   text: string
 }
 
+/** The orchestrator only needs to turn text into vectors (the renderer's WASM
+ *  embedder satisfies this via the main↔renderer bridge; tests pass a stub). */
+export interface DistillEmbedder {
+  embed(texts: string[]): Promise<Float32Array[]>
+}
+
 export interface DistillDeps {
-  embedder: Embedder
+  embedder: DistillEmbedder
   chat: ChatModel
 }
 
@@ -105,7 +111,10 @@ async function extractCluster(
   signal?: AbortSignal
 ): Promise<{ items: ExtractedItem[]; failed: boolean }> {
   const { system, user } = buildExtractionPrompt(chunks)
-  const first = await collect(chat.chat({ system, messages: [{ role: 'user', content: user }] }), signal)
+  const first = await collect(
+    chat.chat({ system, messages: [{ role: 'user', content: user }], signal }),
+    signal
+  )
   let parsed = parseExtraction(first)
   if (!parsed.ok) {
     const repair: ChatRequest = {
@@ -114,7 +123,8 @@ async function extractCluster(
         { role: 'user', content: user },
         { role: 'assistant', content: first.slice(0, 800) },
         { role: 'user', content: 'That was not valid JSON in the required shape. Reply with ONLY the JSON object, nothing else.' }
-      ]
+      ],
+      signal
     }
     parsed = parseExtraction(await collect(chat.chat(repair), signal))
   }

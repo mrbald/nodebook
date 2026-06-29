@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, relative, dirname, sep } from 'path'
+import { join, relative, dirname, sep, basename } from 'path'
 import {
   promises as fs,
   openSync,
@@ -15,6 +15,8 @@ import {
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
+import { distill, type DistillEmbedder } from './distill/run'
+import { StagedRunStore } from './distill/staged'
 import { Telemetry } from './telemetry'
 import {
   ensureSettingsFile,
@@ -29,7 +31,7 @@ import {
 import { makeChatModel } from './rag/chat'
 import { buildAppMenu } from './menu'
 import { addRecent } from './recents'
-import type { Citation, TalkStatus } from '../shared/types'
+import type { Citation, TalkStatus, DistillRunResult } from '../shared/types'
 
 // Name the app so the macOS menu bar / dialogs say "Nodebook", not "Electron".
 // (In `npm run dev` the bold app-menu title is still read from the Electron.app
@@ -175,11 +177,17 @@ function atomicWrite(filePath: string, content: string): void {
 let index: VaultIndex | null = null
 let watcher: FSWatcher | null = null
 let vaultRoot: string | null = null
+let distillRuns: StagedRunStore | null = null
+const distillAbort = new Map<string, AbortController>()
 const telemetry = new Telemetry()
 
 async function closeVault(): Promise<void> {
   if (watcher) await watcher.close()
   watcher = null
+  for (const ctrl of distillAbort.values()) ctrl.abort()
+  distillAbort.clear()
+  distillRuns?.close()
+  distillRuns = null
   index?.close()
   index = null
   vaultRoot = null
@@ -237,6 +245,7 @@ async function openVault(root: string): Promise<VaultListing> {
   await closeVault()
   vaultRoot = root
   index = new VaultIndex(join(root, '.nodebook', 'index.db'))
+  distillRuns = new StagedRunStore(root)
   // If talk-to-docs is on, turn the vector layer on *before* the scan so each
   // indexed file is chunked in the same pass (content-hash gated, so unchanged
   // notes on reopen are skipped and never re-embedded).
@@ -272,6 +281,41 @@ async function openVault(root: string): Promise<VaultListing> {
     .on('unlinkDir', notifyVaultChanged)
 
   return listing
+}
+
+// Bridge distill's embedding to the renderer's WASM embedder. The embedder lives
+// in the renderer (the same one "talk" uses); main owns the run db + chat. One
+// request/response round-trip per batch, correlated by a sequence id.
+function rendererEmbedder(): DistillEmbedder {
+  let seq = 0
+  return {
+    embed(texts: string[]): Promise<Float32Array[]> {
+      const id = ++seq
+      const channel = `distill:embed:res:${id}`
+      return new Promise((resolve, reject) => {
+        if (!mainWindow) {
+          reject(new Error('No window available to embed with'))
+          return
+        }
+        ipcMain.once(channel, (_e, vectors: number[][], err?: string) => {
+          if (err) reject(new Error(err))
+          else resolve(vectors.map((v) => Float32Array.from(v)))
+        })
+        mainWindow.webContents.send('distill:embed:req', id, texts)
+      })
+    }
+  }
+}
+
+/** A safe, readable run id from a document path (basename, sanitized). */
+function distillRunId(file: string): string {
+  const base = basename(file).replace(/\.[^.]+$/, '')
+  return (
+    base
+      .replace(/[^A-Za-z0-9 ._-]+/g, '-')
+      .replace(/^[^A-Za-z0-9]+/, '')
+      .slice(0, 80) || 'run'
+  )
 }
 
 function registerIpc(): void {
@@ -557,6 +601,60 @@ function registerIpc(): void {
   ipcMain.handle('talk:semanticEdges', (_e, paths: string[], k?: number) =>
     index?.talkSemanticEdges(paths, k, readSettings().talk.relatedMinScore) ?? []
   )
+
+  // --- Distill a document -------------------------------------------------
+  // Pick a markdown/text book to distill (a file dialog; any readable file).
+  ipcMain.handle('distill:pick', async (): Promise<string | null> => {
+    const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
+      title: 'Distill a document',
+      properties: ['openFile'],
+      filters: [{ name: 'Text & Markdown', extensions: ['md', 'markdown', 'txt', 'text'] }]
+    })
+    if (res.canceled || res.filePaths.length === 0) return null
+    return res.filePaths[0]
+  })
+
+  // Run the distill pipeline on a document → a staged, cited run-artifact. The
+  // chunks are embedded via the renderer bridge; extraction uses the chat model;
+  // output lands in the run's own db (never the canonical index).
+  ipcMain.handle('distill:run', async (_e, filePath: string): Promise<DistillRunResult> => {
+    if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
+    const cfg = chatProviderConfig()
+    if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
+    const text = await fs.readFile(filePath, 'utf8')
+    const source = { file: basename(filePath), text }
+    const runId = distillRunId(filePath)
+    const ctrl = new AbortController()
+    distillAbort.set(runId, ctrl)
+    try {
+      const result = await distill(
+        source,
+        { embedder: rendererEmbedder(), chat: makeChatModel(cfg) },
+        {
+          signal: ctrl.signal,
+          onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p)
+        }
+      )
+      distillRuns.create(runId, source, result.notes)
+      return { runId, stats: result.stats }
+    } finally {
+      distillAbort.delete(runId)
+    }
+  })
+
+  ipcMain.handle('distill:cancel', (_e, runId: string) => {
+    distillAbort.get(runId)?.abort()
+  })
+
+  ipcMain.handle(
+    'distill:graph',
+    (_e, runId: string, focus: string | null, opts?: { depth?: number; cap?: number }) =>
+      distillRuns?.graph(runId, focus ?? null, opts) ?? { nodes: [], edges: [] }
+  )
+
+  ipcMain.handle('distill:listRuns', () => distillRuns?.list() ?? [])
+
+  ipcMain.handle('distill:remove', (_e, runId: string) => distillRuns?.remove(runId))
 
   // --- Telemetry (measure everything) -------------------------------------
   // Reconcile the measurement to the settings flag (called by the renderer on

@@ -24,6 +24,8 @@ export interface ChatRequest {
   /** Grounding instruction + the retrieved note chunks as context. */
   system?: string
   messages: ChatTurn[]
+  /** Optional cancellation — adapters pass it through to `fetch`. */
+  signal?: AbortSignal
 }
 
 /** Streams answer tokens for a grounded question. */

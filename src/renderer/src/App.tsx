@@ -13,6 +13,7 @@ import { StatusSelect } from './StatusSelect'
 import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
 import { useTalk } from './talk/useTalk'
+import { getEmbedder } from './talk/embedder'
 import { TalkPanel } from './talk/TalkPanel'
 import { AskPanel } from './AskPanel'
 import { TelemetryWidget } from './telemetry/TelemetryWidget'
@@ -140,6 +141,18 @@ export default function App() {
     return () => mq.removeEventListener('change', onChange)
     // Mount-once: load settings + attach the OS-appearance listener.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Answer distill's embed requests with the renderer's WASM embedder (the same
+  // one "talk" uses). Main bridges here because the embedder lives in the
+  // renderer; this keeps a distilled run's chunks off the canonical store.
+  useEffect(() => {
+    return window.nodebook.onDistillEmbedRequest(async (texts) => {
+      const model = settingsRef.current?.talk.embed.model ?? 'Xenova/all-MiniLM-L6-v2'
+      const emb = await getEmbedder(model)
+      const vecs = await emb.embed(texts)
+      return vecs.map((v) => Array.from(v))
+    })
   }, [])
 
   // --- Save controllers (one per editor buffer) ---------------------------
