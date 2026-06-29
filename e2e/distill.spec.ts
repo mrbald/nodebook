@@ -3,6 +3,7 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, sep } from 'path'
+import { zipSync, strToU8 } from 'fflate'
 
 // Verifies the "distill a document" vertical end-to-end — chunk → embed (renderer
 // bridge, faked) → cluster → extract (stub chat) → ground → emit → staged run.db
@@ -134,6 +135,26 @@ test('distills a PDF via pdf.js text extraction → cited notes', async () => {
   const res = await page.evaluate((p) => window.nodebook.distillRun(p), pdfPath)
   expect(res.stats.chunks).toBeGreaterThan(0)
   expect(res.stats.notes).toBeGreaterThan(0) // extracted text flowed through the pipeline
+})
+
+test('distills an EPUB (unzip + HTML→markdown) → cited notes', async () => {
+  const opf =
+    '<?xml version="1.0"?><package><manifest><item id="c1" href="chap1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>'
+  const epub = zipSync({
+    mimetype: strToU8('application/epub+zip'),
+    'META-INF/container.xml': strToU8(
+      '<?xml version="1.0"?><container><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
+    ),
+    'content.opf': strToU8(opf),
+    'chap1.xhtml': strToU8(
+      '<html><body><h1>Faction</h1><p>Faction arises from the unequal distribution of property among citizens.</p></body></html>'
+    )
+  })
+  const epubPath = join(mkdtempSync(join(tmpdir(), 'nodebook-epub-')), 'sample.epub')
+  writeFileSync(epubPath, epub)
+  const res = await page.evaluate((p) => window.nodebook.distillRun(p), epubPath)
+  expect(res.stats.chunks).toBeGreaterThan(0)
+  expect(res.stats.notes).toBeGreaterThan(0)
 })
 
 test('the run map toggles Standalone ⟷ Overlay (overlay adds the vault notes)', async () => {

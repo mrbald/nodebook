@@ -40,12 +40,14 @@
     "@lezer/markdown": "^1.6.4",
     "better-sqlite3": "^12.11.1",
     "chokidar": "^5.0.0",
+    "fflate": "^0.8.3",
     "markdown-it": "^14.2.0",
     "pdfjs-dist": "^6.1.200",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "smol-toml": "^1.7.0",
-    "sqlite-vec": "^0.1.9"
+    "sqlite-vec": "^0.1.9",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -56,6 +58,7 @@
     "@types/node": "^26.0.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^42.5.0",
     "electron-builder": "^26.15.3",

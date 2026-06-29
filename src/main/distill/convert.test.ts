@@ -2,9 +2,27 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { pdfToMarkdown, convertDocument } from './convert'
+import { zipSync, strToU8 } from 'fflate'
+import { pdfToMarkdown, epubToMarkdown, convertDocument } from './convert'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
+
+/** A minimal valid EPUB: one chapter, in-memory. */
+function makeEpub(): Uint8Array {
+  const container =
+    '<?xml version="1.0"?><container><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
+  const opf =
+    '<?xml version="1.0"?><package><manifest><item id="c2" href="chap2.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="chap1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>'
+  const chap1 = '<html><body><h1>Faction</h1><p>Faction arises from the unequal distribution of property.</p></body></html>'
+  const chap2 = '<html><body><h1>Republic</h1><p>A republic refines public views through representatives.</p></body></html>'
+  return zipSync({
+    mimetype: strToU8('application/epub+zip'),
+    'META-INF/container.xml': strToU8(container),
+    'content.opf': strToU8(opf),
+    'chap1.xhtml': strToU8(chap1),
+    'chap2.xhtml': strToU8(chap2)
+  })
+}
 
 // A minimal, text-bearing PDF: one page that shows "Hello Faction world".
 const PDF = `%PDF-1.4
@@ -50,6 +68,22 @@ describe('pdfToMarkdown', () => {
 
   it('throws a friendly error for a scanned PDF (no text layer)', async () => {
     await expect(pdfToMarkdown(enc(PDF_NO_TEXT))).rejects.toThrow(/scanned|OCR/i)
+  })
+})
+
+describe('epubToMarkdown', () => {
+  it('reads chapters in spine order and converts them to markdown', async () => {
+    const md = await epubToMarkdown(makeEpub())
+    expect(md).toContain('Faction arises from the unequal distribution of property.')
+    expect(md).toContain('A republic refines public views through representatives.')
+    // Spine order (c1 then c2) wins over manifest order (c2 first).
+    expect(md.indexOf('Faction')).toBeLessThan(md.indexOf('Republic'))
+    expect(md).toContain('## Section 1')
+  })
+
+  it('throws on a non-EPUB zip', async () => {
+    const notEpub = zipSync({ 'hello.txt': strToU8('hi') })
+    await expect(epubToMarkdown(notEpub)).rejects.toThrow(/EPUB/i)
   })
 })
 
