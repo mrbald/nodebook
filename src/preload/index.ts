@@ -130,6 +130,12 @@ const api = {
     focus?: string | null,
     opts?: { depth?: number; cap?: number }
   ): Promise<GraphData> => ipcRenderer.invoke('distill:graph', runId, focus ?? null, opts),
+  /** The vault + this run unioned live (overlay view; no writes). */
+  distillOverlayGraph: (
+    runId: string,
+    focus?: string | null,
+    opts?: { depth?: number; cap?: number }
+  ): Promise<GraphData> => ipcRenderer.invoke('distill:overlayGraph', runId, focus ?? null, opts),
   distillListRuns: (): Promise<string[]> => ipcRenderer.invoke('distill:listRuns'),
   distillRemove: (runId: string): Promise<void> => ipcRenderer.invoke('distill:remove', runId),
   /** Subscribe to a distill run's progress. */

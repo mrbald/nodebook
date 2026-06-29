@@ -62,6 +62,8 @@ export default function App() {
   const [graphEpoch, setGraphEpoch] = useState(0)
   // A finished distill run, shown as its own map; and live progress while running.
   const [distillRun, setDistillRun] = useState<{ runId: string } | null>(null)
+  // Overlay vs standalone for the run map (a reversible view; nothing written).
+  const [distillOverlay, setDistillOverlay] = useState(false)
   const [distilling, setDistilling] = useState<{
     runId?: string
     phase: string
@@ -551,6 +553,7 @@ export default function App() {
       const res = await window.nodebook.distillRun(path)
       setGraphOpen(false)
       setAskOpen(false)
+      setDistillOverlay(false) // a fresh run opens standalone
       setDistillRun({ runId: res.runId })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -563,9 +566,13 @@ export default function App() {
   // Stable graph loader for the run map, so the reused GraphView doesn't refetch
   // every render. Only called while a run map is shown (distillRun set).
   const distillLoad = useCallback(
-    (f: string | null, o?: { depth?: number; cap?: number }) =>
-      window.nodebook.distillGraph(distillRun?.runId ?? '', f, o),
-    [distillRun]
+    (f: string | null, o?: { depth?: number; cap?: number }) => {
+      const id = distillRun?.runId ?? ''
+      return distillOverlay
+        ? window.nodebook.distillOverlayGraph(id, f, o)
+        : window.nodebook.distillGraph(id, f, o)
+    },
+    [distillRun, distillOverlay]
   )
 
   useEffect(() => {
@@ -787,6 +794,17 @@ export default function App() {
             reloadKey={0}
             statusSlot={
               <>
+                <button
+                  className="status-btn distill-view-toggle"
+                  title={
+                    distillOverlay
+                      ? 'Overlay: your notes + this run together (nothing written)'
+                      : 'Standalone: this run on its own'
+                  }
+                  onClick={() => setDistillOverlay((v) => !v)}
+                >
+                  {distillOverlay ? '⧉ Overlay' : '◻ Standalone'}
+                </button>
                 <StatusSelect
                   kind="theme"
                   title="App theme"

@@ -4,7 +4,7 @@ import { basename, dirname } from 'path'
 import { harvest } from './harvest'
 import { VectorStore, type PendingChunk } from './rag/store'
 import { rrfRank } from './rag/rrf'
-import { buildGraph, noteName, type FileRow, type TripleRow } from './graph'
+import { buildGraph, noteName, type FileRow, type TripleRow, type GraphRows } from './graph'
 import type { Backlink, GraphData, Outbound, SearchHit } from '../shared/types'
 
 /**
@@ -128,17 +128,24 @@ export class VaultIndex {
       .all(fts) as SearchHit[]
   }
 
-  /** A slice of the knowledge graph: local depth-`d` around a focus note (by
-   *  path), or the whole graph (focusPath null) capped to the busiest nodes. */
-  graph(focusPath: string | null, opts?: { depth?: number; cap?: number }): GraphData {
-    // `.map.md` files are saved *views*, not knowledge — exclude them and the
-    // edges they author from the graph (see docs/state-and-scopes.md).
+  /** The raw {files, triples} this index contributes to a graph. Saved `.map.md`
+   *  views are *views*, not knowledge, so they're excluded (see
+   *  docs/state-and-scopes.md). Exposed so an overlay can compose this index with
+   *  another source. */
+  graphRows(): GraphRows {
     const files = this.db
       .prepare("SELECT path, title FROM files WHERE path NOT LIKE '%.map.md'")
       .all() as FileRow[]
     const triples = this.db
       .prepare("SELECT subject, relation, object FROM triples WHERE source_file NOT LIKE '%.map.md'")
       .all() as TripleRow[]
+    return { files, triples }
+  }
+
+  /** A slice of the knowledge graph: local depth-`d` around a focus note (by
+   *  path), or the whole graph (focusPath null) capped to the busiest nodes. */
+  graph(focusPath: string | null, opts?: { depth?: number; cap?: number }): GraphData {
+    const { files, triples } = this.graphRows()
     return buildGraph(files, triples, focusPath ? noteName(focusPath) : null, opts)
   }
 

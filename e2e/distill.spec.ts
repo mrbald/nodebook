@@ -102,6 +102,18 @@ test('FIREWALL: distilled notes never enter the canonical index', async () => {
   for (const node of g.nodes) expect(canonNames).not.toContain(node.id)
 })
 
+test('OVERLAY unions the vault + the run with provenance, writing nothing', async () => {
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  const overlay = await page.evaluate((id) => window.nodebook.distillOverlayGraph(id), runs[0])
+  const sources = new Set(overlay.nodes.map((n) => n.source))
+  expect(sources.has('run')).toBe(true) // the book's nodes
+  expect(sources.has('vault')).toBe(true) // your existing notes, shown alongside
+  expect(overlay.nodes.some((n) => n.id === 'on-government' && n.source === 'run')).toBe(true)
+  // Overlay is a pure view — the run stays out of the canonical index.
+  const canon = await page.evaluate(() => window.nodebook.noteNames())
+  expect(canon).not.toContain('on-government')
+})
+
 test('File ▸ Distill a document… runs from the menu and shows the run map', async () => {
   // Point the file dialog at the book, then fire the menu command.
   await app.evaluate(async ({ dialog }, p) => {
@@ -115,4 +127,14 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(page.locator('.graph-node').first()).toBeVisible()
   expect(await page.locator('.graph-node').count()).toBeGreaterThan(1)
   await expect(page.locator('.graph-edge').first()).toBeVisible()
+})
+
+test('the run map toggles Standalone ⟷ Overlay (overlay adds the vault notes)', async () => {
+  // The run map is open from the previous test.
+  await expect(page.locator('.distill-view-toggle')).toContainText('Standalone')
+  const standalone = await page.locator('.graph-node').count()
+  await page.locator('.distill-view-toggle').click()
+  await expect(page.locator('.distill-view-toggle')).toContainText('Overlay')
+  // Overlay folds in your vault's notes, so there are strictly more nodes.
+  await expect.poll(() => page.locator('.graph-node').count()).toBeGreaterThan(standalone)
 })

@@ -15,6 +15,7 @@ import {
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
+import { overlayGraph } from './graph'
 import { distill, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
 import { Telemetry } from './telemetry'
@@ -650,6 +651,16 @@ function registerIpc(): void {
     'distill:graph',
     (_e, runId: string, focus: string | null, opts?: { depth?: number; cap?: number }) =>
       distillRuns?.graph(runId, focus ?? null, opts) ?? { nodes: [], edges: [] }
+  )
+
+  // Overlay: the vault + this run, unioned live (no writes) — the "how they'd
+  // play together" preview. Built from raw rows of both indexes.
+  ipcMain.handle(
+    'distill:overlayGraph',
+    (_e, runId: string, focus: string | null, opts?: { depth?: number; cap?: number }) => {
+      if (!index || !distillRuns) return { nodes: [], edges: [] }
+      return overlayGraph(index.graphRows(), distillRuns.rows(runId), focus ?? null, opts)
+    }
   )
 
   ipcMain.handle('distill:listRuns', () => distillRuns?.list() ?? [])

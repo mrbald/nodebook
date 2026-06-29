@@ -63,6 +63,11 @@ export interface NodebookApi {
     focus?: string | null,
     opts?: { depth?: number; cap?: number }
   ) => Promise<GraphData>
+  distillOverlayGraph: (
+    runId: string,
+    focus?: string | null,
+    opts?: { depth?: number; cap?: number }
+  ) => Promise<GraphData>
   distillListRuns: () => Promise<string[]>
   distillRemove: (runId: string) => Promise<void>
   onDistillProgress: (cb: (runId: string, p: DistillProgress) => void) => () => void

@@ -33,6 +33,9 @@ export interface GraphNode {
   degree: number
   /** The note the slice is centred on (local map). */
   focus: boolean
+  /** In an overlay view, where this node's name came from: the vault, the
+   *  distilled run, or both (a same-name overlap). Absent in single-source views. */
+  source?: 'vault' | 'run' | 'both'
 }
 
 /** A directed edge: `source --relation--> target` (a harvested triple). */

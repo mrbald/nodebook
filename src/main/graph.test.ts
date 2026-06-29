@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildGraph, noteName, type FileRow, type TripleRow } from './graph'
+import { buildGraph, overlayGraph, noteName, type FileRow, type TripleRow } from './graph'
 
 const files: FileRow[] = [
   { path: '/v/A.md', title: 'A' },
@@ -114,5 +114,45 @@ describe('buildGraph', () => {
       'A-cites->C',
       'A-links_to->B'
     ])
+  })
+})
+
+describe('overlayGraph', () => {
+  // Vault and run share the name "Faction" — the overlap to preview.
+  const vault = {
+    files: [
+      { path: '/v/A.md', title: 'A' },
+      { path: '/v/Faction.md', title: 'Faction' }
+    ],
+    triples: [{ subject: 'A', relation: 'about', object: 'Faction' }]
+  }
+  const run = {
+    files: [
+      { path: '/run/Faction.md', title: 'Faction' },
+      { path: '/run/Republic.md', title: 'Republic' }
+    ],
+    triples: [{ subject: 'Republic', relation: 'contrasts_with', object: 'Faction' }]
+  }
+
+  it('tags each node by source: vault, run, or both (the overlap)', () => {
+    const g = overlayGraph(vault, run, null)
+    const src = (id: string): string | undefined => g.nodes.find((n) => n.id === id)?.source
+    expect(src('A')).toBe('vault') // only in the vault
+    expect(src('Republic')).toBe('run') // only in the run
+    expect(src('Faction')).toBe('both') // same name on both sides → the join
+  })
+
+  it('joins same-name notes into one node both sides connect to', () => {
+    const g = overlayGraph(vault, run, null)
+    expect(g.nodes.filter((n) => n.id === 'Faction')).toHaveLength(1)
+    const into = g.edges
+      .filter((e) => e.target === 'Faction')
+      .map((e) => e.source)
+      .sort()
+    expect(into).toEqual(['A', 'Republic']) // reached from a vault note and a run note
+  })
+
+  it('is deterministic and writes nothing (a pure view)', () => {
+    expect(overlayGraph(vault, run, null)).toEqual(overlayGraph(vault, run, null))
   })
 })

@@ -16,6 +16,7 @@ import { join } from 'path'
 import { VaultIndex } from '../indexer'
 import { writeRunArtifact, runDir, listRuns, removeRun, type RunSource } from './artifact'
 import type { EmittedNote } from './emit'
+import type { GraphRows } from '../graph'
 import type { GraphData } from '../../shared/types'
 
 export class StagedRunStore {
@@ -46,6 +47,11 @@ export class StagedRunStore {
   /** The run's knowledge graph (staged-only — never the canonical vault). */
   graph(runId: string, focus: string | null = null, opts?: { depth?: number; cap?: number }): GraphData {
     return this.indexOf(runId).graph(focus, opts)
+  }
+
+  /** The run's raw graph rows, for composing an overlay with the vault. */
+  rows(runId: string): GraphRows {
+    return this.indexOf(runId).graphRows()
   }
 
   list(): string[] {
