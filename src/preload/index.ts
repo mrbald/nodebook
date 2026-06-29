@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AskResult,
   Backlink,
+  DistillMergeResult,
+  DistillMergeStatus,
   DistillProgress,
   DistillRunResult,
   GraphData,
@@ -138,6 +140,14 @@ const api = {
   ): Promise<GraphData> => ipcRenderer.invoke('distill:overlayGraph', runId, focus ?? null, opts),
   distillListRuns: (): Promise<string[]> => ipcRenderer.invoke('distill:listRuns'),
   distillRemove: (runId: string): Promise<void> => ipcRenderer.invoke('distill:remove', runId),
+  /** Merge a run into the vault (reversible). */
+  distillMerge: (runId: string): Promise<DistillMergeResult> =>
+    ipcRenderer.invoke('distill:merge', runId),
+  /** Undo a run's merge. */
+  distillUnmerge: (runId: string): Promise<boolean> => ipcRenderer.invoke('distill:unmerge', runId),
+  /** Whether a run has been merged into the vault. */
+  distillMergeStatus: (runId: string): Promise<DistillMergeStatus> =>
+    ipcRenderer.invoke('distill:mergeStatus', runId),
   /** Subscribe to a distill run's progress. */
   onDistillProgress: (cb: (runId: string, p: DistillProgress) => void): (() => void) => {
     const listener = (_e: unknown, runId: string, p: DistillProgress): void => cb(runId, p)

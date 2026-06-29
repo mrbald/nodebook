@@ -12,7 +12,7 @@
  * until an explicit promote moves them into the vault proper.
  */
 
-import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'fs'
+import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync, copyFileSync } from 'fs'
 import { join, basename, sep } from 'path'
 import type { EmittedNote } from './emit'
 
@@ -110,4 +110,86 @@ export function listRuns(vaultRoot: string): string[] {
 /** Delete a run's whole artifact. */
 export function removeRun(vaultRoot: string, runId: string): void {
   rmSync(runDir(vaultRoot, runId), { recursive: true, force: true })
+}
+
+// --- Merge into the vault (reversible) -----------------------------------
+// "Merge" copies a run's notes OUT of the staged dir into a namespaced vault
+// subfolder, so they become real notes the canonical index picks up. It records
+// a manifest of exactly what it wrote, so "un-merge" is just deleting those.
+
+/** Record of one merge, so it can be undone cleanly. Stored beside the run. */
+export interface MergeManifest {
+  /** Vault-relative folder the run was merged into (e.g. `Distilled/sapiens`). */
+  folder: string
+  /** Vault-relative paths of every file the merge wrote. */
+  files: string[]
+}
+
+/** The namespaced vault folder a run merges into (vault-relative). */
+export function mergeFolder(runId: string): string {
+  assertRunId(runId)
+  return join('Distilled', runId)
+}
+
+function manifestPath(vaultRoot: string, runId: string): string {
+  return join(runDir(vaultRoot, runId), 'merge.json')
+}
+
+/** The merge manifest for a run, or null if it hasn't been merged. */
+export function readMergeManifest(vaultRoot: string, runId: string): MergeManifest | null {
+  const p = manifestPath(vaultRoot, runId)
+  if (!existsSync(p)) return null
+  try {
+    return JSON.parse(readFileSync(p, 'utf8')) as MergeManifest
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Copy a run's notes into a namespaced vault subfolder and write a manifest.
+ * Filesystem only — the caller indexes the new files into the canonical index
+ * (the watcher would too). Returns the manifest plus the absolute paths written.
+ */
+export function mergeRun(
+  vaultRoot: string,
+  runId: string
+): { manifest: MergeManifest; written: string[] } {
+  const notesDir = join(runDir(vaultRoot, runId), 'notes')
+  const folder = mergeFolder(runId)
+  const targetAbs = join(vaultRoot, folder)
+  mkdirSync(targetAbs, { recursive: true })
+
+  const files: string[] = []
+  const written: string[] = []
+  for (const name of readdirSync(notesDir).sort()) {
+    if (!name.endsWith('.md')) continue
+    copyFileSync(join(notesDir, name), join(targetAbs, name))
+    files.push(join(folder, name))
+    written.push(join(targetAbs, name))
+  }
+  const manifest: MergeManifest = { folder, files }
+  writeFileSync(manifestPath(vaultRoot, runId), JSON.stringify(manifest, null, 2))
+  return { manifest, written }
+}
+
+/**
+ * Undo a merge: delete exactly the files it wrote (and the now-empty folder) and
+ * the manifest. Returns the absolute paths removed, so the caller can de-index.
+ */
+export function unmergeRun(vaultRoot: string, runId: string): string[] {
+  const manifest = readMergeManifest(vaultRoot, runId)
+  if (!manifest) return []
+  const removed: string[] = []
+  for (const rel of manifest.files) {
+    const abs = join(vaultRoot, rel)
+    rmSync(abs, { force: true })
+    removed.push(abs)
+  }
+  const targetAbs = join(vaultRoot, manifest.folder)
+  if (existsSync(targetAbs) && readdirSync(targetAbs).length === 0) {
+    rmSync(targetAbs, { recursive: true, force: true })
+  }
+  rmSync(manifestPath(vaultRoot, runId), { force: true })
+  return removed
 }

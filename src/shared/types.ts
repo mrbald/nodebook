@@ -219,3 +219,17 @@ export interface DistillProgress {
   done: number
   total: number
 }
+
+/** Outcome of merging a run into the vault (reversible). */
+export interface DistillMergeResult {
+  /** Vault-relative folder the notes were written into. */
+  folder: string
+  count: number
+}
+
+/** Whether a run has been merged into the vault, for the UI's Merge/Undo state. */
+export interface DistillMergeStatus {
+  merged: boolean
+  folder?: string
+  count?: number
+}

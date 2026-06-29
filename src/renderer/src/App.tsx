@@ -64,6 +64,10 @@ export default function App() {
   const [distillRun, setDistillRun] = useState<{ runId: string } | null>(null)
   // Overlay vs standalone for the run map (a reversible view; nothing written).
   const [distillOverlay, setDistillOverlay] = useState(false)
+  // Set once a run has been merged into the vault, driving the Undo banner.
+  const [mergeInfo, setMergeInfo] = useState<{ runId: string; folder: string; count: number } | null>(
+    null
+  )
   const [distilling, setDistilling] = useState<{
     runId?: string
     phase: string
@@ -575,6 +579,34 @@ export default function App() {
     [distillRun, distillOverlay]
   )
 
+  // Merge a run into the vault (an explicit, confirmed, reversible write).
+  const mergeDistillRun = useCallback(() => {
+    if (!distillRun) return
+    const runId = distillRun.runId
+    setConfirm({
+      message: `Merge this run's notes into your vault under "Distilled/${runId}"? You can undo it right after.`,
+      onConfirm: () => {
+        setConfirm(null)
+        void window.nodebook
+          .distillMerge(runId)
+          .then((res) => setMergeInfo({ runId, folder: res.folder, count: res.count }))
+          .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      }
+    })
+  }, [distillRun])
+
+  // Restore the merged/undo state when a run map opens (and clear it on close).
+  useEffect(() => {
+    if (!distillRun) {
+      setMergeInfo(null)
+      return
+    }
+    const runId = distillRun.runId
+    void window.nodebook.distillMergeStatus(runId).then((s) => {
+      setMergeInfo(s.merged ? { runId, folder: s.folder ?? '', count: s.count ?? 0 } : null)
+    })
+  }, [distillRun])
+
   useEffect(() => {
     return window.nodebook.onMenuCommand((cmd, arg) => {
       // ⌘E toggles writing (Live) ⇄ Reading; ⌘1/2/3 pick a mode.
@@ -805,6 +837,15 @@ export default function App() {
                 >
                   {distillOverlay ? '⧉ Overlay' : '◻ Standalone'}
                 </button>
+                {!mergeInfo && (
+                  <button
+                    className="status-btn distill-merge-btn"
+                    title="Merge this run's notes into your vault (reversible)"
+                    onClick={mergeDistillRun}
+                  >
+                    ⤓ Merge
+                  </button>
+                )}
                 <StatusSelect
                   kind="theme"
                   title="App theme"
@@ -946,6 +987,30 @@ export default function App() {
               Cancel
             </button>
           )}
+        </div>
+      )}
+      {mergeInfo && (
+        <div className="distill-merged-banner" role="status">
+          <span>
+            Merged {mergeInfo.count} {mergeInfo.count === 1 ? 'note' : 'notes'} into{' '}
+            <code>{mergeInfo.folder}</code>.
+          </span>
+          <button
+            className="distill-undo"
+            onClick={() => {
+              const runId = mergeInfo.runId
+              void window.nodebook.distillUnmerge(runId).then(() => setMergeInfo(null))
+            }}
+          >
+            Undo
+          </button>
+          <button
+            className="distill-merged-close"
+            aria-label="Dismiss"
+            onClick={() => setMergeInfo(null)}
+          >
+            ✕
+          </button>
         </div>
       )}
       {error && (

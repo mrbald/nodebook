@@ -138,3 +138,29 @@ test('the run map toggles Standalone ⟷ Overlay (overlay adds the vault notes)'
   // Overlay folds in your vault's notes, so there are strictly more nodes.
   await expect.poll(() => page.locator('.graph-node').count()).toBeGreaterThan(standalone)
 })
+
+test('MERGE writes the run into the vault (now canonical); UNDO reverses it', async () => {
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  const id = runs[0]
+  expect(await page.evaluate(() => window.nodebook.noteNames())).not.toContain('on-government')
+  const res = await page.evaluate((r) => window.nodebook.distillMerge(r), id)
+  expect(res.count).toBeGreaterThan(0)
+  // The merged notes are now real vault notes — the canonical index sees them.
+  expect(await page.evaluate(() => window.nodebook.noteNames())).toContain('on-government')
+  // Undo removes exactly what it wrote.
+  await page.evaluate((r) => window.nodebook.distillUnmerge(r), id)
+  expect(await page.evaluate(() => window.nodebook.noteNames())).not.toContain('on-government')
+})
+
+test('Merge button → confirm → Undo banner → reverses', async () => {
+  // The run map is still open from the earlier tests.
+  await page.locator('.distill-merge-btn').click()
+  await page.locator('.modal-btn-danger').click() // confirm the merge
+  await expect(page.locator('.distill-merged-banner')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.nodebook.noteNames())).toContain('on-government')
+  await page.locator('.distill-undo').click()
+  await expect(page.locator('.distill-merged-banner')).toBeHidden()
+  await expect
+    .poll(() => page.evaluate(() => window.nodebook.noteNames()))
+    .not.toContain('on-government')
+})

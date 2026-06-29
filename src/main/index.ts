@@ -18,6 +18,7 @@ import { VaultIndex } from './indexer'
 import { overlayGraph } from './graph'
 import { distill, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
+import { mergeRun, unmergeRun, readMergeManifest } from './distill/artifact'
 import { Telemetry } from './telemetry'
 import {
   ensureSettingsFile,
@@ -32,7 +33,13 @@ import {
 import { makeChatModel } from './rag/chat'
 import { buildAppMenu } from './menu'
 import { addRecent } from './recents'
-import type { Citation, TalkStatus, DistillRunResult } from '../shared/types'
+import type {
+  Citation,
+  TalkStatus,
+  DistillRunResult,
+  DistillMergeResult,
+  DistillMergeStatus
+} from '../shared/types'
 
 // Name the app so the macOS menu bar / dialogs say "Nodebook", not "Electron".
 // (In `npm run dev` the bold app-menu title is still read from the Electron.app
@@ -666,6 +673,39 @@ function registerIpc(): void {
   ipcMain.handle('distill:listRuns', () => distillRuns?.list() ?? [])
 
   ipcMain.handle('distill:remove', (_e, runId: string) => distillRuns?.remove(runId))
+
+  // Merge a run into the vault: copy its notes into a namespaced subfolder so the
+  // canonical index picks them up. Reversible — a manifest records what we wrote.
+  ipcMain.handle('distill:merge', (_e, runId: string): DistillMergeResult => {
+    if (!vaultRoot || !index) throw new Error('Open a vault first.')
+    const { manifest, written } = mergeRun(vaultRoot, runId)
+    for (const p of written) {
+      try {
+        index.indexFile(p, readFileSync(p, 'utf8'), 0)
+      } catch {
+        /* unreadable — the watcher will retry */
+      }
+    }
+    notifyVaultChanged()
+    notifyIndexChanged()
+    notifyTalkDirty()
+    return { folder: manifest.folder, count: manifest.files.length }
+  })
+
+  // Undo a merge: delete exactly what it wrote and de-index it.
+  ipcMain.handle('distill:unmerge', (_e, runId: string): boolean => {
+    if (!vaultRoot || !index) return false
+    for (const p of unmergeRun(vaultRoot, runId)) index.removeFile(p)
+    notifyVaultChanged()
+    notifyIndexChanged()
+    return true
+  })
+
+  ipcMain.handle('distill:mergeStatus', (_e, runId: string): DistillMergeStatus => {
+    if (!vaultRoot) return { merged: false }
+    const m = readMergeManifest(vaultRoot, runId)
+    return m ? { merged: true, folder: m.folder, count: m.files.length } : { merged: false }
+  })
 
   // --- Telemetry (measure everything) -------------------------------------
   // Reconcile the measurement to the settings flag (called by the renderer on

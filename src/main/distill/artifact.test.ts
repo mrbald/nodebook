@@ -9,7 +9,10 @@ import {
   planRunFiles,
   writeRunArtifact,
   listRuns,
-  removeRun
+  removeRun,
+  mergeRun,
+  unmergeRun,
+  readMergeManifest
 } from './artifact'
 import { emitNotes } from './emit'
 import type { GroundedNote } from './extract'
@@ -105,6 +108,44 @@ describe('listRuns / removeRun', () => {
     expect(listRuns(v)).toEqual(['a', 'b'])
     removeRun(v, 'a')
     expect(listRuns(v)).toEqual(['b'])
+  })
+})
+
+describe('mergeRun / unmergeRun (reversible promote)', () => {
+  const run = (v: string): void => {
+    writeRunArtifact(v, 'sapiens', { file: 'Sapiens.md', text: 'x' }, emitNotes(grounded()))
+  }
+
+  it('copies the run notes into a namespaced vault folder + records a manifest', () => {
+    const v = tmpVault()
+    run(v)
+    expect(canonicalMarkdown(v)).toEqual([]) // staged run is hidden (the firewall)
+    const { manifest, written } = mergeRun(v, 'sapiens')
+    expect(manifest.folder).toBe(join('Distilled', 'sapiens'))
+    // Now the notes live in the vault proper — a canonical scan sees them.
+    expect(canonicalMarkdown(v).length).toBe(manifest.files.length)
+    expect(existsSync(join(v, 'Distilled', 'sapiens', 'Faction.md'))).toBe(true)
+    expect(written).toHaveLength(manifest.files.length)
+    expect(readMergeManifest(v, 'sapiens')).toEqual(manifest)
+  })
+
+  it('undo deletes exactly what it wrote, the empty folder, and the manifest', () => {
+    const v = tmpVault()
+    run(v)
+    const { written } = mergeRun(v, 'sapiens')
+    const removed = unmergeRun(v, 'sapiens')
+    expect(removed.sort()).toEqual([...written].sort())
+    expect(canonicalMarkdown(v)).toEqual([]) // fully reversed
+    expect(existsSync(join(v, 'Distilled', 'sapiens'))).toBe(false)
+    expect(readMergeManifest(v, 'sapiens')).toBeNull()
+  })
+
+  it('reports merge status (null until merged)', () => {
+    const v = tmpVault()
+    run(v)
+    expect(readMergeManifest(v, 'sapiens')).toBeNull()
+    mergeRun(v, 'sapiens')
+    expect(readMergeManifest(v, 'sapiens')?.folder).toBe(join('Distilled', 'sapiens'))
   })
 })
 
