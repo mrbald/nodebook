@@ -90,6 +90,8 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
         { label: 'Open Vault…', accelerator: 'CmdOrCtrl+O', click: () => send('open-vault-dialog') },
         { label: 'Open Recent', submenu: openRecentSubmenu },
         { type: 'separator' },
+        { label: 'Distill a Document…', enabled: state.hasVault, click: () => send('distill') },
+        { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', enabled: state.canSave, click: () => send('save') },
         { type: 'separator' },
         { label: 'Export PDF…', enabled: state.hasNote, click: () => send('export-pdf') },

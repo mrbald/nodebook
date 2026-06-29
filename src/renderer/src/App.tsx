@@ -60,6 +60,14 @@ export default function App() {
   const [telemetryOn, setTelemetryOn] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
   const [graphEpoch, setGraphEpoch] = useState(0)
+  // A finished distill run, shown as its own map; and live progress while running.
+  const [distillRun, setDistillRun] = useState<{ runId: string } | null>(null)
+  const [distilling, setDistilling] = useState<{
+    runId?: string
+    phase: string
+    done: number
+    total: number
+  } | null>(null)
   const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -530,6 +538,36 @@ export default function App() {
 
   // Application-menu commands (also drive the ⌘E/⌘P/⌘S/⌘O/⌘N/⌘G/⌘, accelerators).
   // Defined after the handlers it dispatches to so their identities are in scope.
+  // Distill a document: pick a file → run the pipeline (with live progress) →
+  // show the resulting staged run as its own map.
+  const runDistill = useCallback(async () => {
+    const path = await window.nodebook.distillPick()
+    if (!path) return
+    setDistilling({ phase: 'starting', done: 0, total: 0 })
+    const off = window.nodebook.onDistillProgress((runId, p) =>
+      setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })
+    )
+    try {
+      const res = await window.nodebook.distillRun(path)
+      setGraphOpen(false)
+      setAskOpen(false)
+      setDistillRun({ runId: res.runId })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      off()
+      setDistilling(null)
+    }
+  }, [])
+
+  // Stable graph loader for the run map, so the reused GraphView doesn't refetch
+  // every render. Only called while a run map is shown (distillRun set).
+  const distillLoad = useCallback(
+    (f: string | null, o?: { depth?: number; cap?: number }) =>
+      window.nodebook.distillGraph(distillRun?.runId ?? '', f, o),
+    [distillRun]
+  )
+
   useEffect(() => {
     return window.nodebook.onMenuCommand((cmd, arg) => {
       // ⌘E toggles writing (Live) ⇄ Reading; ⌘1/2/3 pick a mode.
@@ -554,6 +592,8 @@ export default function App() {
         if (vault) newNoteIn(vault)
       } else if (cmd === 'map') {
         if (active) setGraphOpen(true)
+      } else if (cmd === 'distill') {
+        void runDistill()
       } else if (cmd === 'ask') {
         if (talk.canAsk) openAsk()
         else void openSettings()
@@ -574,13 +614,15 @@ export default function App() {
     noteSaver,
     vault,
     active,
-    talk.canAsk
+    talk.canAsk,
+    runDistill
   ])
 
   // The right panel (backlinks) only shows when editing a note; collapse the grid
   // to two columns otherwise (map / settings / help / empty) so the centre fills
   // the width instead of leaving a blank third column.
-  const showRightPanel = !!active && !settingsOpen && !helpOpen && !graphOpen && !askOpen
+  const showRightPanel =
+    !!active && !settingsOpen && !helpOpen && !graphOpen && !askOpen && !distillRun
   return (
     <div className={`app${showRightPanel ? '' : ' app--no-right'}`}>
       <aside className="sidebar">
@@ -731,6 +773,31 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : distillRun ? (
+          <GraphView
+            key={`distill-${distillRun.runId}`}
+            loadGraph={distillLoad}
+            focusPath={null}
+            focusName=""
+            vaultRoot={vault}
+            talkReady={false}
+            onOpen={() => {}}
+            onOpenInEditor={() => {}}
+            onClose={() => setDistillRun(null)}
+            reloadKey={0}
+            statusSlot={
+              <>
+                <StatusSelect
+                  kind="theme"
+                  title="App theme"
+                  value={themeMode}
+                  options={THEME_OPTIONS}
+                  onChange={pickThemeMode}
+                />
+                <TelemetryWidget enabled={telemetryOn} />
+              </>
+            }
+          />
         ) : graphOpen && active ? (
           <GraphView
             focusPath={active.path}
@@ -837,6 +904,31 @@ export default function App() {
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
         />
+      )}
+      {distilling && (
+        <div className="distill-toast" role="status">
+          <span className="distill-spinner" aria-hidden="true" />
+          <span className="distill-toast-label">
+            Distilling…{' '}
+            {({
+              chunking: 'reading',
+              embedding: 'embedding',
+              clustering: 'finding themes',
+              extracting: 'extracting concepts',
+              finalizing: 'writing notes',
+              done: 'done'
+            } as Record<string, string>)[distilling.phase] ?? 'starting'}
+            {distilling.total > 0 ? ` (${distilling.done}/${distilling.total})` : ''}
+          </span>
+          {distilling.runId && (
+            <button
+              className="distill-cancel"
+              onClick={() => void window.nodebook.distillCancel(distilling.runId!)}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       )}
       {error && (
         <div className="error-banner" role="alert">

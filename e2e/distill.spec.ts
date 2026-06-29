@@ -101,3 +101,18 @@ test('FIREWALL: distilled notes never enter the canonical index', async () => {
   // Not one of the run's nodes (source or distilled concepts) leaked into the vault index.
   for (const node of g.nodes) expect(canonNames).not.toContain(node.id)
 })
+
+test('File ▸ Distill a document… runs from the menu and shows the run map', async () => {
+  // Point the file dialog at the book, then fire the menu command.
+  await app.evaluate(async ({ dialog }, p) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] })
+  }, bookPath)
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
+  })
+  // The run map renders via the reused GraphView, with nodes + a source edge.
+  await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
+  await expect(page.locator('.graph-node').first()).toBeVisible()
+  expect(await page.locator('.graph-node').count()).toBeGreaterThan(1)
+  await expect(page.locator('.graph-edge').first()).toBeVisible()
+})
