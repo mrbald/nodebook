@@ -16,7 +16,7 @@ import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
 import { overlayGraph } from './graph'
-import { distill, type DistillEmbedder } from './distill/run'
+import { distill, probeChat, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
 import { convertDocument } from './distill/convert'
 import { mergeRun, unmergeRun, readMergeManifest } from './distill/artifact'
@@ -630,6 +630,17 @@ function registerIpc(): void {
     if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
     const cfg = chatProviderConfig()
     if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
+    const chat = makeChatModel(cfg)
+    // Fail fast: confirm the model actually responds (key valid, local server up)
+    // BEFORE the expensive embedding, not half-way through the run.
+    try {
+      await probeChat(chat, AbortSignal.timeout(15_000))
+    } catch (err) {
+      throw new Error(
+        `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), or that your local server (LM Studio/Ollama) is running at the right baseUrl. ${err instanceof Error ? err.message : ''}`.trim(),
+        { cause: err }
+      )
+    }
     // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
     // rest of the pipeline is format-agnostic.
     const text = await convertDocument(filePath)
@@ -640,7 +651,7 @@ function registerIpc(): void {
     try {
       const result = await distill(
         source,
-        { embedder: rendererEmbedder(), chat: makeChatModel(cfg) },
+        { embedder: rendererEmbedder(), chat },
         {
           signal: ctrl.signal,
           onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p)

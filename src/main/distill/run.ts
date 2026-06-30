@@ -131,6 +131,22 @@ async function extractCluster(
   return parsed.ok ? { items: parsed.items, failed: false } : { items: [], failed: true }
 }
 
+/**
+ * Pre-flight check: confirm the chat model actually responds — API key valid,
+ * local server (Ollama/LM Studio) reachable — by pulling the first token of a
+ * tiny request. Throws on failure so a run fails *before* the expensive
+ * embedding, not half-way through. The optional signal bounds the wait.
+ */
+export async function probeChat(chat: ChatModel, signal?: AbortSignal): Promise<void> {
+  const stream = chat.chat({ messages: [{ role: 'user', content: 'ping' }], signal })
+  const iter = stream[Symbol.asyncIterator]()
+  try {
+    await iter.next()
+  } finally {
+    await iter.return?.()
+  }
+}
+
 export async function distill(
   source: DistillSource,
   deps: DistillDeps,

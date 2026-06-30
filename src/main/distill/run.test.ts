@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { distill, DistillAborted, type DistillProgress } from './run'
+import { distill, probeChat, DistillAborted, type DistillProgress } from './run'
 import type { Embedder, ChatModel } from '../rag/provider'
 
 // A small two-topic corpus: three "faction" sections, three "power" sections.
@@ -57,6 +57,29 @@ function quotingChat(): ChatModel {
 
 // Force two clusters on the small corpus.
 const opts = { minClusters: 2, perCluster: 3 }
+
+describe('probeChat', () => {
+  it('resolves when the model responds', async () => {
+    const ok: ChatModel = {
+      id: 'ok',
+      async *chat() {
+        yield 'hi'
+      }
+    }
+    await expect(probeChat(ok)).resolves.toBeUndefined()
+  })
+
+  it('rejects when the model errors (bad key / unreachable server)', async () => {
+    const bad: ChatModel = {
+      id: 'bad',
+      // eslint-disable-next-line require-yield
+      async *chat() {
+        throw new Error('No API key')
+      }
+    }
+    await expect(probeChat(bad)).rejects.toThrow(/No API key/)
+  })
+})
 
 describe('distill', () => {
   it('runs the full pipeline into cited notes, reporting phases in order', async () => {
