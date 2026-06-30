@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { MarkdownFile, Backlink, Outbound } from '@shared/types'
+import type { NoteCitation } from './citations'
 
 interface Props {
   active: MarkdownFile
   files: MarkdownFile[]
   onOpen: (f: MarkdownFile) => void
+  /** Provenance citations from the note's frontmatter (distilled notes). */
+  citations?: NoteCitation[]
+  /** Open a citation's source note at the cited span. */
+  onOpenCitation?: (c: NoteCitation) => void
 }
 
-export function BacklinksPanel({ active, files, onOpen }: Props) {
+export function BacklinksPanel({ active, files, onOpen, citations, onOpenCitation }: Props) {
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [outbound, setOutbound] = useState<Outbound[]>([])
 
@@ -59,9 +64,34 @@ export function BacklinksPanel({ active, files, onOpen }: Props) {
   const outboundGroups = groupBy(outbound, (o) => o.relation)
   const backlinkGroups = groupBy(backlinks, (b) => b.relation)
 
+  const cites = citations ?? []
+
   return (
     <div className="backlinks">
-      {outbound.length === 0 && backlinks.length === 0 ? (
+      {cites.length > 0 && (
+        <section className="sources">
+          <h2>Sources</h2>
+          {cites.map((c, i) => (
+            <div
+              key={i}
+              className="outbound-item is-link source-cite"
+              role="button"
+              tabIndex={0}
+              title={`Open ${c.source} at characters ${c.start}–${c.end}`}
+              onClick={() => onOpenCitation?.(c)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onOpenCitation?.(c)
+                }
+              }}
+            >
+              📄 {c.source} <span className="source-span">{c.start}–{c.end}</span>
+            </div>
+          ))}
+        </section>
+      )}
+      {outbound.length === 0 && backlinks.length === 0 && cites.length === 0 ? (
         <>
           <h2>Connections</h2>
           <p className="backlinks-empty">

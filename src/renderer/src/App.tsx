@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MarkdownFile, SearchHit, Settings } from '@shared/types'
 import { Editor, type ViewMode } from './editor/Editor'
 import { BacklinksPanel } from './BacklinksPanel'
+import { parseCitations, type NoteCitation } from './citations'
 import { MapView } from './MapView'
 import { ConfigEditor } from './editor/ConfigEditor'
 import { getTheme } from './editor/themes'
@@ -54,6 +55,10 @@ export default function App() {
   const [files, setFiles] = useState<MarkdownFile[]>([])
   const [active, setActive] = useState<MarkdownFile | null>(null)
   const [doc, setDoc] = useState<string | null>(null)
+  // A pending "jump to a cited span" — the source path + range to reveal once open.
+  const [pendingReveal, setPendingReveal] = useState<{ path: string; from: number; to: number } | null>(
+    null
+  )
   const [noteNames, setNoteNames] = useState<string[]>([])
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchHit[]>([])
@@ -352,6 +357,29 @@ export default function App() {
     (target: string) =>
       files.some((x) => x.name === target || x.rel.replace(/\.md$/i, '') === target),
     [files]
+  )
+
+  // Provenance: a distilled note carries `cite:` spans in its frontmatter.
+  // Clicking one opens its source note scrolled to + selecting the cited range.
+  const citations = useMemo<NoteCitation[]>(
+    () => (active ? parseCitations(doc ?? '') : []),
+    [active, doc]
+  )
+  const openCitation = useCallback(
+    (c: NoteCitation) => {
+      const f = files.find((x) => x.name === c.source)
+      if (!f) return
+      setPendingReveal({ path: f.path, from: c.start, to: c.end })
+      void openFile(f)
+    },
+    [files, openFile]
+  )
+  const revealRange = useMemo(
+    () =>
+      active && pendingReveal && pendingReveal.path === active.path
+        ? { from: pendingReveal.from, to: pendingReveal.to }
+        : null,
+    [active, pendingReveal]
   )
 
   const openSettings = useCallback(async () => {
@@ -902,6 +930,7 @@ export default function App() {
                   linkExists={linkExists}
                   theme={editorTheme}
                   mode={editorMode}
+                  revealRange={revealRange}
                 />
               </div>
               <div className="status-bar">
@@ -943,7 +972,15 @@ export default function App() {
         )}
       </main>
 
-      {showRightPanel && <BacklinksPanel active={active} files={files} onOpen={openFile} />}
+      {showRightPanel && (
+        <BacklinksPanel
+          active={active}
+          files={files}
+          onOpen={openFile}
+          citations={citations}
+          onOpenCitation={openCitation}
+        />
+      )}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
