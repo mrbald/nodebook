@@ -21,7 +21,9 @@ export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
   // Lazy + the *legacy* build (node-friendly, no DOM globals); loaded only when
   // a PDF is actually distilled, so it never costs startup.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  const doc = await pdfjs.getDocument({ data }).promise
+  // verbosity 0 = errors only: silences pdf.js's noisy per-font warnings (e.g.
+  // "TT: undefined function") that are irrelevant to text extraction.
+  const doc = await pdfjs.getDocument({ data, verbosity: 0 }).promise
   const pages: string[] = []
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
