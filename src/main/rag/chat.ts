@@ -47,15 +47,19 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
         },
         body: JSON.stringify({
           model: cfg.model,
-          max_tokens: 1024,
+          // 4096 gives a distill extraction prompt room to finish its JSON
+          // instead of being clipped mid-object. TODO: a settings knob per
+          // provider/model once there's a concrete need to tune it further.
+          max_tokens: 4096,
           system: req.system,
           messages: req.messages.filter((m) => m.role !== 'system'),
           stream: true
         })
       })
       if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      // No `[DONE]` sentinel on this path — that's an OpenAI-ism (see
+      // openaiCompatChat below). Anthropic's stream just ends.
       for await (const data of sseData(res)) {
-        if (data === '[DONE]') break
         try {
           const ev = JSON.parse(data) as DeltaEvent
           if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {

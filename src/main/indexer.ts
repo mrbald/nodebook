@@ -149,6 +149,18 @@ export class VaultIndex {
     return buildGraph(files, triples, focusPath ? noteName(focusPath) : null, opts)
   }
 
+  /** path → stored mtime for every indexed file. The vault-open scan uses it
+   *  to skip re-parsing files whose on-disk mtime is unchanged (and to drop
+   *  rows of files deleted while the app was closed). An mtime of 0 means
+   *  "unknown" (some writers index before a stat) and never matches. */
+  knownFiles(): Map<string, number> {
+    const rows = this.db.prepare('SELECT path, mtime FROM files').all() as {
+      path: string
+      mtime: number | null
+    }[]
+    return new Map(rows.map((r) => [r.path, r.mtime ?? 0]))
+  }
+
   /** Distinct note base-names (no extension) currently in the index, sorted. */
   noteNames(): string[] {
     const rows = this.db.prepare('SELECT path FROM files').all() as { path: string }[]
@@ -174,9 +186,11 @@ export class VaultIndex {
     return !!this.vec?.ready
   }
 
-  /** Set the embedding dimensionality reported by the loaded model. */
-  setEmbedDims(dims: number): void {
-    this.vec?.setDims(dims)
+  /** Set the embedding dimensionality (+ model id, when known) reported by the
+   *  loaded model. A model change is gated exactly like a dims change — see
+   *  `VectorStore.setDims` / `needsEmbeddingReset`. */
+  setEmbedDims(dims: number, modelId?: string): void {
+    this.vec?.setDims(dims, modelId)
   }
 
   /** (Re)chunk one file for embedding — content-hash gated. */

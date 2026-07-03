@@ -34,6 +34,7 @@ describe('menuTemplate', () => {
         'New Vault…',
         'Open Vault…',
         'Open Recent',
+        'Find Note…',
         'Save',
         'Export PDF…',
         'Print…'
@@ -41,6 +42,7 @@ describe('menuTemplate', () => {
     )
     expect(item(file, 'New Note')?.accelerator).toBe('CmdOrCtrl+N')
     expect(item(file, 'Open Vault…')?.accelerator).toBe('CmdOrCtrl+O')
+    expect(item(file, 'Find Note…')?.accelerator).toBe('CmdOrCtrl+K')
     expect(item(file, 'Save')?.accelerator).toBe('CmdOrCtrl+S')
   })
 
@@ -75,6 +77,22 @@ describe('menuTemplate', () => {
       expect.arrayContaining(['Markdown & Syntax', 'Keyboard Shortcuts', 'Learn More / Report an Issue'])
     )
     expect(roles(help)).toContain('toggleDevTools')
+  })
+
+  it('Keyboard Shortcuts opens help scrolled to the shortcuts section (not a duplicate)', () => {
+    const calls: Array<[string, string?]> = []
+    const help = sub(menuTemplate(deps({ send: (c, a) => calls.push([c, a]) })), 'help')
+    ;(item(help, 'Markdown & Syntax')?.click as () => void)()
+    ;(item(help, 'Keyboard Shortcuts')?.click as () => void)()
+    expect(calls).toEqual([
+      ['help', undefined],
+      ['help', 'shortcuts']
+    ])
+  })
+
+  it('Find Note… is gated on having a vault', () => {
+    const off = sub(menuTemplate(deps({ state: { ...ALL_ON, hasVault: false } })), 'File')
+    expect(item(off, 'Find Note…')?.enabled).toBe(false)
   })
 
   it('macOS puts Preferences (⌘,) in the app menu; About lives there too', () => {

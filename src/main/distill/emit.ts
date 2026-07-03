@@ -55,6 +55,10 @@ function frontmatter(note: GroundedNote, sources: string[]): string {
     for (const c of note.citations) {
       lines.push(`  - chunk: ${c.chunkId}`)
       lines.push(`    span: ${c.start}-${c.end}`)
+      // JSON-string-escaped: the quote can contain anything (quotes, newlines,
+      // colons) and this stays a valid single-line YAML double-quoted scalar,
+      // so an old parser that only reads chunk+span still ignores it safely.
+      lines.push(`    quote: ${JSON.stringify(c.quote)}`)
     }
   }
   lines.push('---')

@@ -170,16 +170,63 @@ export function parseExtraction(raw: string): { ok: boolean; items: ExtractedIte
   return { ok: true, items }
 }
 
-/** Escape a string for literal use inside a RegExp. */
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** Punctuation an LLM routinely normalizes away when it copies a quote — fold
+ *  both sides to the same plain form before comparing. Multi-char targets
+ *  (the ellipsis glyph) fold to their multi-character equivalent. */
+const PUNCT_FOLD: Record<string, string> = {
+  '’': "'", // ' RIGHT SINGLE QUOTATION MARK
+  '‘': "'", // ' LEFT SINGLE QUOTATION MARK
+  '`': "'", // `
+  '´': "'", // ´
+  '“': '"', // " LEFT DOUBLE QUOTATION MARK
+  '”': '"', // " RIGHT DOUBLE QUOTATION MARK
+  '–': '-', // – EN DASH
+  '—': '-', // — EM DASH
+  '…': '...' // … HORIZONTAL ELLIPSIS
+}
+
+/** One normalized character, remembering the exact original span it came
+ *  from — so a match found in the normalized string maps back to exact
+ *  offsets into the original. */
+interface NormChar {
+  ch: string
+  origStart: number
+  origEnd: number
 }
 
 /**
- * Find `quote` inside `haystack`, tolerating whitespace differences (a model
- * often reflows newlines and spaces). Returns raw [start, end) offsets into
- * `haystack`, or null if the quote can't be located — which is what fails
- * grounding.
+ * Fold `s` into normalized characters: whitespace runs collapse to a single
+ * space (so reflowed line breaks still match), fancy punctuation folds to its
+ * plain equivalent, and everything lower-cases. One-to-one with the *output*
+ * string's characters (an expansion like `…` → `...` emits three entries, one
+ * per output character), so `norm[i]` always identifies exactly which slice
+ * of the original produced the i-th normalized character.
+ */
+function foldChars(s: string): NormChar[] {
+  const out: NormChar[] = []
+  let i = 0
+  while (i < s.length) {
+    const ch = s[i]
+    if (/\s/.test(ch)) {
+      let j = i + 1
+      while (j < s.length && /\s/.test(s[j])) j++
+      out.push({ ch: ' ', origStart: i, origEnd: j })
+      i = j
+      continue
+    }
+    const folded = PUNCT_FOLD[ch] ?? ch.toLowerCase()
+    for (const c of folded) out.push({ ch: c, origStart: i, origEnd: i + 1 })
+    i++
+  }
+  return out
+}
+
+/**
+ * Find `quote` inside `haystack`, tolerating whitespace reflow, curly
+ * quotes/dashes/ellipses vs. their plain equivalents, and case differences —
+ * all things an LLM normalizes when it "copies" a quote. Always returns EXACT
+ * offsets into the original (unnormalized) `haystack`, or null if the quote
+ * can't be located anywhere — which is what fails grounding.
  */
 export function locateQuote(
   haystack: string,
@@ -189,9 +236,17 @@ export function locateQuote(
   if (!q) return null
   const exact = haystack.indexOf(q)
   if (exact >= 0) return { start: exact, end: exact + q.length }
-  const pattern = q.split(/\s+/).map(escapeRe).join('\\s+')
-  const m = new RegExp(pattern).exec(haystack)
-  return m ? { start: m.index, end: m.index + m[0].length } : null
+
+  const hChars = foldChars(haystack)
+  const hNorm = hChars.map((c) => c.ch).join('')
+  const qNorm = foldChars(q)
+    .map((c) => c.ch)
+    .join('')
+  if (!qNorm) return null
+
+  const at = hNorm.indexOf(qNorm)
+  if (at < 0) return null
+  return { start: hChars[at].origStart, end: hChars[at + qNorm.length - 1].origEnd }
 }
 
 export interface GroundingResult {

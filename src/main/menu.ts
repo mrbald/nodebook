@@ -90,6 +90,8 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
         { label: 'Open Vault…', accelerator: 'CmdOrCtrl+O', click: () => send('open-vault-dialog') },
         { label: 'Open Recent', submenu: openRecentSubmenu },
         { type: 'separator' },
+        { label: 'Find Note…', accelerator: 'CmdOrCtrl+K', enabled: state.hasVault, click: () => send('find-note') },
+        { type: 'separator' },
         { label: 'Distill a Document…', enabled: state.hasVault, click: () => send('distill') },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', enabled: state.canSave, click: () => send('save') },
@@ -127,7 +129,8 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       role: 'help',
       submenu: [
         { label: 'Markdown & Syntax', click: () => send('help') },
-        { label: 'Keyboard Shortcuts', click: () => send('help') },
+        // Same document, scrolled to its shortcuts section (not a duplicate opener).
+        { label: 'Keyboard Shortcuts', click: () => send('help', 'shortcuts') },
         { type: 'separator' },
         ...helpExtras,
         { label: 'Learn More / Report an Issue', click: () => d.openExternal(REPO_URL) },

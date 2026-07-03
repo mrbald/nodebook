@@ -68,10 +68,17 @@ lifecycle, and error models; don't fold them into one kind):**
   hosts) is a **separate outbound feature**, not part of this abstraction at all.
   Strategically interesting, tracked elsewhere.
 
-**Default model pairs** (configurable): *local* — embed `EmbeddingGemma-300M` (or
-`bge-small-en-v1.5` for speed), chat (later) a small local model
-(`Qwen2.5-3B`/`Llama-3.2-3B`) via llama.cpp; *cloud* — embed
-`text-embedding-3-small`/`voyage-3`, chat Claude or GPT.
+**Default model pairs** (configurable): *local* — embed `bge-small-en-v1.5` (as
+shipped; `EmbeddingGemma-300M`/`nomic-embed-text` are quality-leaning
+alternatives), chat (later) a small local model (`Qwen2.5-3B`/`Llama-3.2-3B`)
+via llama.cpp; *cloud* — embed `text-embedding-3-small`/`voyage-3`, chat Claude
+or GPT.
+
+bge-small and nomic-embed are *asymmetric* retrieval models — trained with
+different query/document wording — so the renderer embedder tags each call
+with a role (`'query'` for search/ask, `'document'` for note-chunk indexing)
+and prepends the matching prefix (a small table keyed by model id substring;
+MiniLM and anything unrecognized get no prefix).
 
 ## Pipeline (and the event-loop angle)
 

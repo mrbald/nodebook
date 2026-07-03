@@ -86,11 +86,22 @@ export interface TalkChunk {
 export interface Citation {
   path: string
   title: string
+  /** True when the answer text actually cites this note via an inline
+   *  `[[wikilink]]` — as opposed to being retrieved as context but never drawn
+   *  on. Drives the "Cited" vs "Also sent to the model" split in the UI.
+   *  Optional so producers that predate the field stay type-compatible;
+   *  absent reads as "not cited". */
+  used?: boolean
 }
 
 /** Returned when an "Ask" stream completes (the answer itself streams as tokens). */
 export interface AskResult {
   citations: Citation[]
+  /** Every retrieved note's name (unique), regardless of whether the answer
+   *  cited it. Used to gate which `[[wikilink]]`s in the answer are real
+   *  citations — a name outside this list is a hallucination and must not
+   *  render as a clickable link. */
+  sources: string[]
 }
 
 /** Enabled-state inputs the renderer reports to the main process so the app menu
@@ -207,6 +218,11 @@ export interface DistillStats {
   merged: number
   notes: number
   failedClusters: number
+  /** Fraction (0..1) of `chunks` actually shown to the LLM as a cluster
+   *  representative. A big source is clustered + sampled, not read in full —
+   *  this is the honesty number: 1.0 means every chunk was shown, well below
+   *  1.0 means the run leaned on sampling. */
+  coverage: number
 }
 
 export interface DistillRunResult {

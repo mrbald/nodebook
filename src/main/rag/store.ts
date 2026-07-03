@@ -53,8 +53,45 @@ export interface VectorHit {
  * therefore re-embeds) only the notes that actually changed — embeddings persist
  * in `.nodebook/index.db` across restarts (still rebuildable; Discipline #3).
  */
+/**
+ * Pure: whether a (dims, modelId) change requires dropping stored vectors and
+ * marking every chunk unembedded again — see `VectorStore.setDims`. A model
+ * swap is treated exactly like a dims change even when the width matches
+ * (e.g. MiniLM → bge-small, both 384-dim): two different models never share a
+ * vector space, so silently keeping old vectors would corrupt retrieval.
+ * `next.modelId` undefined (a caller that only knows dims) never triggers a
+ * reset by itself. Exported for unit tests.
+ */
+export function needsEmbeddingReset(
+  current: { dims: number; modelId: string },
+  next: { dims: number; modelId?: string }
+): boolean {
+  return next.dims !== current.dims || (next.modelId !== undefined && next.modelId !== current.modelId)
+}
+
+/**
+ * Pure: turn a free-text query into an FTS5 MATCH expression for `chunkSearch`
+ * — each token prefix-matched and OR'd together (not FTS5's implicit AND), so
+ * a natural-language question ("what is the capital of France") still matches
+ * a chunk sharing only some of its terms; bm25 ranking still favors a chunk
+ * matching more of them. Null for a query with no tokens. Exported for unit
+ * tests.
+ */
+export function ftsOrMatch(query: string): string | null {
+  const tokens = query.match(/[\p{L}\p{N}]+/gu)
+  if (!tokens || tokens.length === 0) return null
+  return tokens.map((t) => `${t}*`).join(' OR ')
+}
+
 export class VectorStore {
   private dims = 0
+  private modelId = ''
+  // Note-centroid cache: computing centroids reads every stored embedding and
+  // is O(all chunks × dims) on the main process — too hot to redo per map
+  // recolor. Any write that can change an embedded chunk bumps `gen`, which
+  // invalidates the cache lazily.
+  private gen = 0
+  private centroidCache: { gen: number; map: Map<string, Float32Array> } | null = null
 
   constructor(private db: Database.Database) {
     sqliteVec.load(this.db)
@@ -88,6 +125,10 @@ export class VectorStore {
       | undefined
     if (row) {
       this.dims = Number(row.v)
+      const modelRow = this.db.prepare(`SELECT v FROM talk_meta WHERE k = 'model'`).get() as
+        | { v: string }
+        | undefined
+      this.modelId = modelRow?.v ?? ''
       this.ensureVecTable()
     }
   }
@@ -101,10 +142,17 @@ export class VectorStore {
     return this.dims > 0
   }
 
-  /** Set the embedding width (from the loaded model). Recreates the vec table and
-   *  resets all embeddings if the model's dimensionality changed. */
-  setDims(dims: number): void {
-    if (dims === this.dims) {
+  /**
+   * Set the embedding width + model id (from the loaded model). Recreates the
+   * vec table and resets all embeddings if either changed — a model swap is
+   * treated exactly like a dims change even when the new model happens to
+   * share the old one's width (e.g. MiniLM → bge-small, both 384-dim), since
+   * two same-dim models don't share a vector space and silently mixing them
+   * would corrupt retrieval. `modelId` is optional so existing call sites that
+   * only know dims keep working; omitting it never triggers a reset by itself.
+   */
+  setDims(dims: number, modelId?: string): void {
+    if (!needsEmbeddingReset({ dims: this.dims, modelId: this.modelId }, { dims, modelId })) {
       this.ensureVecTable()
       return
     }
@@ -115,8 +163,16 @@ export class VectorStore {
         .prepare(`INSERT INTO talk_meta(k, v) VALUES('dims', ?)
                   ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
         .run(String(dims))
+      if (modelId !== undefined) {
+        this.modelId = modelId
+        this.db
+          .prepare(`INSERT INTO talk_meta(k, v) VALUES('model', ?)
+                    ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
+          .run(modelId)
+      }
       this.ensureVecTable()
       this.db.exec(`UPDATE chunks SET embedded = 0`)
+      this.gen++ // every stored vector was just dropped
     })()
   }
 
@@ -133,6 +189,7 @@ export class VectorStore {
       | { hash: string }
       | undefined
     if (prev?.hash === hash) return false
+    this.gen++ // re-chunking drops this file's embedded rows
     const chunks = chunkMarkdown(content)
     this.db.transaction(() => {
       this.deleteFileRows(file)
@@ -154,6 +211,7 @@ export class VectorStore {
   }
 
   removeFile(file: string): void {
+    this.gen++
     this.db.transaction(() => {
       this.deleteFileRows(file)
       this.db.prepare(`DELETE FROM chunk_file WHERE file = ?`).run(file)
@@ -191,6 +249,7 @@ export class VectorStore {
   /** Store vectors for freshly-embedded chunks and mark them embedded. */
   putEmbeddings(rows: { id: number; vector: Float32Array }[]): void {
     if (!this.dims) throw new Error('embedding dims not set')
+    if (rows.length > 0) this.gen++
     this.db.transaction(() => {
       const del = this.db.prepare(`DELETE FROM chunk_vec WHERE rowid = ?`)
       const insVec = this.db.prepare(`INSERT INTO chunk_vec(rowid, embedding) VALUES (?, ?)`)
@@ -205,9 +264,12 @@ export class VectorStore {
   }
 
   /** Per-note centroid vectors (mean of a note's chunk embeddings), L2-normalized
-   *  so a dot product is cosine similarity. */
+   *  so a dot product is cosine similarity. Cached until an embedding-changing
+   *  write bumps `gen` (see the field comment). */
   private centroids(): Map<string, Float32Array> {
+    if (this.centroidCache && this.centroidCache.gen === this.gen) return this.centroidCache.map
     const map = new Map<string, Float32Array>()
+    this.centroidCache = { gen: this.gen, map }
     if (!this.dims) return map
     const rows = this.db
       .prepare(
@@ -295,11 +357,14 @@ export class VectorStore {
 
   /** Chunk-level keyword (FTS5) hits for a query — same shape as `vectorHits`, so
    *  the two can be RRF-fused for grounding. Catches exact names/terms/IDs that
-   *  embeddings miss. */
+   *  embeddings miss. Tokens are OR'd (not FTS5's implicit AND): a natural-
+   *  language question ("what is the capital of France") has plenty of tokens
+   *  that won't all appear in one chunk, so ANDing them usually matches nothing
+   *  and this leg quietly drops out of the hybrid fusion. OR still ranks by
+   *  bm25, so a chunk matching more of the question's terms still ranks higher. */
   chunkSearch(query: string, k = 30): VectorHit[] {
-    const tokens = query.match(/[\p{L}\p{N}]+/gu)
-    if (!tokens || tokens.length === 0) return []
-    const match = tokens.map((t) => `${t}*`).join(' ')
+    const match = ftsOrMatch(query)
+    if (!match) return []
     const rows = this.db
       .prepare(
         `SELECT c.id AS id, c.file AS file, c.text AS text

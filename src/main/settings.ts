@@ -13,13 +13,18 @@ import type { ProviderConfig } from './rag/provider'
  * never crashes the app — it just reverts a value.
  */
 
+/** Default local embedding model (a transformers.js/HF Hub repo id) — a small,
+ *  fast, retrieval-tuned model. Needs the query-side prefix handled by the
+ *  renderer embedder (see src/renderer/src/talk/embedder.ts). */
+export const DEFAULT_EMBED_MODEL = 'Xenova/bge-small-en-v1.5'
+
 export const DEFAULTS: Settings = {
   editor: { fontSize: 15, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
   theme: { followSystem: true, dark: 'dark', light: 'light', name: 'dark' },
   talk: {
     enabled: false,
     relatedMinScore: 0.5,
-    embed: { runtime: 'wasm', model: 'Xenova/all-MiniLM-L6-v2' },
+    embed: { runtime: 'wasm', model: DEFAULT_EMBED_MODEL },
     chat: { provider: 'none', model: 'claude-sonnet-4-6', baseUrl: '' }
   },
   telemetry: { enabled: false }
@@ -70,7 +75,7 @@ relatedMinScore = 0.5
 # "native" (faster, larger). WASM runs in a background worker.
 runtime = "wasm"
 # Embedding model (a transformers.js repo). Downloaded on first enable.
-model = "Xenova/all-MiniLM-L6-v2"
+model = "${DEFAULT_EMBED_MODEL}"
 
 [talk.chat]
 # "Ask" chat over your notes. "none" = search-only (no LLM, fully local).
@@ -93,6 +98,19 @@ baseUrl = ""
 # plus rolling CPU and memory — "measure everything". Off by default.
 enabled = false
 `
+
+/** Pure: the TOML syntax error in `raw`, as a short human-readable message
+ *  (smol-toml includes the line/column), or null when the text parses. Used to
+ *  tell the user their edit broke the file instead of silently falling back. */
+export function settingsSyntaxError(raw: string): string | null {
+  try {
+    parseToml(raw)
+    return null
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return msg.split('\n')[0] || 'invalid TOML'
+  }
+}
 
 /** Pure: TOML text → validated Settings, defaults filling any gap. */
 export function parseSettings(raw: string): Settings {
@@ -215,12 +233,20 @@ export function ensureSettingsFile(): string {
   return path
 }
 
+// The last successfully-parsed settings. When the user saves a file with a
+// syntax error, the app keeps running on these instead of snapping every
+// option back to factory defaults mid-edit (the renderer shows the error).
+let lastGood: Settings | null = null
+
 export function readSettings(): Settings {
   ensureSettingsFile()
   try {
-    return parseSettings(readFileSync(settingsPath(), 'utf8'))
+    const raw = readFileSync(settingsPath(), 'utf8')
+    if (settingsSyntaxError(raw) !== null) return lastGood ?? structuredClone(DEFAULTS)
+    lastGood = parseSettings(raw)
+    return lastGood
   } catch {
-    return structuredClone(DEFAULTS)
+    return lastGood ?? structuredClone(DEFAULTS)
   }
 }
 

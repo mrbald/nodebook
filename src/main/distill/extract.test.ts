@@ -38,6 +38,36 @@ describe('locateQuote', () => {
     expect(locateQuote(src, '   ')).toBeNull()
     expect(locateQuote('a (b) c', '(b)')).toEqual({ start: 2, end: 5 })
   })
+
+  it('folds curly quotes to their plain equivalent', () => {
+    const curly = 'She whispered, “Don’t stop now.”'
+    const loc = locateQuote(curly, '"Don\'t stop now."')!
+    expect(curly.slice(loc.start, loc.end)).toBe('“Don’t stop now.”')
+  })
+
+  it('folds em/en dashes to a plain hyphen', () => {
+    const dashed = 'Progress—not perfection—is the goal.'
+    const loc = locateQuote(dashed, 'Progress-not perfection-is the goal.')!
+    expect(dashed.slice(loc.start, loc.end)).toBe('Progress—not perfection—is the goal.')
+  })
+
+  it('folds the ellipsis glyph to three dots (and back)', () => {
+    const ell = 'We hold these truths…self-evident.'
+    const loc = locateQuote(ell, 'We hold these truths...self-evident.')!
+    expect(ell.slice(loc.start, loc.end)).toBe('We hold these truths…self-evident.')
+  })
+
+  it('matches case-insensitively while returning the source casing', () => {
+    const cased = 'The Constitution protects LIBERTY.'
+    const loc = locateQuote(cased, 'the constitution protects liberty.')!
+    expect(cased.slice(loc.start, loc.end)).toBe('The Constitution protects LIBERTY.')
+  })
+
+  it('combines case-folding with whitespace reflow', () => {
+    const mixed = 'Extend the sphere, and\nyou take in a greater variety.'
+    const loc = locateQuote(mixed, 'YOU TAKE IN A greater variety')!
+    expect(mixed.slice(loc.start, loc.end)).toBe('you take in a greater variety')
+  })
 })
 
 describe('parseExtraction', () => {

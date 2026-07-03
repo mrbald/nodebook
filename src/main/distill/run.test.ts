@@ -175,6 +175,23 @@ describe('distill', () => {
     const res = await distill({ file: 'Book.md', text: '' }, { embedder, chat: quotingChat() }, opts)
     expect(res.stats.chunks).toBe(0)
     expect(res.notes).toEqual([])
+    expect(res.stats.coverage).toBe(1) // nothing to sample — trivially "fully covered"
+  })
+
+  it('reports coverage as the fraction of chunks actually shown to the LLM', async () => {
+    // 6 chunks, forced into 2 clusters (opts), default repsPerCluster=4 — every
+    // cluster has 3 members, so all 3 become representatives: full coverage.
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: quotingChat() }, opts)
+    expect(res.stats.coverage).toBe(1)
+  })
+
+  it('reports partial coverage when a cluster has more members than reps shown', async () => {
+    const res = await distill(
+      { file: 'Book.md', text: SRC },
+      { embedder, chat: quotingChat() },
+      { ...opts, repsPerCluster: 1 } // 2 clusters × 1 rep = 2 of 6 chunks shown
+    )
+    expect(res.stats.coverage).toBeCloseTo(2 / 6)
   })
 
   it('is deterministic for fixed stubs', async () => {

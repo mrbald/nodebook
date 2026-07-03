@@ -30,8 +30,10 @@ describe('noteName', () => {
 describe('renderNote', () => {
   const md = renderNote(note())
 
-  it('puts kind + cite spans in frontmatter, the H1, and edges in the body', () => {
-    expect(md).toMatch(/^---\nkind: claim\nsource: Federalist Papers\ncite:\n {2}- chunk: 10\n {4}span: 100-117\n---/)
+  it('puts kind + cite spans (with the quote) in frontmatter, the H1, and edges in the body', () => {
+    expect(md).toMatch(
+      /^---\nkind: claim\nsource: Federalist Papers\ncite:\n {2}- chunk: 10\n {4}span: 100-117\n {4}quote: "Extend the sphere"\n---/
+    )
     expect(md).toContain('# Extended republic')
     expect(md).toContain('source:: [[Federalist Papers]]')
     expect(md).toContain('about:: [[Faction]]')
@@ -43,6 +45,19 @@ describe('renderNote', () => {
   it('sanitizes an unsafe relation name and normalizes link targets', () => {
     const md2 = renderNote(note({ links: [{ relation: 'is-a/kind', target: 'Pure democracy' }] }))
     expect(md2).toContain('is-a_kind:: [[Pure democracy]]')
+  })
+
+  it('JSON-escapes a quote containing quotes/newlines so it stays one YAML line', () => {
+    const tricky = note({
+      citations: [
+        { file: 'Book.md', chunkId: 1, start: 0, end: 10, quote: 'He said "no"\nand left.' }
+      ]
+    })
+    const md2 = renderNote(tricky)
+    expect(md2).toContain('quote: "He said \\"no\\"\\nand left."')
+    // Round-trips: the emitted line is valid JSON for the original quote.
+    const line = /quote: (".*")/.exec(md2)![1]
+    expect(JSON.parse(line)).toBe('He said "no"\nand left.')
   })
 })
 

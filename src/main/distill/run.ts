@@ -87,6 +87,8 @@ export interface DistillResult {
     merged: number
     notes: number
     failedClusters: number
+    /** Fraction (0..1) of `chunks` actually shown to the LLM (see shared DistillStats). */
+    coverage: number
   }
 }
 
@@ -210,6 +212,12 @@ export async function distill(
   const emitted = emitNotes(deduped)
   report('done', 1, 1)
 
+  // Coverage honesty: clusters partition every chunk, and representativeIds is
+  // a subset of each cluster's members, so summing them counts each shown
+  // chunk exactly once — this is what the LLM actually saw, out of the whole.
+  const shown = clusters.reduce((sum, c) => sum + c.representativeIds.length, 0)
+  const coverage = chunks.length > 0 ? shown / chunks.length : 1
+
   return {
     notes: emitted,
     stats: {
@@ -220,7 +228,8 @@ export async function distill(
       dropped: droppedTitles.length,
       merged,
       notes: emitted.length,
-      failedClusters
+      failedClusters,
+      coverage
     }
   }
 }

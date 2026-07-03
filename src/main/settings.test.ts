@@ -1,5 +1,26 @@
 import { describe, it, expect } from 'vitest'
-import { parseSettings, setThemeMode, setTalkEnabled, DEFAULTS, DEFAULT_TOML } from './settings'
+import {
+  parseSettings,
+  setThemeMode,
+  setTalkEnabled,
+  settingsSyntaxError,
+  DEFAULTS,
+  DEFAULT_TOML
+} from './settings'
+
+describe('settingsSyntaxError', () => {
+  it('is null for valid TOML (including the shipped defaults)', () => {
+    expect(settingsSyntaxError(DEFAULT_TOML)).toBeNull()
+    expect(settingsSyntaxError('')).toBeNull()
+    expect(settingsSyntaxError('[editor]\nfontSize = 15\n')).toBeNull()
+  })
+
+  it('returns a short one-line message for broken TOML', () => {
+    const err = settingsSyntaxError('[editor\nfontSize = 15\n')
+    expect(err).toBeTruthy()
+    expect(err!).not.toContain('\n') // one line, fit for an inline banner
+  })
+})
 
 describe('parseSettings', () => {
   it('reads valid values', () => {
