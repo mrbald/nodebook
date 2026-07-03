@@ -4,10 +4,37 @@
  * vectors. A deterministic in-process stub (no model download) is used when the
  * e2e sets `window.__NODEBOOK_FAKE_EMBED__`, keeping CI fast and offline.
  */
+/** `'query'` gets a search-query prefix on models that need one (e.g. bge, nomic-
+ *  embed — asymmetric retrieval models trained with different query/document
+ *  wording); `'document'` (the default) is the plain/indexing side. See
+ *  `rolePrefix` below — the prefix is applied in the worker (which owns the
+ *  actual model), keyed by the same table. */
+export type EmbedRole = 'query' | 'document'
+
 export interface Embedder {
   readonly dims: number
-  embed(texts: string[]): Promise<Float32Array[]>
+  embed(texts: string[], role?: EmbedRole): Promise<Float32Array[]>
   dispose(): void
+}
+
+/**
+ * Pure: the text prefix to prepend for `role`, given a model id — asymmetric
+ * retrieval models are trained with different query/document wording, so
+ * feeding the raw text both ways works but retrieves noticeably worse. Keyed
+ * by a substring of the model id so it survives the `Xenova/…` mirror prefix.
+ * MiniLM and anything unrecognized: no prefix (symmetric model). Lives here
+ * (not embed.worker.ts) so it's a plain, unit-testable pure function; the
+ * worker imports it and applies it right before the actual embed call, since
+ * it's the side that owns the loaded model. Exported for unit tests.
+ */
+export function rolePrefix(model: string, role: EmbedRole): string {
+  if (model.includes('bge-')) {
+    return role === 'query' ? 'Represent this sentence for searching relevant passages: ' : ''
+  }
+  if (model.includes('nomic-embed')) {
+    return role === 'query' ? 'search_query: ' : 'search_document: '
+  }
+  return ''
 }
 
 /** Model-download progress: a 0..1 fraction, or null while no size is known. */
@@ -69,12 +96,12 @@ function workerEmbedder(model: string, onProgress?: ProgressFn): Promise<Embedde
         onProgress?.(1) // download complete (or served from cache)
         resolve({
           dims: m.dims,
-          embed: (texts) =>
+          embed: (texts, role = 'document') =>
             new Promise<Float32Array[]>((res, rej) => {
               const id = ++seq
               waiters.set(id, res)
               rejecters.set(id, rej)
-              worker.postMessage({ type: 'embed', id, texts })
+              worker.postMessage({ type: 'embed', id, texts, role })
             }),
           dispose: () => worker.terminate()
         })
@@ -111,5 +138,13 @@ function fakeEmbedder(dims = 384): Embedder {
     for (let i = 0; i < dims; i++) v[i] /= norm
     return v
   }
-  return { dims, embed: (texts) => Promise.resolve(texts.map(one)), dispose: () => {} }
+  // `role` is accepted per the `Embedder` interface (for wire compatibility
+  // with the e2e stub `window.__NODEBOOK_FAKE_EMBED__`, an extra ignored
+  // argument) but doesn't affect the deterministic hash — tests don't need
+  // query/document asymmetry, so it's simply omitted from the signature here.
+  return {
+    dims,
+    embed: (texts) => Promise.resolve(texts.map(one)),
+    dispose: () => {}
+  }
 }

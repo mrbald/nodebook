@@ -97,7 +97,7 @@ export function useTalk(): UseTalk {
   const searchSemantic = useCallback(async (query: string): Promise<SearchHit[]> => {
     const e = embedderRef.current
     if (!e) return window.nodebook.search(query)
-    const [vec] = await e.embed([query])
+    const [vec] = await e.embed([query], 'query')
     return window.nodebook.talkSearch(query, Array.from(vec))
   }, [])
 
@@ -106,7 +106,7 @@ export function useTalk(): UseTalk {
       const e = embedderRef.current
       let vec: number[] = []
       if (e) {
-        const [v] = await e.embed([question])
+        const [v] = await e.embed([question], 'query')
         vec = Array.from(v)
       }
       return window.nodebook.ask(question, vec, onToken)

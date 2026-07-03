@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { aggregateProgress } from './embedder'
+import { aggregateProgress, rolePrefix } from './embedder'
 
 /**
  * The model-download progress bar aggregates per-file byte counts into one
@@ -27,5 +27,34 @@ describe('aggregateProgress', () => {
 
   it('clamps to 1 if reported loaded exceeds total', () => {
     expect(aggregateProgress([{ loaded: 120, total: 100 }])).toBe(1)
+  })
+})
+
+/**
+ * Asymmetric retrieval models (bge, nomic-embed) need different query/document
+ * wording to retrieve well; feeding the raw text both ways still "works" but
+ * measurably worse. This table decides the prefix per model + role.
+ */
+describe('rolePrefix', () => {
+  it('adds the bge query prefix only for role "query"', () => {
+    expect(rolePrefix('Xenova/bge-small-en-v1.5', 'query')).toBe(
+      'Represent this sentence for searching relevant passages: '
+    )
+    expect(rolePrefix('Xenova/bge-small-en-v1.5', 'document')).toBe('')
+  })
+
+  it('adds asymmetric nomic-embed prefixes for both roles', () => {
+    expect(rolePrefix('nomic-ai/nomic-embed-text-v1.5', 'query')).toBe('search_query: ')
+    expect(rolePrefix('nomic-ai/nomic-embed-text-v1.5', 'document')).toBe('search_document: ')
+  })
+
+  it('adds no prefix for MiniLM or an unrecognized model', () => {
+    expect(rolePrefix('Xenova/all-MiniLM-L6-v2', 'query')).toBe('')
+    expect(rolePrefix('Xenova/all-MiniLM-L6-v2', 'document')).toBe('')
+    expect(rolePrefix('some/other-model', 'query')).toBe('')
+  })
+
+  it('matches on a model-id substring, surviving a mirror/org prefix', () => {
+    expect(rolePrefix('some-mirror/bge-base-en-v1.5', 'query')).not.toBe('')
   })
 })

@@ -292,6 +292,15 @@ body {
   color: var(--text);
   background: rgba(127, 127, 127, 0.12);
 }
+/* Inline (non-blocking) TOML syntax feedback under the settings header. */
+.settings-error {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: #ffb4a9;
+  background: rgba(255, 83, 112, 0.12);
+  border-bottom: 1px solid var(--border);
+}
 .settings-body {
   flex: 1;
   min-height: 0;
@@ -951,8 +960,11 @@ body {
   font-size: 13px;
 }
 
-/* Talk to docs — the "search by meaning" affordance under the search box. */
-.talk-cta {
+/* Talk to docs — the "search by meaning" affordance under the search box.
+   .ask-cta (the "set up a chat provider" sibling) shares the styling but has
+   its own class so e2e locators stay unambiguous. */
+.talk-cta,
+.ask-cta {
   display: block;
   width: calc(100% - 24px);
   margin: 0 12px 8px;
@@ -965,7 +977,8 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
-.talk-cta:hover {
+.talk-cta:hover,
+.ask-cta:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1355,6 +1368,11 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+/* "Also sent to the model" is context the answer didn't actually draw on —
+   visually secondary to the "Cited" group. */
+.ask-sources-other {
+  opacity: 0.7;
+}
 .ask-hint {
   color: var(--muted);
   font-size: 12px;
@@ -1488,6 +1506,38 @@ body {
   padding: 2px 4px;
 }
 .distill-merged-close:hover {
+  color: var(--text);
+}
+
+/* Coverage honesty: shown once after a run completes, if it sampled the
+   source rather than covering it in full (see distill/run.ts stats.coverage). */
+.distill-coverage-banner {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent, #7aa2f7);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  color: var(--text);
+}
+.distill-coverage-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.distill-coverage-close:hover {
   color: var(--text);
 }
 

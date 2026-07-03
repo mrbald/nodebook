@@ -12,18 +12,25 @@ import {
   type FeatureExtractionPipeline,
   type ProgressInfo
 } from '@huggingface/transformers'
+import { rolePrefix, type EmbedRole } from './embedder'
 
 // We always pull models from the Hub (there's no local model dir in the app).
 env.allowLocalModels = false
 
 type InMsg =
   | { type: 'init'; model: string }
-  | { type: 'embed'; id: number; texts: string[] }
+  | { type: 'embed'; id: number; texts: string[]; role?: EmbedRole }
 
 let extractor: FeatureExtractionPipeline | null = null
+let modelId = ''
 
-async function embed(texts: string[]): Promise<{ vectors: Float32Array[]; dims: number }> {
-  const out = await extractor!(texts, { pooling: 'mean', normalize: true })
+async function embed(
+  texts: string[],
+  role: EmbedRole = 'document'
+): Promise<{ vectors: Float32Array[]; dims: number }> {
+  const prefix = rolePrefix(modelId, role)
+  const input = prefix ? texts.map((t) => prefix + t) : texts
+  const out = await extractor!(input, { pooling: 'mean', normalize: true })
   const dims = out.dims[out.dims.length - 1]
   const data = out.data as Float32Array
   const vectors: Float32Array[] = []
@@ -35,6 +42,7 @@ self.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
   try {
     if (msg.type === 'init') {
+      modelId = msg.model
       // Forward transformers.js download progress so the UI can show a real bar
       // instead of an indeterminate "Loading model…". Events that carry byte
       // counts (one per file being fetched) are the ones worth surfacing; the
@@ -49,7 +57,7 @@ self.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
       const { dims } = await embed(['probe'])
       self.postMessage({ type: 'ready', dims })
     } else if (msg.type === 'embed') {
-      const { vectors } = await embed(msg.texts)
+      const { vectors } = await embed(msg.texts, msg.role)
       self.postMessage(
         { type: 'embedded', id: msg.id, vectors },
         vectors.map((v) => v.buffer)

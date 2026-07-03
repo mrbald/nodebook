@@ -31,8 +31,9 @@ const api = {
     ipcRenderer.invoke('fs:rename', path, newName),
   deletePath: (path: string): Promise<boolean> => ipcRenderer.invoke('fs:delete', path),
   readFile: (path: string): Promise<string> => ipcRenderer.invoke('file:read', path),
-  saveFile: (path: string, content: string): Promise<void> =>
-    ipcRenderer.invoke('file:save', path, content),
+  /** Save; rejects on a disk conflict unless `force` (see main's file:save). */
+  saveFile: (path: string, content: string, force?: boolean): Promise<void> =>
+    ipcRenderer.invoke('file:save', path, content, force),
   /** Synchronous save for window-close flush (blocks until written). */
   saveFileNow: (path: string, content: string): void => {
     ipcRenderer.sendSync('file:save-now', path, content)
@@ -103,6 +104,9 @@ const api = {
     ipcRenderer.invoke('telemetry:snapshot'),
   settingsPath: (): Promise<string> => ipcRenderer.invoke('settings:path'),
   readSettings: (): Promise<Settings> => ipcRenderer.invoke('settings:read'),
+  /** The TOML syntax error in `raw` (short message with line/col), or null. */
+  validateSettings: (raw: string): Promise<string | null> =>
+    ipcRenderer.invoke('settings:validate', raw),
   setThemeMode: (mode: 'system' | 'dark' | 'light'): Promise<Settings> =>
     ipcRenderer.invoke('settings:setThemeMode', mode),
   resetSettings: (): Promise<string> => ipcRenderer.invoke('settings:reset'),
@@ -121,6 +125,13 @@ const api = {
     const listener = (): void => cb()
     ipcRenderer.on('index:changed', listener)
     return () => ipcRenderer.removeListener('index:changed', listener)
+  },
+  /** Subscribe to on-disk changes of a specific note (external edit or a
+   *  relation typed from the map), so a clean open buffer can reload. */
+  onFileChanged: (cb: (path: string) => void): (() => void) => {
+    const listener = (_e: unknown, path: string): void => cb(path)
+    ipcRenderer.on('file:changed', listener)
+    return () => ipcRenderer.removeListener('file:changed', listener)
   },
   // Distill a document → a staged, cited run of notes + its own map.
   distillPick: (): Promise<string | null> => ipcRenderer.invoke('distill:pick'),
@@ -154,12 +165,15 @@ const api = {
     ipcRenderer.on('distill:progress', listener)
     return () => ipcRenderer.removeListener('distill:progress', listener)
   },
-  /** Let the renderer's WASM embedder answer main's distill embed requests. */
+  /** Let the renderer's WASM embedder answer main's distill embed requests.
+   *  The reply channel is namespaced by run token + sequence id (main assigns
+   *  both) so two concurrent runs can never cross-resolve each other's batch. */
   onDistillEmbedRequest: (handler: (texts: string[]) => Promise<number[][]>): (() => void) => {
-    const listener = (_e: unknown, id: number, texts: string[]): void => {
+    const listener = (_e: unknown, token: string, id: number, texts: string[]): void => {
+      const channel = `distill:embed:res:${token}:${id}`
       void handler(texts)
-        .then((vectors) => ipcRenderer.send(`distill:embed:res:${id}`, vectors))
-        .catch((err: unknown) => ipcRenderer.send(`distill:embed:res:${id}`, [], String(err)))
+        .then((vectors) => ipcRenderer.send(channel, vectors))
+        .catch((err: unknown) => ipcRenderer.send(channel, [], String(err)))
     }
     ipcRenderer.on('distill:embed:req', listener)
     return () => ipcRenderer.removeListener('distill:embed:req', listener)

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AskResult, Citation, MarkdownFile } from '@shared/types'
 import { renderMarkdown } from './markdownRender'
+import { gateAnswerCitations } from './citations'
 
 interface Props {
   ask: (question: string, onToken: (t: string) => void) => Promise<AskResult>
@@ -23,6 +24,9 @@ export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }
   const [asked, setAsked] = useState<string | null>(null)
   const [answer, setAnswer] = useState('')
   const [citations, setCitations] = useState<Citation[]>([])
+  // Every retrieved note's name — gates which answer [[wikilink]]s are real
+  // citations vs. a hallucinated/misremembered name (see gateAnswerCitations).
+  const [sources, setSources] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -47,10 +51,12 @@ export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }
     setAsked(q)
     setAnswer('')
     setCitations([])
+    setSources([])
     setError(null)
     try {
       const res = await ask(q, (t) => setAnswer((a) => a + t))
       setCitations(res.citations)
+      setSources(res.sources)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ask failed.')
     } finally {
@@ -103,28 +109,45 @@ export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }
                 <div
                   className="ask-answer ask-answer-rendered md-rendered"
                   onClick={onAnswerClick}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(answer) }}
+                  dangerouslySetInnerHTML={{
+                    __html: renderMarkdown(gateAnswerCitations(answer, sources))
+                  }}
                 />
               )
             )}
-            {citations.length > 0 && (
-              <div className="ask-sources">
-                <div className="ask-sources-label">Sources</div>
-                {citations.map((c) => {
-                  const f = files.find((x) => x.path === c.path)
-                  return (
-                    <button
-                      key={c.path}
-                      className="ask-source"
-                      disabled={!f}
-                      onClick={() => f && onOpen(f)}
-                    >
-                      {c.title}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+            {(() => {
+              const renderSource = (c: Citation): React.ReactNode => {
+                const f = files.find((x) => x.path === c.path)
+                return (
+                  <button
+                    key={c.path}
+                    className="ask-source"
+                    disabled={!f}
+                    onClick={() => f && onOpen(f)}
+                  >
+                    {c.title}
+                  </button>
+                )
+              }
+              const cited = citations.filter((c) => c.used)
+              const other = citations.filter((c) => !c.used)
+              return (
+                <>
+                  {cited.length > 0 && (
+                    <div className="ask-sources">
+                      <div className="ask-sources-label">Cited</div>
+                      {cited.map(renderSource)}
+                    </div>
+                  )}
+                  {other.length > 0 && (
+                    <div className="ask-sources ask-sources-other">
+                      <div className="ask-sources-label">Also sent to the model</div>
+                      {other.map(renderSource)}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
           </>
         )}
         {!asked && (

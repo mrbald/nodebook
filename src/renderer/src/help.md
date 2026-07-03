@@ -67,7 +67,8 @@ fresh one with **File ▸ New Vault…**.
 
 - **New note** — **File ▸ New Note** (⌘N), or right-click a folder in the tree.
 - **Organise** — right-click any file or folder in the sidebar tree to **rename**
-  or **delete** it, or make a **new note/folder** inside it. Edits made on disk
+  or **delete** it, or make a **new note/folder** inside it. Deleting moves the
+  files to the system **Trash**, so you can get them back. Edits made on disk
   show up in the tree automatically.
 - **Save** — **File ▸ Save** (⌘S). Saving is explicit by default; a dot marks an
   unsaved note (turn on autosave in Settings if you prefer).
@@ -157,9 +158,33 @@ Settings (`[talk.chat]`).
   Prefer the environment variable for keys; you *can* put one in the settings
   file, but it's stored in plain text.
 - **Grounded + cited** — only the most relevant passages from your notes are sent to
-  the model (never your whole vault); the answer streams in, and the notes it used are
-  listed as **Sources** you can click to open.
+  the model (never your whole vault); the answer streams in, and under it you can see
+  exactly which notes it **cited** and which were merely **sent to the model** — click
+  either to open the note.
 - Best with Talk-to-docs **on** (its embeddings power the retrieval).
+
+## Distill a document
+
+Turn a long document — a **PDF, EPUB, Markdown, or plain-text** file — into a set
+of small, linked notes, each backed by **quotes from the original**. Start it with
+**File ▸ Distill a Document…** (it needs a chat provider, same as Ask).
+
+- **What happens** — Nodebook reads the document, groups its ideas by topic, and asks
+  the model to write one short note per concept. Every claim in a note carries a
+  **citation**: a real quote from the document. If the model can't back a point with a
+  verbatim quote, that point is dropped — not guessed.
+- **Nothing touches your vault yet** — the result opens as its **own map**, kept in a
+  staging area. Explore it like the knowledge map. The **⧉ Overlay** button shows your
+  vault and the run *together* (a preview — still nothing written).
+- **Merge when happy** — **⤓ Merge** copies the run's notes into your vault under a
+  `Distilled/…` folder. It's reversible: **Undo** in the banner removes exactly what
+  was written.
+- **Click a citation** — a distilled note lists its **Sources** in the right-hand
+  panel; clicking one opens the original document at the quoted passage.
+- **Sampling** — very long documents are read *representatively*, not line by line;
+  when that happens Nodebook tells you how much of the text it looked at.
+
+## Performance telemetry
 
 ## Performance telemetry
 

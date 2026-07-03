@@ -27,7 +27,7 @@ export interface NodebookApi {
   rename: (path: string, newName: string) => Promise<string | null>
   deletePath: (path: string) => Promise<boolean>
   readFile: (path: string) => Promise<string>
-  saveFile: (path: string, content: string) => Promise<void>
+  saveFile: (path: string, content: string, force?: boolean) => Promise<void>
   saveFileNow: (path: string, content: string) => void
   backlinks: (target: string) => Promise<Backlink[]>
   outbound: (sourceFile: string) => Promise<Outbound[]>
@@ -50,6 +50,7 @@ export interface NodebookApi {
   telemetrySnapshot: () => Promise<TelemetrySnapshot | null>
   settingsPath: () => Promise<string>
   readSettings: () => Promise<Settings>
+  validateSettings: (raw: string) => Promise<string | null>
   setThemeMode: (mode: 'system' | 'dark' | 'light') => Promise<Settings>
   resetSettings: () => Promise<string>
   defaultSettings: () => Promise<string>
@@ -57,6 +58,7 @@ export interface NodebookApi {
   exportPdf: (name: string) => Promise<boolean>
   onVaultChanged: (cb: () => void) => () => void
   onIndexChanged: (cb: () => void) => () => void
+  onFileChanged: (cb: (path: string) => void) => () => void
   distillPick: () => Promise<string | null>
   distillRun: (filePath: string) => Promise<DistillRunResult>
   distillCancel: (runId: string) => Promise<void>

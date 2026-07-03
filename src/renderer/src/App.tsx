@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MarkdownFile, SearchHit, Settings } from '@shared/types'
 import { Editor, type ViewMode } from './editor/Editor'
 import { BacklinksPanel } from './BacklinksPanel'
-import { parseCitations, type NoteCitation } from './citations'
+import { parseCitations, resolveCitationSpan, type NoteCitation } from './citations'
 import { MapView } from './MapView'
 import { ConfigEditor } from './editor/ConfigEditor'
 import { getTheme } from './editor/themes'
@@ -55,6 +55,9 @@ export default function App() {
   const [files, setFiles] = useState<MarkdownFile[]>([])
   const [active, setActive] = useState<MarkdownFile | null>(null)
   const [doc, setDoc] = useState<string | null>(null)
+  // Bumped when the active note's file changes on disk under a clean buffer,
+  // to remount the editor on the fresh bytes (the island reads its doc once).
+  const [noteEpoch, setNoteEpoch] = useState(0)
   // A pending "jump to a cited span" — the source path + range to reveal once open.
   const [pendingReveal, setPendingReveal] = useState<{ path: string; from: number; to: number } | null>(
     null
@@ -73,6 +76,9 @@ export default function App() {
   const [mergeInfo, setMergeInfo] = useState<{ runId: string; folder: string; count: number } | null>(
     null
   )
+  // Coverage honesty: set after a run completes if it sampled rather than
+  // fully covered the source (see distill/run.ts stats.coverage).
+  const [distillCoverageNote, setDistillCoverageNote] = useState<string | null>(null)
   const [distilling, setDistilling] = useState<{
     runId?: string
     phase: string
@@ -102,12 +108,22 @@ export default function App() {
     confirmLabel?: string
     onConfirm: (value: string) => void
   } | null>(null)
-  const [confirm, setConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
+  const [confirm, setConfirm] = useState<{
+    message: string
+    confirmLabel?: string
+    onConfirm: () => void
+  } | null>(null)
   // The markdown view mode (Code / Live / Reading), persisted across file switches.
   const [editorMode, setEditorMode] = useState<ViewMode>('live')
   const settingsRef = useRef<Settings | null>(null)
   // Off-screen container that holds the fully-rendered note for Print / Export-PDF.
   const printRef = useRef<HTMLDivElement | null>(null)
+  // The sidebar search box, so File ▸ Find Note… (⌘K) can focus it.
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  // Non-blocking syntax feedback for the settings editor (set on save).
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  // Where to scroll the Help doc on open (Help ▸ Keyboard Shortcuts).
+  const [helpReveal, setHelpReveal] = useState<{ from: number; to: number } | null>(null)
 
   // Apply a theme to the whole app (CSS vars) and surface its name so the
   // editors reconfigure their own compartment to match.
@@ -175,25 +191,61 @@ export default function App() {
   }, [])
 
   // --- Save controllers (one per editor buffer) ---------------------------
+  // Re-runs the note save with force after the user confirms an overwrite.
+  // (A ref because the conflict handler lives inside the saver's own persist.)
+  const forceNoteSave = useRef<() => void>(() => {})
   const noteSaver = useDirtyDoc({
-    docKey: active?.path ?? null,
+    docKey: active ? `${active.path}#${noteEpoch}` : null,
     initialDoc: doc,
-    persist: (content) => {
-      if (active) void window.nodebook.saveFile(active.path, content)
+    persist: (content, force) => {
+      if (!active) return
+      const name = active.name
+      return window.nodebook.saveFile(active.path, content, force).catch((e: unknown) => {
+        // Refused save. A conflict means the file changed on disk under our
+        // edits (external edit, or a relation typed from the map) — let the
+        // user decide; anything else is surfaced as a plain error.
+        if (String(e).includes('Conflict')) {
+          setConfirm({
+            message: `“${name}” changed on disk while you were editing. Overwrite it with your version?`,
+            confirmLabel: 'Overwrite',
+            onConfirm: () => {
+              setConfirm(null)
+              forceNoteSave.current()
+            }
+          })
+        } else {
+          setError(`Couldn't save “${name}”: ${e instanceof Error ? e.message : String(e)}`)
+        }
+        throw e // keep the buffer dirty
+      })
     },
     autosaveDelayMs: autosave.delayMs,
     autosaveOnSwitch: autosave.onSwitch
   })
+  forceNoteSave.current = () => noteSaver.saveNow(true)
 
   const configSaver = useDirtyDoc({
     docKey: settingsPath == null ? null : `${settingsPath}#${settingsEpoch}`,
     initialDoc: settingsDoc,
-    persist: (content) => {
+    persist: (content, force) => {
       if (!settingsPath) return
-      void window.nodebook
-        .saveFile(settingsPath, content)
+      return window.nodebook
+        .saveFile(settingsPath, content, force)
+        .then(async () => {
+          // Saved, but is it valid TOML? Surface a syntax error inline instead
+          // of silently running on the previous settings (main keeps last-good).
+          setSettingsError(await window.nodebook.validateSettings(content))
+        })
         .then(() => window.nodebook.readSettings())
         .then(applySettings)
+        .catch((e: unknown) => {
+          setError(
+            String(e).includes('Conflict')
+              ? 'The settings file changed on disk — close and reopen Settings to pick up the new version.'
+              : `Couldn't save settings: ${e instanceof Error ? e.message : String(e)}`
+          )
+          throw e // keep the buffer dirty
+        })
     },
     autosaveDelayMs: autosave.delayMs,
     autosaveOnSwitch: autosave.onSwitch
@@ -300,6 +352,26 @@ export default function App() {
     }
   }, [vault, relist])
 
+  // Reload a *clean* open buffer when its file changes on disk (an external
+  // edit, or a relation typed from the map). Content is compared first, so our
+  // own save echoing back through the watcher is a no-op. A dirty buffer is
+  // left alone — that conflict is handled at save time (see noteSaver).
+  useEffect(() => {
+    return window.nodebook.onFileChanged((path) => {
+      if (!active || path !== active.path || noteSaver.dirty) return
+      void window.nodebook
+        .readFile(path)
+        .then((content) => {
+          if (content === noteSaver.getContent()) return
+          setDoc(content)
+          setNoteEpoch((e) => e + 1) // remount the editor on the fresh bytes
+        })
+        .catch(() => {
+          // vanished mid-read — the vault:changed relist will reconcile
+        })
+    })
+  }, [active, noteSaver])
+
   const openFile = useCallback(
     async (f: MarkdownFile) => {
       flushCurrent() // save the editor we're leaving
@@ -365,12 +437,31 @@ export default function App() {
     () => (active ? parseCitations(doc ?? '') : []),
     [active, doc]
   )
+  // Self-healing: the recorded [start,end) can drift once the source note is
+  // edited after a distill run. Re-verify against the source's current
+  // content before revealing — relocate via the quote if it moved, or open
+  // without a selection (and say so) if it can't be found at all. A citation
+  // from before quotes were captured (c.quote undefined) is trusted as-is.
   const openCitation = useCallback(
     (c: NoteCitation) => {
       const f = files.find((x) => x.name === c.source)
       if (!f) return
-      setPendingReveal({ path: f.path, from: c.start, to: c.end })
-      void openFile(f)
+      void openFile(f).then(() =>
+        window.nodebook
+          .readFile(f.path)
+          .then((content) => {
+            const res = resolveCitationSpan(content, c)
+            if (res.status === 'not-found') {
+              setPendingReveal(null)
+              setError(`Couldn't locate the cited passage in "${f.name}" — the source may have changed.`)
+            } else {
+              setPendingReveal({ path: f.path, from: res.start, to: res.end })
+            }
+          })
+          .catch(() => {
+            // openFile already surfaced a read failure, if any — nothing more to do.
+          })
+      )
     },
     [files, openFile]
   )
@@ -388,6 +479,7 @@ export default function App() {
     const content = await window.nodebook.readFile(p)
     setSettingsPath(p)
     setSettingsDoc(content)
+    setSettingsError(null) // fresh open — feedback comes from the next save
     setDefaultsDoc(null) // start with the defaults reference hidden
     setSettingsOpen(true)
     setHelpOpen(false)
@@ -404,13 +496,23 @@ export default function App() {
     [files, openFile]
   )
 
-  const openHelp = useCallback(() => {
-    flushCurrent()
-    setGraphOpen(false)
-    setSettingsOpen(false)
-    setAskOpen(false)
-    setHelpOpen(true)
-  }, [flushCurrent])
+  const openHelp = useCallback(
+    (section?: string) => {
+      flushCurrent()
+      setGraphOpen(false)
+      setSettingsOpen(false)
+      setAskOpen(false)
+      // Help ▸ Keyboard Shortcuts opens the same doc scrolled to its section.
+      if (section === 'shortcuts') {
+        const at = HELP_DOC.indexOf('## Keyboard shortcuts')
+        setHelpReveal(at >= 0 ? { from: at, to: at } : null)
+      } else {
+        setHelpReveal(null)
+      }
+      setHelpOpen(true)
+    },
+    [flushCurrent]
+  )
 
   const openAsk = useCallback(() => {
     flushCurrent()
@@ -454,7 +556,19 @@ export default function App() {
   const exportPdf = useCallback(async () => {
     fillPrint()
     await window.nodebook.exportPdf(active?.name ?? 'note')
+    // Empty the imperatively-filled container once the PDF is written — the
+    // rendered HTML must not linger in the DOM (React doesn't know about it).
+    if (printRef.current) printRef.current.innerHTML = ''
   }, [fillPrint, active])
+
+  // Same cleanup for ⌘P: the browser fires afterprint when the dialog closes.
+  useEffect(() => {
+    const clear = (): void => {
+      if (printRef.current) printRef.current.innerHTML = ''
+    }
+    window.addEventListener('afterprint', clear)
+    return () => window.removeEventListener('afterprint', clear)
+  }, [])
 
   // Absolute directory a "new" action should create into.
   const dirOf = (target: ContextTarget): string => {
@@ -530,11 +644,17 @@ export default function App() {
 
   const deleteTarget = (target: ContextTarget): void => {
     const path = pathOf(target)
+    const label = labelOf(target)
     setConfirm({
-      message: `Delete “${labelOf(target)}”? This cannot be undone.`,
+      message: `Move “${label}” to the Trash?`,
+      confirmLabel: 'Move to Trash',
       onConfirm: () => {
         setConfirm(null)
-        void window.nodebook.deletePath(path).then(async () => {
+        void window.nodebook.deletePath(path).then(async (ok) => {
+          if (!ok) {
+            setError(`Couldn't move “${label}” to the Trash — nothing was deleted.`)
+            return
+          }
           const files = await relist()
           if (active && !files.some((f) => f.path === active.path)) {
             setActive(null)
@@ -581,12 +701,22 @@ export default function App() {
     const off = window.nodebook.onDistillProgress((runId, p) =>
       setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })
     )
+    setDistillCoverageNote(null)
     try {
       const res = await window.nodebook.distillRun(path)
       setGraphOpen(false)
       setAskOpen(false)
       setDistillOverlay(false) // a fresh run opens standalone
       setDistillRun({ runId: res.runId })
+      // A big source is clustered + sampled, not read in full — say so when
+      // that sampling was substantial, so "Distilled" doesn't imply full coverage.
+      if (res.stats.coverage < 0.95) {
+        const pct = Math.round(res.stats.coverage * 100)
+        const shown = Math.round(res.stats.coverage * res.stats.chunks)
+        setDistillCoverageNote(
+          `Distilled — sampled ${pct}% of the text (${shown} of ${res.stats.chunks} sections)`
+        )
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -642,7 +772,7 @@ export default function App() {
       else if (cmd === 'mode-code') setEditorMode('code')
       else if (cmd === 'mode-live') setEditorMode('live')
       else if (cmd === 'mode-reading') setEditorMode('reading')
-      else if (cmd === 'help') openHelp()
+      else if (cmd === 'help') openHelp(arg)
       else if (cmd === 'export-pdf') void exportPdf()
       else if (cmd === 'print') {
         fillPrint()
@@ -657,6 +787,10 @@ export default function App() {
         if (arg) void enterVault(arg)
       } else if (cmd === 'new-note') {
         if (vault) newNoteIn(vault)
+      } else if (cmd === 'find-note') {
+        // ⌘K: jump to the sidebar search box (select so typing replaces).
+        searchRef.current?.focus()
+        searchRef.current?.select()
       } else if (cmd === 'map') {
         if (active) setGraphOpen(true)
       } else if (cmd === 'distill') {
@@ -708,18 +842,28 @@ export default function App() {
         )}
         {vault && (
           <input
+            ref={searchRef}
             className="search-box"
-            placeholder="Search notes…"
+            placeholder={`Search notes…  ${navigator.platform.startsWith('Mac') ? '⌘K' : 'Ctrl+K'}`}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         )}
         {vault && <TalkPanel talk={talk} />}
-        {vault && talk.canAsk && (
-          <button className="ask-open-btn" onClick={openAsk}>
-            💬 Ask your notes
-          </button>
-        )}
+        {vault &&
+          (talk.canAsk ? (
+            <button className="ask-open-btn" onClick={openAsk}>
+              💬 Ask your notes
+            </button>
+          ) : (
+            // Same setup-CTA pattern as semantic search (shared styling, own
+            // class): the feature is real but needs a provider — route to
+            // Settings instead of hiding it.
+            <button className="ask-cta" onClick={openSettings}>
+              💬 Ask your notes — set up a chat provider{' '}
+              <span className="talk-cta-note">(local Ollama works)</span>
+            </button>
+          ))}
         {query.trim() ? (
           <ul className="search-results">
             {results.length === 0 ? (
@@ -789,7 +933,14 @@ export default function App() {
             onClose={() => setAskOpen(false)}
           />
         ) : helpOpen ? (
-          <div className="settings-pane">
+          /* The center pane is one big keyless ternary of look-alike <div>s;
+             keys stop React from reusing one branch's DOM for another. That
+             reuse is not just cosmetic: the note pane's .print-reader div is
+             filled IMPERATIVELY (innerHTML) for Print/Export-PDF, so if a
+             later branch reuses that node, the stale print HTML stays inside
+             it and (for the settings pane) breaks CodeMirror's viewport
+             measurement. Keys make every switch a clean remount. */
+          <div className="settings-pane" key="help">
             <div className="settings-header">
               <span className="settings-title">Help — Markdown &amp; Syntax</span>
               <button className="settings-reset" onClick={() => setHelpOpen(false)}>
@@ -805,11 +956,12 @@ export default function App() {
                 theme={editorTheme}
                 mode="reading"
                 onOpenUrl={(url) => void window.nodebook.openExternal(url)}
+                revealRange={helpReveal}
               />
             </div>
           </div>
         ) : settingsOpen && settingsDoc !== null ? (
-          <div className="settings-pane">
+          <div className="settings-pane" key="settings">
             <div className="settings-header">
               <span className="settings-title">Settings</span>
               <div className="settings-actions">
@@ -825,6 +977,12 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {settingsError && (
+              <div className="settings-error" role="alert">
+                Saved, but the file has a TOML error — your previous settings stay in effect
+                until it's fixed. ({settingsError})
+              </div>
+            )}
             <div className={`settings-body${defaultsDoc !== null ? ' settings-body--split' : ''}`}>
               <ConfigEditor
                 key={`settings-${settingsEpoch}`}
@@ -887,6 +1045,7 @@ export default function App() {
           />
         ) : graphOpen && active ? (
           <GraphView
+            key="graph"
             focusPath={active.path}
             focusName={active.name}
             vaultRoot={vault}
@@ -918,10 +1077,10 @@ export default function App() {
           active.rel.endsWith('.map.md') ? (
             <MapView key={active.path} content={doc} onOpen={openLink} />
           ) : (
-            <div className="note-pane">
+            <div className="note-pane" key="note">
               <div className="note-content">
                 <Editor
-                  key={active.path}
+                  key={`${active.path}#${noteEpoch}`}
                   initialDoc={noteSaver.getContent() ?? doc ?? ''}
                   noteNames={noteNames}
                   onChange={noteSaver.onChange}
@@ -997,6 +1156,7 @@ export default function App() {
       {confirm && (
         <Confirm
           message={confirm.message}
+          confirmLabel={confirm.confirmLabel}
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
         />
@@ -1045,6 +1205,18 @@ export default function App() {
             className="distill-merged-close"
             aria-label="Dismiss"
             onClick={() => setMergeInfo(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {distillCoverageNote && (
+        <div className="distill-coverage-banner" role="status">
+          <span>{distillCoverageNote}</span>
+          <button
+            className="distill-coverage-close"
+            aria-label="Dismiss"
+            onClick={() => setDistillCoverageNote(null)}
           >
             ✕
           </button>

@@ -5,8 +5,9 @@ interface Options {
   docKey: string | null
   /** The document's on-disk content (the saved baseline). */
   initialDoc: string | null
-  /** Persist content to disk (async). */
-  persist: (content: string) => void
+  /** Persist content to disk. May return a promise; a rejection (e.g. a
+   *  disk conflict) keeps the buffer dirty instead of pretending it saved. */
+  persist: (content: string, force?: boolean) => void | Promise<void>
   /** Autosave after this many ms of no typing. 0 = off. */
   autosaveDelayMs: number
   /** Whether this doc should flush on switch / window close. */
@@ -52,17 +53,30 @@ export function useDirtyDoc({
     setDirty(false) // React's "adjust state on prop change" pattern
   }
 
-  const saveNow = useCallback(() => {
+  const saveNow = useCallback((force = false) => {
     if (timer.current) {
       clearTimeout(timer.current)
       timer.current = null
     }
     const c = contentRef.current
-    if (c != null && c !== savedRef.current) {
-      persistRef.current(c)
-      savedRef.current = c
-      setDirty(false)
-    }
+    if (c == null || c === savedRef.current) return
+    // Update the baseline only when the save actually lands: a rejected save
+    // (disk conflict) must leave the buffer dirty, or the user's text would
+    // show as saved while the disk still holds someone else's bytes. The key
+    // guard drops a settle that arrives after a file switch already reset us.
+    const key = prevKey.current
+    Promise.resolve(persistRef.current(c, force)).then(
+      () => {
+        if (prevKey.current !== key) return
+        savedRef.current = c
+        setDirty(contentRef.current !== c)
+      },
+      () => {
+        if (prevKey.current !== key) return
+        savedRef.current = null // on-disk state unknown — anything is dirty now
+        setDirty(true)
+      }
+    )
   }, [])
 
   const onChange = useCallback(
