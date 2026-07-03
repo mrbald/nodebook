@@ -235,10 +235,10 @@ test('right-click → Rename renames a file (input pre-filled)', async () => {
   await expect(page.locator('.tree-file', { hasText: 'ToRename' })).toHaveCount(0)
 })
 
-test('right-click → Delete removes a file after confirm', async () => {
+test('right-click → Delete moves the file to the Trash after confirm', async () => {
   await page.locator('.tree-file', { hasText: 'Renamed' }).click({ button: 'right' })
   await page.locator('.context-menu-item', { hasText: 'Delete' }).click()
-  await expect(page.locator('.modal-message')).toContainText('Delete')
+  await expect(page.locator('.modal-message')).toContainText('Trash')
   await page.locator('.modal-btn-danger').click()
 
   await expect(page.locator('.tree-file', { hasText: 'Renamed' })).toHaveCount(0)
@@ -471,6 +471,22 @@ test('followSystem flips the theme live when the OS appearance changes', async (
   await expect.poll(bg, { timeout: 3000 }).toBe('#fdf6e3') // solarized-light
 })
 
+test('Settings: saving broken TOML shows an inline error and keeps the previous settings', async () => {
+  await rewriteSettings('[editor]\nfontSize = 19\n')
+  await expect.poll(fontSizeVar, { timeout: 3000 }).toBe('19px')
+
+  // Break the file (unclosed table header): saved, but flagged — and the live
+  // settings do NOT snap to factory defaults (fontSize stays 19, not 15).
+  await rewriteSettings('[editor\nfontSize = 23\n')
+  await expect(page.locator('.settings-error')).toBeVisible()
+  expect(await fontSizeVar()).toBe('19px')
+
+  // Fixing the file clears the banner and applies the new value.
+  await rewriteSettings('[editor]\nfontSize = 16\n')
+  await expect(page.locator('.settings-error')).toHaveCount(0)
+  await expect.poll(fontSizeVar, { timeout: 3000 }).toBe('16px')
+})
+
 test('Settings: "Reset to defaults" restores the factory file', async () => {
   // Make a non-default change and save it.
   await rewriteSettings('[editor]\nfontSize = 22\n')
@@ -481,6 +497,36 @@ test('Settings: "Reset to defaults" restores the factory file', async () => {
   await page.locator('.modal-btn-danger').click()
   await expect.poll(fontSizeVar, { timeout: 3000 }).toBe('15px')
   await expect(page.locator('.cm-content')).toContainText('defaultMode') // shipped default
+})
+
+test('an external edit to a clean open note reloads the editor', async () => {
+  await page.locator('.tree-file', { hasText: 'welcome' }).click()
+  await expect(page.locator('.cm-content')).toContainText('Welcome')
+
+  writeFileSync(join(vaultDir, 'welcome.md'), '# Welcome to Nodebook\n\nEXTERNALEDIT\n')
+
+  // The watcher notifies the renderer, which reloads the clean buffer.
+  await expect(page.locator('.cm-content')).toContainText('EXTERNALEDIT', { timeout: 5000 })
+})
+
+test('saving a dirty note after an external edit surfaces a conflict', async () => {
+  await page.locator('.tree-file', { hasText: 'Graph Model' }).click()
+  await page.locator('.cm-content').click()
+  await page.keyboard.type('LOCALEDIT ')
+  await expect(page.locator('.tree-file.active .tree-dirty')).toBeVisible()
+
+  // The file changes on disk under the dirty buffer.
+  writeFileSync(join(vaultDir, 'Graph Model.md'), '# Graph Model\n\nDISKEDIT\n')
+
+  // ⌘S is refused (mtime mismatch) and the conflict dialog appears...
+  await page.keyboard.press(`${MOD}+s`)
+  await expect(page.locator('.modal-message')).toContainText('changed on disk')
+  await expect(page.locator('.tree-file.active .tree-dirty')).toBeVisible() // still dirty
+
+  // ...and Overwrite force-saves the buffer.
+  await page.locator('.modal-btn-danger').click()
+  await expect(page.locator('.tree-file.active .tree-dirty')).toHaveCount(0)
+  await expect(page.locator('.cm-content')).toContainText('LOCALEDIT')
 })
 
 test('Help menu opens the Markdown reference (read-only) and closes', async () => {

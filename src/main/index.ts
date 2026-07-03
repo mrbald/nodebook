@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, relative, dirname, sep, basename } from 'path'
+import { join, relative, dirname, resolve, basename } from 'path'
 import {
   promises as fs,
   openSync,
@@ -9,9 +9,11 @@ import {
   renameSync,
   existsSync,
   realpathSync,
+  statSync,
   writeFileSync,
   readFileSync
 } from 'fs'
+import { withinRoot, ignoredInVault } from './paths'
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
@@ -27,6 +29,7 @@ import {
   setThemeMode,
   setTalkEnabled,
   settingsPath as settingsFilePath,
+  settingsSyntaxError,
   chatProviderConfig,
   DEFAULT_TOML,
   type ThemeMode
@@ -65,7 +68,9 @@ function createWindow(): void {
     title: 'Nodebook',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      // The preload uses only contextBridge + ipcRenderer, so the renderer can
+      // run fully sandboxed — a compromised page gets no Node capabilities.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -131,16 +136,17 @@ function validName(name: string): string | null {
   return n
 }
 
-/** True only if p is the vault root or strictly inside it (no `/vault2` prefix trick). */
+/** True only if p is the vault root or strictly inside it. Resolves `..`/`.`
+ *  segments first — a raw prefix check passes `/vault/../../etc/passwd`. */
 function withinVault(p: string): boolean {
-  return !!vaultRoot && (p === vaultRoot || p.startsWith(vaultRoot + sep))
+  return !!vaultRoot && withinRoot(vaultRoot, p)
 }
 
 // file:read / file:save serve note files (inside the vault) AND the settings
 // file (in userData). Anything else is rejected, so a crafted path from the
 // renderer can't read/overwrite arbitrary files.
 function isAccessibleFile(p: string): boolean {
-  return withinVault(p) || p === settingsFilePath()
+  return withinVault(p) || resolve(p) === settingsFilePath()
 }
 
 /** Absolute paths of every markdown file under `dir` (recursively, skip dotdirs). */
@@ -190,16 +196,46 @@ let distillRuns: StagedRunStore | null = null
 const distillAbort = new Map<string, AbortController>()
 const telemetry = new Telemetry()
 
+// Pending distill embed round-trips (the renderer WASM embedder answers main's
+// requests over IPC), keyed by their reply channel. Tracked globally so a
+// vault close can fail them fast instead of leaving `ipcMain.once` listeners —
+// and the run awaiting them — hanging forever.
+const pendingEmbeds = new Map<string, (err: Error) => void>()
+
+// Staleness baseline for file:save — the mtime of each file as of the last
+// time the app knowingly read or wrote it. A save whose on-disk mtime differs
+// from the baseline would clobber someone else's bytes (an external edit, or a
+// relation typed from the map while the buffer was dirty), so it is refused
+// and the renderer surfaces the conflict. NOTE: index:typeRelation
+// deliberately does NOT update the baseline — that mismatch is exactly what
+// stops a stale editor buffer from overwriting the appended relation.
+const knownMtime = new Map<string, number>()
+
+/** Record `path`'s current mtime as the save-staleness baseline. */
+function trackMtime(path: string): void {
+  try {
+    knownMtime.set(path, Math.floor(statSync(path).mtimeMs))
+  } catch {
+    knownMtime.delete(path) // vanished — recreating it later is always allowed
+  }
+}
+
 async function closeVault(): Promise<void> {
   if (watcher) await watcher.close()
   watcher = null
   for (const ctrl of distillAbort.values()) ctrl.abort()
   distillAbort.clear()
+  // Fail any in-flight embed round-trip now — otherwise its `ipcMain.once`
+  // listener (and the run awaiting it) would hang until the timeout, or
+  // forever if the renderer never replies (e.g. it reloaded mid-run).
+  for (const fail of [...pendingEmbeds.values()]) fail(new Error('Vault closed while waiting to embed.'))
+  pendingEmbeds.clear()
   distillRuns?.close()
   distillRuns = null
   index?.close()
   index = null
   vaultRoot = null
+  knownMtime.clear()
 }
 
 async function indexPath(path: string): Promise<void> {
@@ -228,6 +264,19 @@ function notifyTalkDirty(): void {
  *  derived views like the knowledge map can re-query. */
 function notifyIndexChanged(): void {
   mainWindow?.webContents.send('index:changed')
+}
+
+/** Wikilink targets referenced in `text` — `[[Target]]` / `[[Target|Display]]`
+ *  — matching the renderer's wikilink markdown rule (target is before `|` and
+ *  `#`). Used to tell which retrieved sources an "Ask" answer actually cites.
+ *  (Duplicated in the renderer's citations.ts: main and renderer don't share a
+ *  module boundary — see tsconfig.node.json / tsconfig.web.json.) */
+function wikilinkTargetsIn(text: string): string[] {
+  const out: string[] = []
+  for (const m of text.matchAll(/\[\[([^[\]]+)\]\]/g)) {
+    out.push(m[1].split('|')[0].split('#')[0].trim())
+  }
+  return out
 }
 
 function talkStatus(): TalkStatus {
@@ -261,12 +310,39 @@ async function openVault(root: string): Promise<VaultListing> {
   if (readSettings().talk.enabled) index.enableTalk()
 
   const listing = await scanVault(root)
-  for (const f of listing.files) await indexPath(f.path)
+  // Incremental re-open: skip files whose stored mtime matches the disk (their
+  // rows are already correct — re-parsing the whole vault made every open
+  // O(vault) instead of O(changed)). mtime 0 in the index means "unknown" and
+  // never matches, so those files re-index. When talk is on, an unchanged file
+  // is only skipped if its chunks exist (talk may have been enabled elsewhere).
+  const known = index.knownFiles()
+  for (const f of listing.files) {
+    let mtime: number
+    try {
+      mtime = Math.floor((await fs.stat(f.path)).mtimeMs)
+    } catch {
+      continue // vanished mid-scan — nothing to index
+    }
+    const stored = known.get(f.path)
+    if (stored !== undefined && stored !== 0 && stored === mtime) {
+      if (!index.talkOn || index.isChunked(f.path)) {
+        knownMtime.set(f.path, mtime) // still the save-staleness baseline
+        continue
+      }
+    }
+    await indexPath(f.path)
+  }
+  // Drop rows of files deleted while the app was closed (the watcher only
+  // catches deletions that happen while we're running).
+  const present = new Set(listing.files.map((f) => f.path))
+  for (const p of known.keys()) if (!present.has(p)) index.removeFile(p)
   console.log(`[index] ${root}:`, index.stats())
 
-  // Watch for external edits. Ignore dotfiles/dirs (covers .nodebook/ + .git/).
+  // Watch for external edits. Ignore dotfiles/dirs *relative to the vault*
+  // (covers .nodebook/ + .git/ without killing the watcher for a vault that
+  // itself lives under a dotted ancestor like ~/.local/share/notes).
   watcher = chokidar.watch(root, {
-    ignored: (p: string) => /(^|[/\\])\.[^/\\]/.test(p),
+    ignored: ignoredInVault(root),
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 }
   })
@@ -276,11 +352,15 @@ async function openVault(root: string): Promise<VaultListing> {
       notifyVaultChanged()
     })
     .on('change', (p: string) => {
-      if (MD_EXT.test(p))
+      if (MD_EXT.test(p)) {
+        // Tell the renderer which note changed so a clean open buffer can
+        // reload (it compares content, so our own save echoes are a no-op).
+        mainWindow?.webContents.send('file:changed', p)
         void indexPath(p).then(() => {
           notifyTalkDirty()
           notifyIndexChanged()
         })
+      }
     })
     .on('unlink', (p: string) => {
       if (MD_EXT.test(p)) index?.removeFile(p)
@@ -295,22 +375,47 @@ async function openVault(root: string): Promise<VaultListing> {
 // Bridge distill's embedding to the renderer's WASM embedder. The embedder lives
 // in the renderer (the same one "talk" uses); main owns the run db + chat. One
 // request/response round-trip per batch, correlated by a sequence id.
-function rendererEmbedder(): DistillEmbedder {
+//
+// The reply channel is namespaced with the run's own id (`token`), not just a
+// per-run-local sequence number — two concurrent runs each starting their
+// sequence at 1 would otherwise share `distill:embed:res:1` and cross-resolve
+// each other's vectors. A per-batch timeout (5 min — the first batch may need
+// to download the embedding model) and cleanup on vault close mean a run fails
+// fast instead of hanging if the renderer never replies (e.g. a reload mid-run).
+function rendererEmbedder(token: string): DistillEmbedder {
   let seq = 0
   return {
     embed(texts: string[]): Promise<Float32Array[]> {
       const id = ++seq
-      const channel = `distill:embed:res:${id}`
+      const channel = `distill:embed:res:${token}:${id}`
       return new Promise((resolve, reject) => {
         if (!mainWindow) {
           reject(new Error('No window available to embed with'))
           return
         }
-        ipcMain.once(channel, (_e, vectors: number[][], err?: string) => {
+        const cleanup = (): void => {
+          clearTimeout(timer)
+          ipcMain.removeListener(channel, onReply)
+          pendingEmbeds.delete(channel)
+        }
+        const onReply = (_e: unknown, vectors: number[][], err?: string): void => {
+          cleanup()
           if (err) reject(new Error(err))
           else resolve(vectors.map((v) => Float32Array.from(v)))
+        }
+        const timer = setTimeout(
+          () => {
+            cleanup()
+            reject(new Error("Timed out waiting for the renderer to embed a batch (5 min) — it may have reloaded."))
+          },
+          5 * 60_000
+        )
+        pendingEmbeds.set(channel, (err) => {
+          cleanup()
+          reject(err)
         })
-        mainWindow.webContents.send('distill:embed:req', id, texts)
+        ipcMain.once(channel, onReply)
+        mainWindow.webContents.send('distill:embed:req', token, id, texts)
       })
     }
   }
@@ -325,6 +430,16 @@ function distillRunId(file: string): string {
       .replace(/^[^A-Za-z0-9]+/, '')
       .slice(0, 80) || 'run'
   )
+}
+
+/** De-collide a run id against already-staged runs: distilling two documents
+ *  with the same basename must not silently replace the earlier run. */
+function uniqueRunId(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`
+    if (!taken.has(candidate)) return candidate
+  }
 }
 
 function registerIpc(): void {
@@ -423,11 +538,14 @@ function registerIpc(): void {
       await fs.rename(oldPath, newPath)
       await indexPath(newPath)
     }
+    knownMtime.delete(oldPath)
     notifyVaultChanged()
     return newPath
   })
 
-  // Delete a file or folder (recursive). Updates the index. Returns success.
+  // Delete a file or folder by moving it to the system Trash (recoverable —
+  // never a permanent rm). Updates the index. Returns success; false means
+  // nothing was deleted (the renderer tells the user).
   ipcMain.handle('fs:delete', async (_e, target: string): Promise<boolean> => {
     if (!withinVault(target) || target === vaultRoot) return false
     let stat
@@ -436,29 +554,51 @@ function registerIpc(): void {
     } catch {
       return false
     }
-    if (stat.isDirectory()) {
-      for (const p of await markdownUnder(target)) index?.removeFile(p)
-      await fs.rm(target, { recursive: true, force: true })
-    } else {
-      index?.removeFile(target)
-      await fs.rm(target, { force: true })
+    // Collect the notes to de-index BEFORE the move empties the folder.
+    const under = stat.isDirectory() ? await markdownUnder(target) : [target]
+    try {
+      await shell.trashItem(target)
+    } catch {
+      return false // no trash available — leave the files alone
+    }
+    for (const p of under) {
+      index?.removeFile(p)
+      knownMtime.delete(p)
     }
     notifyVaultChanged()
     return true
   })
 
-  ipcMain.handle('file:read', (_e, path: string) => {
+  ipcMain.handle('file:read', async (_e, path: string) => {
     if (!isAccessibleFile(path)) throw new Error('Access denied: path outside the vault')
-    return fs.readFile(path, 'utf8')
+    const content = await fs.readFile(path, 'utf8')
+    trackMtime(path) // reading refreshes the save-staleness baseline
+    return content
   })
 
-  ipcMain.handle('file:save', async (_e, path: string, content: string) => {
+  ipcMain.handle('file:save', async (_e, path: string, content: string, force?: boolean) => {
     if (!isAccessibleFile(path)) throw new Error('Access denied: path outside the vault')
+    // Refuse to clobber bytes the app didn't write: if the file changed on disk
+    // since we last read/wrote it, this save would silently drop that change.
+    // The renderer surfaces the conflict and may re-save with force.
+    if (!force) {
+      const known = knownMtime.get(path)
+      if (known !== undefined) {
+        let onDisk: number | null = null
+        try {
+          onDisk = Math.floor((await fs.stat(path)).mtimeMs)
+        } catch {
+          // vanished — recreating it preserves the user's work
+        }
+        if (onDisk !== null && onDisk !== known)
+          throw new Error('Conflict: the file changed on disk since it was opened.')
+      }
+    }
     atomicWrite(path, content)
+    trackMtime(path)
     // Re-index synchronously from the bytes we just wrote (no fs round-trip).
     if (index && withinVault(path)) {
-      const { mtimeMs } = await fs.stat(path)
-      index.indexFile(path, content, Math.floor(mtimeMs))
+      index.indexFile(path, content, knownMtime.get(path) ?? 0)
       notifyTalkDirty()
       notifyIndexChanged()
     }
@@ -488,6 +628,8 @@ function registerIpc(): void {
   )
 
   // Synchronous save used on window close (beforeunload can't await async IPC).
+  // No staleness check: this is the last-chance flush on quit, where dropping
+  // the buffer is strictly worse than overwriting.
   ipcMain.on('file:save-now', (e, path: string, content: string) => {
     try {
       if (!isAccessibleFile(path)) {
@@ -523,12 +665,17 @@ function registerIpc(): void {
   ipcMain.handle('talk:status', () => talkStatus())
 
   // Turn on (or resume) the feature: persist the flag, load the vector layer,
-  // record the model's dims, and chunk any not-yet-chunked notes.
+  // record the model's dims + configured model id (a model swap gates the
+  // stored embeddings exactly like a dims change — see VectorStore.setDims),
+  // and chunk any not-yet-chunked notes.
   ipcMain.handle('talk:enable', async (_e, dims: number): Promise<TalkStatus> => {
     const path = ensureSettingsFile()
     atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), true))
+    trackMtime(path)
     index?.enableTalk()
-    if (Number.isFinite(dims) && dims > 0) index?.setEmbedDims(dims)
+    if (Number.isFinite(dims) && dims > 0) {
+      index?.setEmbedDims(dims, readSettings().talk.embed.model)
+    }
     await chunkUnchunkedFiles()
     return talkStatus()
   })
@@ -537,6 +684,7 @@ function registerIpc(): void {
   ipcMain.handle('talk:disable', (): TalkStatus => {
     const path = ensureSettingsFile()
     atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), false))
+    trackMtime(path)
     index?.disableTalk()
     return talkStatus()
   })
@@ -586,22 +734,32 @@ function registerIpc(): void {
         ` answer, say so plainly.\n\nNOTES:\n${context || '(no relevant notes found)'}`
 
       const model = makeChatModel(cfg)
+      let answer = ''
       for await (const token of model.chat({
         system,
         messages: [{ role: 'user', content: question }]
       })) {
+        answer += token
         e.sender.send('talk:ask:token', token)
       }
 
+      // "used" = the answer actually cites this note via [[wikilink]] — as
+      // opposed to being retrieved as context but never drawn on. Citations
+      // become attribution (what the answer leans on), not just a dump of
+      // whatever was sent to the model.
+      const usedNames = new Set(wikilinkTargetsIn(answer))
       const seen = new Set<string>()
       const citations: Citation[] = []
+      const sources: string[] = []
       for (const c of chunks) {
         if (!seen.has(c.file)) {
           seen.add(c.file)
-          citations.push({ path: c.file, title: noteName(c.file) })
+          const title = noteName(c.file)
+          sources.push(title)
+          citations.push({ path: c.file, title, used: usedNames.has(title) })
         }
       }
-      e.sender.send('talk:ask:done', { citations })
+      e.sender.send('talk:ask:done', { citations, sources })
     } catch (err) {
       e.sender.send('talk:ask:error', err instanceof Error ? err.message : String(err))
     }
@@ -645,13 +803,13 @@ function registerIpc(): void {
     // rest of the pipeline is format-agnostic.
     const text = await convertDocument(filePath)
     const source = { file: basename(filePath), text }
-    const runId = distillRunId(filePath)
+    const runId = uniqueRunId(distillRunId(filePath), new Set(distillRuns.list()))
     const ctrl = new AbortController()
     distillAbort.set(runId, ctrl)
     try {
       const result = await distill(
         source,
-        { embedder: rendererEmbedder(), chat },
+        { embedder: rendererEmbedder(runId), chat },
         {
           signal: ctrl.signal,
           onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p)
@@ -732,12 +890,16 @@ function registerIpc(): void {
 
   ipcMain.handle('settings:path', () => ensureSettingsFile())
   ipcMain.handle('settings:read', () => readSettings())
+  // The TOML syntax error in `raw` (or null) — lets the settings editor tell
+  // the user their edit broke the file instead of silently reverting values.
+  ipcMain.handle('settings:validate', (_e, raw: string) => settingsSyntaxError(raw))
 
   // Quick theme switch from the status bar — edits settings.toml in place
   // (preserving comments) and returns the freshly-parsed Settings.
   ipcMain.handle('settings:setThemeMode', (_e, mode: ThemeMode) => {
     const path = ensureSettingsFile()
     atomicWrite(path, setThemeMode(readFileSync(path, 'utf8'), mode))
+    trackMtime(path)
     return readSettings()
   })
 
@@ -745,6 +907,7 @@ function registerIpc(): void {
   // TOML text so the open settings editor can refresh in place.
   ipcMain.handle('settings:reset', () => {
     atomicWrite(settingsFilePath(), DEFAULT_TOML)
+    trackMtime(settingsFilePath())
     return DEFAULT_TOML
   })
   // Read-only: the documented defaults for "Reveal defaults" (no file write).

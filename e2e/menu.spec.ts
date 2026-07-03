@@ -91,6 +91,30 @@ test('menu command: Ask falls back to Settings when no chat provider is configur
   await expect(page.locator('.settings-title')).toHaveText('Settings')
 })
 
+test('with no chat provider, the sidebar shows an Ask setup CTA that opens Settings', async () => {
+  await page.locator('.tree-file').first().click() // leave the settings pane
+  const cta = page.locator('.ask-cta', { hasText: 'Ask your notes' })
+  await expect(cta).toBeVisible()
+  await cta.click()
+  await expect(page.locator('.settings-title')).toHaveText('Settings')
+  await page.locator('.tree-file').first().click()
+})
+
+test('menu command: find-note focuses the sidebar search box (⌘K)', async () => {
+  await page.locator('.tree-file').first().click() // focus lives in the editor
+  await menuCmd('find-note')
+  await expect(page.locator('.search-box')).toBeFocused()
+})
+
+test('menu command: help with the shortcuts arg opens Help scrolled to the shortcuts table', async () => {
+  await menuCmd('help', 'shortcuts')
+  await expect(page.locator('.settings-title')).toHaveText(/Help/)
+  // The Keyboard-shortcuts heading is scrolled into view (the doc top is not).
+  await expect(page.locator('.cm-content h1, .cm-content .cm-line', { hasText: 'Keyboard shortcuts' }).first())
+    .toBeInViewport()
+  await page.locator('.settings-reset', { hasText: 'Close' }).click()
+})
+
 // Reads the real (native) menu item's enabled flag from the main process.
 function menuItemEnabled(menuLabel: string, itemLabel: string): Promise<boolean | undefined> {
   return app.evaluate(({ Menu }, { menuLabel, itemLabel }) => {
