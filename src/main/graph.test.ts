@@ -117,6 +117,50 @@ describe('buildGraph', () => {
   })
 })
 
+describe('source hubs (showSources)', () => {
+  // Two notes distilled from the same book both carry `source:: [[Book]]`; A also
+  // links to B directly, so the map stays connected once the hub is hidden.
+  const withSource: FileRow[] = [
+    { path: '/v/A.md', title: 'A' },
+    { path: '/v/B.md', title: 'B' },
+    { path: '/v/Book.md', title: 'Book' }
+  ]
+  const sourceTriples: TripleRow[] = [
+    { subject: 'A', relation: 'source', object: 'Book' },
+    { subject: 'B', relation: 'source', object: 'Book' },
+    { subject: 'A', relation: 'links_to', object: 'B' }
+  ]
+
+  it('hides the hub by default, dropping its edges, and reports it as hidden', () => {
+    const g = buildGraph(withSource, sourceTriples, null)
+    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B']))
+    expect(g.edges).toEqual([{ source: 'A', target: 'B', relation: 'links_to' }])
+    expect(g.hiddenSources).toBe(1)
+  })
+
+  it('showSources keeps the hub and its edges; hiddenSources is 0', () => {
+    const g = buildGraph(withSource, sourceTriples, null, { showSources: true })
+    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'Book']))
+    expect(g.edges.filter((e) => e.relation === 'source')).toHaveLength(2)
+    expect(g.hiddenSources).toBe(0)
+  })
+
+  it('a vault with no source triples is untouched, hiddenSources=0', () => {
+    const g = buildGraph(files, triples, null)
+    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'C', 'Ghost']))
+    expect(g.hiddenSources).toBe(0)
+  })
+
+  it('never hides the hub when it is the focus itself — exempted, not just re-shown', () => {
+    // Focusing the book is the one case where the user explicitly asked for it.
+    const g = buildGraph(withSource, sourceTriples, 'Book', { depth: 1 })
+    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'Book']))
+    expect(g.edges.filter((e) => e.relation === 'source')).toHaveLength(2)
+    // Nothing was actually dropped (the only hub is the focus), so the count is 0.
+    expect(g.hiddenSources).toBe(0)
+  })
+})
+
 describe('overlayGraph', () => {
   // Vault and run share the name "Faction" — the overlap to preview.
   const vault = {
@@ -154,5 +198,23 @@ describe('overlayGraph', () => {
 
   it('is deterministic and writes nothing (a pure view)', () => {
     expect(overlayGraph(vault, run, null)).toEqual(overlayGraph(vault, run, null))
+  })
+
+  it('passes showSources through to buildGraph and propagates hiddenSources', () => {
+    // The run's notes all cite the book — the star this feature exists to hide.
+    const bookRun = {
+      files: [
+        { path: '/run/A.md', title: 'A' },
+        { path: '/run/Book.md', title: 'Book' }
+      ],
+      triples: [{ subject: 'A', relation: 'source', object: 'Book' }]
+    }
+    const hidden = overlayGraph(vault, bookRun, null)
+    expect(hidden.nodes.map((n) => n.id)).not.toContain('Book')
+    expect(hidden.hiddenSources).toBe(1)
+
+    const shown = overlayGraph(vault, bookRun, null, { showSources: true })
+    expect(shown.nodes.map((n) => n.id)).toContain('Book')
+    expect(shown.hiddenSources).toBe(0)
   })
 })

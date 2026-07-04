@@ -658,8 +658,8 @@ function registerIpc(): void {
 
   ipcMain.handle(
     'index:graph',
-    (_e, focusPath: string | null, opts?: { depth?: number; cap?: number }) =>
-      index?.graph(focusPath, opts) ?? { nodes: [], edges: [] }
+    (_e, focusPath: string | null, opts?: { depth?: number; cap?: number; showSources?: boolean }) =>
+      index?.graph(focusPath, opts) ?? { nodes: [], edges: [], hiddenSources: 0 }
   )
 
   // --- Talk to docs -------------------------------------------------------
@@ -828,19 +828,44 @@ function registerIpc(): void {
     distillAbort.get(runId)?.abort()
   })
 
+  // Distill views default to SHOWING the source-document node (the vault map
+  // hides it): the book is a run's anchor, and a fresh run's notes may have no
+  // other edges yet — hiding it there can render the map empty. An explicit
+  // showSources still wins (the 📕 toggle).
+  const distillOpts = (
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
+  ): { depth?: number; cap?: number; showSources?: boolean } => ({
+    ...opts,
+    showSources: opts?.showSources ?? true
+  })
+
   ipcMain.handle(
     'distill:graph',
-    (_e, runId: string, focus: string | null, opts?: { depth?: number; cap?: number }) =>
-      distillRuns?.graph(runId, focus ?? null, opts) ?? { nodes: [], edges: [] }
+    (
+      _e,
+      runId: string,
+      focus: string | null,
+      opts?: { depth?: number; cap?: number; showSources?: boolean }
+    ) =>
+      distillRuns?.graph(runId, focus ?? null, distillOpts(opts)) ?? {
+        nodes: [],
+        edges: [],
+        hiddenSources: 0
+      }
   )
 
   // Overlay: the vault + this run, unioned live (no writes) — the "how they'd
   // play together" preview. Built from raw rows of both indexes.
   ipcMain.handle(
     'distill:overlayGraph',
-    (_e, runId: string, focus: string | null, opts?: { depth?: number; cap?: number }) => {
-      if (!index || !distillRuns) return { nodes: [], edges: [] }
-      return overlayGraph(index.graphRows(), distillRuns.rows(runId), focus ?? null, opts)
+    (
+      _e,
+      runId: string,
+      focus: string | null,
+      opts?: { depth?: number; cap?: number; showSources?: boolean }
+    ) => {
+      if (!index || !distillRuns) return { nodes: [], edges: [], hiddenSources: 0 }
+      return overlayGraph(index.graphRows(), distillRuns.rows(runId), focus ?? null, distillOpts(opts))
     }
   )
 

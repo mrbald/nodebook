@@ -41,6 +41,15 @@ describe('parseCitations', () => {
     expect(parseCitations(bad)).toEqual([])
   })
 
+  it('keeps a comma-containing source title whole (one run = one document)', () => {
+    const commaTitle =
+      '---\nsource: Options, Futures, and Other Derivatives Solutions Manual — Hull J\n' +
+      'cite:\n  - chunk: 1\n    span: 10-30\n---\n'
+    expect(parseCitations(commaTitle)[0].source).toBe(
+      'Options, Futures, and Other Derivatives Solutions Manual — Hull J'
+    )
+  })
+
   it('parses the quote field when present, JSON-unescaping it', () => {
     const withQuote =
       '---\nsource: Book.md\ncite:\n  - chunk: 1\n    span: 10-30\n' +

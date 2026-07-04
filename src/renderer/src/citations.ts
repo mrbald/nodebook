@@ -38,10 +38,9 @@ export function parseCitations(content: string): NoteCitation[] {
   const fm = /^---\n([\s\S]*?)\n---/.exec(content)
   if (!fm) return []
   const block = fm[1]
-  const source = (/^source:\s*(.+)$/m.exec(block)?.[1] ?? '')
-    .split(',')[0]
-    .trim()
-    .replace(/\.md$/i, '')
+  // The whole line is ONE note name: a run distills a single document, and the
+  // short human title may itself contain commas ("Options, Futures, and …").
+  const source = (/^source:\s*(.+)$/m.exec(block)?.[1] ?? '').trim().replace(/\.md$/i, '')
   const out: NoteCitation[] = []
   for (const m of block.matchAll(CITE_RE)) {
     const start = Number(m[2])

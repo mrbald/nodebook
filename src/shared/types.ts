@@ -52,6 +52,11 @@ export interface GraphData {
   /** Candidate nodes available before the global cap; equals `nodes.length`
    *  unless the global view was capped to the highest-degree subset. */
   total?: number
+  /** Source-document "hub" nodes dropped because `showSources` was off (a note
+   *  distilled from a book all carry `source:: [[book]]`, which otherwise turns
+   *  the map into a star). 0 when shown, or when the slice has none — so the UI
+   *  can show its toggle only when it would actually do something. */
+  hiddenSources: number
 }
 
 /** A full-text search result. */

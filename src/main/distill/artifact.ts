@@ -13,8 +13,8 @@
  */
 
 import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync, copyFileSync } from 'fs'
-import { join, basename, sep } from 'path'
-import type { EmittedNote } from './emit'
+import { join, sep } from 'path'
+import { noteName, sourceTitle, type EmittedNote } from './emit'
 
 /** A safe run id is one path segment: alphanumeric start, then word/space/.-, no `..`. */
 const RUN_ID_RE = /^[A-Za-z0-9][\w .-]*$/
@@ -35,13 +35,17 @@ export function runDir(vaultRoot: string, runId: string): string {
   return join(distillRoot(vaultRoot), runId)
 }
 
-/** The note name for the source book (its `source::` target), from a path. */
+/** The note name for the source book (its `source::` target), from a path.
+ *  Reuses emit.ts's `sourceTitle` + `noteName` exactly, so this is always the
+ *  same name the emitted notes' `source::` link points at — the link resolves
+ *  to a real note instead of a ghost. */
 export function sourceNoteName(file: string): string {
-  return basename(file).replace(/\.md$/i, '')
+  return noteName(sourceTitle(file))
 }
 
 export interface RunSource {
-  /** Identifier used in citations and the `source::` edge (e.g. `Federalist.md`). */
+  /** The document's raw file identifier (e.g. `Federalist.md`). Note names
+   *  derive from it via `sourceNoteName`; `meta.json` keeps it as-is. */
   file: string
   text: string
 }
@@ -53,10 +57,12 @@ export interface PlannedFile {
 }
 
 /**
- * The files a run consists of: the source book as a note (so `source::` resolves
- * to a real node, not a ghost), each emitted note, and a `meta.json`. Pure —
- * decides the layout without touching disk. `stats` (the pipeline's run stats)
- * is persisted so a bad run — say, zero notes because every claim failed quote
+ * The files a run consists of: the source book as a note (named `sourceNoteName`
+ * so `source::` resolves to a real node, not a ghost), each emitted note, and a
+ * `meta.json` — which keeps the RAW source file identifier, the run's one record
+ * of machine provenance now the notes carry only the short title. Pure — decides
+ * the layout without touching disk. `stats` (the pipeline's run stats) is
+ * persisted so a bad run — say, zero notes because every claim failed quote
  * verification — stays diagnosable after the completion banner is dismissed.
  */
 export function planRunFiles(
@@ -70,7 +76,7 @@ export function planRunFiles(
   files.push({
     relPath: 'meta.json',
     content: JSON.stringify(
-      { source: sourceFile, notes: notes.length, ...(stats ? { stats } : {}) },
+      { source: source.file, notes: notes.length, ...(stats ? { stats } : {}) },
       null,
       2
     )
@@ -80,6 +86,7 @@ export function planRunFiles(
 
 /** What `meta.json` records about a run (see `planRunFiles`). */
 export interface RunMeta {
+  /** The raw source file identifier, exactly as given to the run. */
   source: string
   notes: number
   stats?: Record<string, number>

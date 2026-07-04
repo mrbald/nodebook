@@ -44,8 +44,10 @@ const api = {
     ipcRenderer.invoke('index:outbound', sourceFile),
   search: (query: string): Promise<SearchHit[]> => ipcRenderer.invoke('index:search', query),
   noteNames: (): Promise<string[]> => ipcRenderer.invoke('index:noteNames'),
-  graph: (focusPath: string | null, opts?: { depth?: number; cap?: number }): Promise<GraphData> =>
-    ipcRenderer.invoke('index:graph', focusPath, opts),
+  graph: (
+    focusPath: string | null,
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
+  ): Promise<GraphData> => ipcRenderer.invoke('index:graph', focusPath, opts),
   // Name an untyped link: append `relation:: [[target]]` to the source note + re-index.
   typeRelation: (sourcePath: string, relation: string, target: string): Promise<boolean> =>
     ipcRenderer.invoke('index:typeRelation', sourcePath, relation, target),
@@ -142,13 +144,13 @@ const api = {
   distillGraph: (
     runId: string,
     focus?: string | null,
-    opts?: { depth?: number; cap?: number }
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
   ): Promise<GraphData> => ipcRenderer.invoke('distill:graph', runId, focus ?? null, opts),
   /** The vault + this run unioned live (overlay view; no writes). */
   distillOverlayGraph: (
     runId: string,
     focus?: string | null,
-    opts?: { depth?: number; cap?: number }
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
   ): Promise<GraphData> => ipcRenderer.invoke('distill:overlayGraph', runId, focus ?? null, opts),
   /** Staged runs with note counts + merged flags (newest data read from disk). */
   distillListRuns: (): Promise<DistillRunInfo[]> => ipcRenderer.invoke('distill:listRuns'),

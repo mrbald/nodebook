@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { noteName, renderNote, emitNotes } from './emit'
+import { noteName, sourceTitle, renderNote, emitNotes } from './emit'
 import { harvest } from '../harvest'
 import type { GroundedNote } from './extract'
 
@@ -27,6 +27,32 @@ describe('noteName', () => {
   })
 })
 
+describe('sourceTitle', () => {
+  it('strips the extension, keeps title + author from a library-dump name, cleans underscores', () => {
+    const dump =
+      "Options, Futures, and Other Derivatives__ Solutions Manual -- Hull J_ -- 11, 2021 -- Pearson -- 80e6709029281e474d6c1fe3767907a0 -- Anna's Archive.pdf"
+    expect(sourceTitle(dump)).toBe('Options, Futures, and Other Derivatives Solutions Manual — Hull J')
+  })
+  it('strips a known document extension with no " -- " separators', () => {
+    expect(sourceTitle('book.pdf')).toBe('book')
+    expect(sourceTitle('notes.md')).toBe('notes')
+  })
+  it('turns underscore runs into spaces', () => {
+    expect(sourceTitle('My_Great_Book_Notes.txt')).toBe('My Great Book Notes')
+  })
+  it('soft-caps at 80 chars, cutting at a word boundary with no ellipsis', () => {
+    const long =
+      'This is a very long document title without any double dash separators that definitely exceeds the eighty character soft cap for sure and then some more words.pdf'
+    const title = sourceTitle(long)
+    expect(title.length).toBeLessThanOrEqual(80)
+    expect(title).toBe('This is a very long document title without any double dash separators that')
+    expect(title.endsWith('.')).toBe(false) // no ellipsis, no trailing punctuation from the cut
+  })
+  it('never returns empty', () => {
+    expect(sourceTitle('.pdf')).not.toBe('')
+  })
+})
+
 describe('renderNote', () => {
   const md = renderNote(note())
 
@@ -40,6 +66,25 @@ describe('renderNote', () => {
     expect(md).toContain('supports:: [[Representative republic]]')
     expect(md).toContain('Scale dilutes faction.')
     expect(md).toContain('> Extend the sphere')
+  })
+
+  it('names the source by the same short title in frontmatter and the body link', () => {
+    const md2 = renderNote(
+      note({
+        citations: [
+          {
+            file: "Options, Futures, and Other Derivatives__ Solutions Manual -- Hull J_ -- Anna's Archive.pdf",
+            chunkId: 1,
+            start: 0,
+            end: 5,
+            quote: 'x'
+          }
+        ]
+      })
+    )
+    const short = 'Options, Futures, and Other Derivatives Solutions Manual — Hull J'
+    expect(md2).toContain(`source: ${short}\n`)
+    expect(md2).toContain(`source:: [[${short}]]`)
   })
 
   it('sanitizes an unsafe relation name and normalizes link targets', () => {

@@ -7,9 +7,17 @@
  *  - **Body `key:: value` fields** carry the real knowledge edges: `source::` to
  *    the book, and each typed relation (`about::`, `supports::`, …). These become
  *    triples and drive the derived map.
- *  - **Frontmatter** carries display/provenance metadata (`kind`, per-citation
- *    `cite` spans). It uses single-colon YAML, which `harvest()` ignores — so the
- *    span provenance never pollutes the graph with citation ghost-nodes.
+ *  - **Frontmatter** carries display/provenance metadata (`kind`, the `source`
+ *    note name, per-citation `cite` spans). It uses single-colon YAML, which
+ *    `harvest()` ignores — so the span provenance never pollutes the graph with
+ *    citation ghost-nodes.
+ *
+ * The source is named by ONE short human title everywhere (`sourceTitle`, run
+ * through `noteName`): the body `source::` target, the frontmatter `source:`
+ * line (the renderer's citation panel resolves it to a note), and the book note
+ * file `artifact.ts` writes (`sourceNoteName`) — so the name always resolves to
+ * a real note. Raw machine identity lives in the run's `meta.json` and the cite
+ * chunk/span provenance, not here.
  *
  * Link targets are normalized the same way as note names, so `[[target]]` always
  * resolves to the note emitted for that title.
@@ -26,9 +34,33 @@ export interface EmittedNote {
   content: string
 }
 
-/** Base note name from a source file path (basename without `.md`). */
-function sourceName(file: string): string {
-  return (file.split(/[/\\]/).pop() ?? file).replace(/\.md$/i, '')
+const DOC_EXT_RE = /\.(pdf|epub|md|markdown|txt|text)$/i
+const TITLE_CAP = 80
+
+/** Cut `s` back to the last word boundary at or before `max` chars. No ellipsis. */
+function capWords(s: string, max: number): string {
+  if (s.length <= max) return s
+  const cut = s.slice(0, max)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim()
+}
+
+/**
+ * A short, human title for a source file — via `noteName` it becomes the one
+ * source name used everywhere (see the module header), so links always resolve.
+ *
+ * Strips the file's directory and a known document extension, then — for the
+ * common library-dump convention (`Title -- Author -- Year -- Publisher -- ...`)
+ * — keeps just the title and author segments. Underscores (another dump
+ * convention) become spaces. Falls back to the stripped basename, then
+ * `'source'`; never empty.
+ */
+export function sourceTitle(file: string): string {
+  const base = (file.split(/[/\\]/).pop() ?? file).replace(DOC_EXT_RE, '')
+  const segments = base.split(' -- ')
+  const picked = segments.length > 1 ? segments.slice(0, 2).join(' — ') : base
+  const cleaned = capWords(picked.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim(), TITLE_CAP)
+  return cleaned || base.trim() || 'source'
 }
 
 /**
@@ -68,7 +100,9 @@ function frontmatter(note: GroundedNote, sources: string[]): string {
 /** Render one note's markdown. `name` overrides the title-derived note name
  *  (used when a run de-collides duplicate names). */
 export function renderNote(note: GroundedNote, name = noteName(note.title)): string {
-  const sources = [...new Set(note.citations.map((c) => sourceName(c.file)))]
+  // One name for the source everywhere — frontmatter, body link, book note
+  // file — so it always resolves (see the module header).
+  const sources = [...new Set(note.citations.map((c) => noteName(sourceTitle(c.file))))]
 
   const fields: string[] = []
   for (const s of sources) fields.push(`source:: [[${s}]]`)

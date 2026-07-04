@@ -61,6 +61,11 @@ describe('paths', () => {
   it('derives the source note name from a path', () => {
     expect(sourceNoteName('books/Federalist.md')).toBe('Federalist')
   })
+  it('shortens a library-dump filename the same way emit.ts shortens the source:: link target — so it resolves', () => {
+    const dump =
+      "Options, Futures, and Other Derivatives__ Solutions Manual -- Hull J_ -- 11, 2021 -- Pearson -- 80e6709029281e474d6c1fe3767907a0 -- Anna's Archive.pdf"
+    expect(sourceNoteName(dump)).toBe('Options, Futures, and Other Derivatives Solutions Manual — Hull J')
+  })
 })
 
 describe('planRunFiles', () => {
@@ -78,6 +83,14 @@ describe('planRunFiles', () => {
     const stats = { chunks: 10, notes: 2, dropped: 3, failedClusters: 1 }
     const files = planRunFiles({ file: 'Federalist.md', text: 'x' }, emitNotes(grounded()), stats)
     expect(JSON.parse(files.at(-1)!.content)).toMatchObject({ notes: 2, stats })
+  })
+
+  it('names the book file by the short title (matching the source:: target); meta.source keeps the raw identifier', () => {
+    const dump = "Options, Futures, and Other Derivatives__ Solutions Manual -- Hull J_ -- Anna's Archive.pdf"
+    const shortName = 'Options, Futures, and Other Derivatives Solutions Manual — Hull J'
+    const files = planRunFiles({ file: dump, text: 'x' }, emitNotes(grounded()))
+    expect(files.map((f) => f.relPath)).toContain(join('notes', `${shortName}.md`))
+    expect(JSON.parse(files.at(-1)!.content)).toMatchObject({ source: dump })
   })
 })
 

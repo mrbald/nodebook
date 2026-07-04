@@ -34,7 +34,10 @@ export interface NodebookApi {
   outbound: (sourceFile: string) => Promise<Outbound[]>
   search: (query: string) => Promise<SearchHit[]>
   noteNames: () => Promise<string[]>
-  graph: (focusPath: string | null, opts?: { depth?: number; cap?: number }) => Promise<GraphData>
+  graph: (
+    focusPath: string | null,
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
+  ) => Promise<GraphData>
   typeRelation: (sourcePath: string, relation: string, target: string) => Promise<boolean>
   talkStatus: () => Promise<TalkStatus>
   talkEnable: (dims: number) => Promise<TalkStatus>
@@ -66,12 +69,12 @@ export interface NodebookApi {
   distillGraph: (
     runId: string,
     focus?: string | null,
-    opts?: { depth?: number; cap?: number }
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
   ) => Promise<GraphData>
   distillOverlayGraph: (
     runId: string,
     focus?: string | null,
-    opts?: { depth?: number; cap?: number }
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
   ) => Promise<GraphData>
   distillListRuns: () => Promise<DistillRunInfo[]>
   distillRemove: (runId: string) => Promise<void>

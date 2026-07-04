@@ -23,9 +23,19 @@ those generated notes.
 ## Why it fits (and reuses almost everything)
 
 - **Provenance is already in the chunker.** `chunk.ts` stores `start`/`end` offsets
-  and the heading path for every chunk. A generated note cites `source:: [[Book]]`
-  + `span:: 1234–1456` (or a page/§ anchor); clicking it opens the source at that
-  location — the *same* citation mechanism talk-to-docs P2 chat uses.
+  and the heading path for every chunk. A generated note keeps provenance in
+  **frontmatter** — the source name plus each `cite:` span (chunk id, offset
+  range, the exact quote) — in single-colon YAML, which `harvest()` never turns
+  into a graph edge; the note's **body** carries the real edge, `source:: [[Book]]`.
+  `Book` is one short, human title used everywhere — frontmatter, body link, and
+  the source's own note file (derived from the filename: a library-dump's
+  `Title -- Author -- ...` convention is cut down to title + author, underscores
+  become spaces) — so the link always resolves to a real note, never a ghost; the
+  raw filename survives in the run's `meta.json`. Clicking a citation opens the
+  source at that span — the *same* citation mechanism talk-to-docs P2 chat uses.
+  The derived map hides the source-document node by default (every note in a run
+  points to it, so it's a trivial hub, not a useful edge) — a per-run toggle
+  brings it back.
 - **Themes are already in the embeddings.** Embed the book's chunks (the
   talk-to-docs pipeline) → cluster them (auto-mindmap's clustering) → each cluster
   is a candidate top-level branch. Token-efficient: the LLM sees cluster
@@ -47,8 +57,10 @@ those generated notes.
    claims, and `(entity) --relation--> (entity)` triples — **each with the citing
    span**. *Extractive-first* (quote + locate) over abstractive, so every statement
    is checkable against the source.
-4. **Emit editable notes** with `[[links]]`, `key:: value`, and `cite::`/`source::`
-   provenance → normal index → the derived mindmap appears for free.
+4. **Emit editable notes**: `key:: value` body edges (`source::` the short human
+   title, plus each typed relation) drive `[[links]]`; `cite:`/`source:` in
+   frontmatter carry the span provenance harvest ignores → normal index → the
+   derived mindmap appears for free.
 
 ## Ingestion — the converter (Microsoft MarkItDown & Node options)
 

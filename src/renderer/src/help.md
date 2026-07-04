@@ -125,6 +125,15 @@ it by hand, and nothing here changes your notes.
 - **✨ Related** (only when Talk to docs is on) — adds **dashed green lines** to notes
   that *seem related by meaning* even though you never linked them: a hint of links
   you might want to add. The **✨ Related** button turns it off.
+- **Focused maps** — the map always starts from the note you have open, so the way to
+  map an *aspect* is: open a note at its centre, press **⊹ Map**, and widen with **+**
+  until it tells the story. Hide link types (legend) or notes (right-click) that don't
+  belong. These tweaks are temporary by design — for a view worth keeping, write a
+  `.map.md` note (see **Maps** above): that's a real file, and it renders as a map
+  every time you open it.
+- **Distilled documents** — notes distilled from a document all link back to it, and
+  those "from the same book" lines would swallow the picture. The map hides the
+  document's own node by default; the **📕 Source** button brings it back.
 
 ## Talk to docs — semantic search
 
@@ -194,8 +203,10 @@ of small, linked notes, each backed by **quotes from the original**. Start it wi
   panel; clicking one opens the original document at the quoted passage.
 - **Sampling** — very long documents are read *representatively*, not line by line;
   when that happens Nodebook tells you how much of the text it looked at.
-
-## Performance telemetry
+- **The document's node** — every distilled note links back to the document it came
+  from. The run's own map shows that node (it's what the run is about), but once
+  merged, your vault's knowledge map hides it — otherwise it sits in the middle of a
+  giant star and swallows the picture. **📕 Source** toggles it in either view.
 
 ## Performance telemetry
 

@@ -1101,6 +1101,7 @@ export default function App() {
           <GraphView
             key={`distill-${distillRun.runId}`}
             loadGraph={distillLoad}
+            defaultShowSources
             emptyMessage="This run staged no notes — none of the model's claims could be verified against the source. Try a stronger chat model in Settings, then distill again."
             focusPath={null}
             focusName=""

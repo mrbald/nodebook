@@ -144,7 +144,10 @@ export class VaultIndex {
 
   /** A slice of the knowledge graph: local depth-`d` around a focus note (by
    *  path), or the whole graph (focusPath null) capped to the busiest nodes. */
-  graph(focusPath: string | null, opts?: { depth?: number; cap?: number }): GraphData {
+  graph(
+    focusPath: string | null,
+    opts?: { depth?: number; cap?: number; showSources?: boolean }
+  ): GraphData {
     const { files, triples } = this.graphRows()
     return buildGraph(files, triples, focusPath ? noteName(focusPath) : null, opts)
   }
