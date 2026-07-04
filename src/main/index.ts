@@ -791,12 +791,13 @@ function registerIpc(): void {
     if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
     const chat = makeChatModel(cfg)
     // Fail fast: confirm the model actually responds (key valid, local server up)
-    // BEFORE the expensive embedding, not half-way through the run.
+    // BEFORE the expensive embedding, not half-way through the run. CLI backends
+    // have multi-second cold starts (measured ~6.5s for a trivial codex round-trip).
     try {
-      await probeChat(chat, AbortSignal.timeout(15_000))
+      await probeChat(chat, AbortSignal.timeout(30_000))
     } catch (err) {
       throw new Error(
-        `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), or that your local server (LM Studio/Ollama) is running at the right baseUrl. ${err instanceof Error ? err.message : ''}`.trim(),
+        `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login). ${err instanceof Error ? err.message : ''}`.trim(),
         { cause: err }
       )
     }

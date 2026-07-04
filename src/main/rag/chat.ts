@@ -1,4 +1,5 @@
 import type { ChatModel, ChatRequest, ProviderConfig } from './provider'
+import { codexCliChat, genericCliChat } from './cliChat'
 
 /**
  * Chat adapters for "Ask" — each turns a grounded request into a token stream.
@@ -33,8 +34,10 @@ interface DeltaEvent {
 }
 
 function anthropicChat(cfg: ProviderConfig): ChatModel {
+  // Empty cfg.model means "provider default" (see ProviderConfig doc).
+  const model = cfg.model || 'claude-sonnet-4-6'
   return {
-    id: `anthropic:${cfg.model}`,
+    id: `anthropic:${model}`,
     async *chat(req: ChatRequest): AsyncIterable<string> {
       if (!cfg.apiKey) throw new Error('No API key — set ANTHROPIC_API_KEY or [talk.chat] apiKey.')
       const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -46,7 +49,7 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: cfg.model,
+          model,
           // 4096 gives a distill extraction prompt room to finish its JSON
           // instead of being clipped mid-object. TODO: a settings knob per
           // provider/model once there's a concrete need to tune it further.
@@ -78,6 +81,10 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
   return {
     id: `openai-compat:${cfg.model}`,
     async *chat(req: ChatRequest): AsyncIterable<string> {
+      // Unlike anthropic, there is no sane cross-vendor fallback model id — an
+      // empty model would silently send "" (or undefined) to the server.
+      if (!cfg.model)
+        throw new Error('openai-compat needs a model set in [talk.chat] (e.g. llama3.2 for Ollama).')
       const base = (cfg.baseUrl ?? '').replace(/\/+$/, '')
       if (!base) throw new Error('openai-compat needs a baseUrl (e.g. http://localhost:11434/v1).')
       const messages = req.system
@@ -151,5 +158,7 @@ export function makeChatModel(cfg: ProviderConfig): ChatModel {
   // Ollama is openai-compat pointed at the local server by default (no key).
   if (cfg.kind === 'ollama')
     return openaiCompatChat({ ...cfg, baseUrl: cfg.baseUrl ?? OLLAMA_DEFAULT_URL })
+  if (cfg.kind === 'codex-cli') return codexCliChat(cfg)
+  if (cfg.kind === 'cli') return genericCliChat(cfg)
   throw new Error(`Unsupported chat provider: ${cfg.kind}`)
 }

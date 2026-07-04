@@ -79,6 +79,47 @@ describe('probeChat', () => {
     }
     await expect(probeChat(bad)).rejects.toThrow(/No API key/)
   })
+
+  it('prefers probe() over a real chat round-trip when both are present', async () => {
+    const okProbe: ChatModel = {
+      id: 'has-probe',
+      // eslint-disable-next-line require-yield
+      async *chat() {
+        throw new Error('chat() should not be called when probe() is present')
+      },
+      async probe() {
+        /* cheap check succeeds */
+      }
+    }
+    await expect(probeChat(okProbe)).resolves.toBeUndefined()
+
+    const badProbe: ChatModel = {
+      id: 'has-failing-probe',
+      // eslint-disable-next-line require-yield
+      async *chat() {
+        throw new Error('chat() should not be called when probe() is present')
+      },
+      async probe() {
+        throw new Error("Codex isn't signed in")
+      }
+    }
+    await expect(probeChat(badProbe)).rejects.toThrow(/isn't signed in/)
+  })
+
+  it('falls back to the first-token stream ping when probe() is absent', async () => {
+    // `ok`/`bad` above already exercise this path (neither defines `probe`);
+    // this test makes the fallback explicit and checks chat() actually ran.
+    let called = false
+    const noProbe: ChatModel = {
+      id: 'no-probe',
+      async *chat() {
+        called = true
+        yield 'hi'
+      }
+    }
+    await expect(probeChat(noProbe)).resolves.toBeUndefined()
+    expect(called).toBe(true)
+  })
 })
 
 describe('distill', () => {

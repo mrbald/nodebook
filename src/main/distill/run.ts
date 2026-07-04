@@ -135,11 +135,16 @@ async function extractCluster(
 
 /**
  * Pre-flight check: confirm the chat model actually responds — API key valid,
- * local server (Ollama/LM Studio) reachable — by pulling the first token of a
- * tiny request. Throws on failure so a run fails *before* the expensive
- * embedding, not half-way through. The optional signal bounds the wait.
+ * local server (Ollama/LM Studio) reachable, CLI binary found and signed in —
+ * before the expensive embedding work, not half-way through. The optional
+ * signal bounds the wait.
+ *
+ * CLI backends supply a cheap `probe()` (binary found, signed in) because a
+ * real round-trip bills the user's subscription quota; HTTP providers have no
+ * such probe, so they fall back to pulling the first token of a tiny request.
  */
 export async function probeChat(chat: ChatModel, signal?: AbortSignal): Promise<void> {
+  if (chat.probe) return chat.probe(signal)
   const stream = chat.chat({ messages: [{ role: 'user', content: 'ping' }], signal })
   const iter = stream[Symbol.asyncIterator]()
   try {

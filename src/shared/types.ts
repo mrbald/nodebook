@@ -192,13 +192,22 @@ export interface Settings {
      *  from the env/settings in main and never sent to the renderer. */
     chat: {
       /** 'none' = search-only; 'ollama' = a local Ollama server (zero-config);
-       *  'openai-compat' = any OpenAI-style endpoint (set baseUrl); 'anthropic' = Claude. */
-      provider: 'none' | 'anthropic' | 'openai-compat' | 'ollama'
-      /** Chat model id (e.g. claude-sonnet-4-6, llama3.2, or an OpenAI-compat name). */
+       *  'openai-compat' = any OpenAI-style endpoint (set baseUrl); 'anthropic' = Claude;
+       *  'codex-cli' = the user's installed OpenAI Codex CLI under their ChatGPT
+       *  sign-in (no API key); 'cli' = advanced — any user command that reads
+       *  the prompt on stdin and prints the answer. */
+      provider: 'none' | 'anthropic' | 'openai-compat' | 'ollama' | 'codex-cli' | 'cli'
+      /** Chat model id (e.g. claude-sonnet-4-6, llama3.2, or an OpenAI-compat name).
+       *  Empty = the provider's own default. */
       model: string
       /** OpenAI-compatible base URL (Ollama, LM Studio, a gateway). Optional for
        *  'ollama' (defaults to the local server); required for 'openai-compat'. */
       baseUrl: string
+      /** CLI backends: the executable — a full path, or a bare name resolved
+       *  against PATH plus the usual install dirs. */
+      command: string
+      /** 'cli' only: arguments placed before the stdin-fed prompt. */
+      args: string[]
     }
   }
   /** Main-process telemetry (event-loop lag + CPU/RAM). Off by default; when on,

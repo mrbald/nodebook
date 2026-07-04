@@ -25,14 +25,14 @@ export const DEFAULTS: Settings = {
     enabled: false,
     relatedMinScore: 0.5,
     embed: { runtime: 'wasm', model: DEFAULT_EMBED_MODEL },
-    chat: { provider: 'none', model: 'claude-sonnet-4-6', baseUrl: '' }
+    chat: { provider: 'none', model: '', baseUrl: '', command: '', args: [] }
   },
   telemetry: { enabled: false }
 }
 
 const MODES = ['code', 'live', 'reading'] as const
 const RUNTIMES = ['wasm', 'native'] as const
-const CHAT_PROVIDERS = ['none', 'anthropic', 'openai-compat', 'ollama'] as const
+const CHAT_PROVIDERS = ['none', 'anthropic', 'openai-compat', 'ollama', 'codex-cli', 'cli'] as const
 
 export const DEFAULT_TOML = `# Nodebook settings — every option with its default. Edit and save; changes
 # apply live (⌘S to save now). "Reveal defaults" shows this reference next to
@@ -78,20 +78,36 @@ runtime = "wasm"
 model = "${DEFAULT_EMBED_MODEL}"
 
 [talk.chat]
-# "Ask" chat over your notes. "none" = search-only (no LLM, fully local).
+# "Ask" chat over your notes. Only the retrieved note passages are sent to the
+# model, never your whole vault. Providers:
+# "none" = search-only (no LLM, fully local).
 # "ollama" = a local model via Ollama (free, private, no key — install Ollama,
-# run e.g. "ollama pull llama3.2", then set model below). "anthropic" = Claude
-# (cloud). "openai-compat" = any OpenAI-style endpoint (set baseUrl), e.g. LM
-# Studio or a remote/gateway. Only the retrieved note passages are sent to the
-# model, never your whole vault.
+# run e.g. "ollama pull llama3.2", then set model below).
+# "anthropic" = Claude (cloud, needs an API key).
+# "openai-compat" = any OpenAI-style endpoint (set baseUrl), e.g. LM Studio or
+# a remote/gateway.
+# "codex-cli" = your ChatGPT plan via the Codex CLI — install it, run
+# "codex login", no API key needed; uses your plan's own usage limits.
+# "cli" (advanced) = any command that reads the question on stdin and prints
+# the answer on stdout.
 provider = "none"
-model = "claude-sonnet-4-6"
+# Chat model id. Empty = the provider's own default (Claude Sonnet for
+# "anthropic"; your own Codex default for "codex-cli"). "ollama" and
+# "openai-compat" need one set explicitly, e.g. llama3.2.
+model = ""
 # Base URL for "openai-compat". Optional for "ollama" (defaults to the local
 # server, http://localhost:11434/v1) — set it only for a non-default host/port.
 baseUrl = ""
 # API key: prefer the ANTHROPIC_API_KEY / OPENAI_API_KEY environment variable.
 # You may instead set it here, but it is stored in plain text — env is safer.
 # apiKey = ""
+# CLI providers only: the program to run. Empty resolves the default name
+# ("codex" for "codex-cli") against PATH plus the usual install dirs — set a
+# full path here if it's not found.
+command = ""
+# "cli" provider only: arguments placed before the prompt (which is written to
+# the command's stdin), e.g. args = ["-p"].
+args = []
 
 [telemetry]
 # Show a tiny status-bar widget with event-loop lag (a log-bucketed histogram),
@@ -173,7 +189,9 @@ export function parseSettings(raw: string): Settings {
       chat: {
         provider: chatProvider,
         model: str(chat.model, DEFAULTS.talk.chat.model),
-        baseUrl: str(chat.baseUrl, DEFAULTS.talk.chat.baseUrl)
+        baseUrl: str(chat.baseUrl, DEFAULTS.talk.chat.baseUrl),
+        command: str(chat.command, DEFAULTS.talk.chat.command),
+        args: Array.isArray(chat.args) ? chat.args.filter((x): x is string => typeof x === 'string') : []
       }
     },
     telemetry: {
@@ -272,10 +290,15 @@ export function chatProviderConfig(): ProviderConfig | null {
     s.talk.chat.provider === 'anthropic'
       ? process.env.ANTHROPIC_API_KEY
       : process.env.OPENAI_API_KEY
+  // API keys are only meaningful for HTTP providers — CLI backends authenticate
+  // via the CLI's own sign-in (codex login, etc.), never a key.
+  const isCli = s.talk.chat.provider === 'codex-cli' || s.talk.chat.provider === 'cli'
   return {
     kind: s.talk.chat.provider,
     model: s.talk.chat.model,
     baseUrl: s.talk.chat.baseUrl || undefined,
-    apiKey: envKey || tomlKey || undefined
+    apiKey: isCli ? undefined : envKey || tomlKey || undefined,
+    command: s.talk.chat.command || undefined,
+    args: s.talk.chat.args.length ? s.talk.chat.args : undefined
   }
 }

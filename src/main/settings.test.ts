@@ -118,7 +118,9 @@ describe('parseSettings', () => {
     expect(s.talk.chat).toEqual({
       provider: 'anthropic',
       model: 'claude-x',
-      baseUrl: 'http://h/v1'
+      baseUrl: 'http://h/v1',
+      command: '',
+      args: []
     })
     // unknown provider falls back to "none" (search-only)
     expect(parseSettings('[talk.chat]\nprovider = "bogus"').talk.chat.provider).toBe('none')
@@ -128,6 +130,40 @@ describe('parseSettings', () => {
     const s = parseSettings('[talk.chat]\nprovider = "ollama"\nmodel = "llama3.2"')
     expect(s.talk.chat.provider).toBe('ollama')
     expect(s.talk.chat.model).toBe('llama3.2')
+  })
+
+  it('accepts the "codex-cli" and "cli" providers', () => {
+    expect(parseSettings('[talk.chat]\nprovider = "codex-cli"').talk.chat.provider).toBe('codex-cli')
+    expect(parseSettings('[talk.chat]\nprovider = "cli"').talk.chat.provider).toBe('cli')
+  })
+
+  it('defaults model to empty (provider default), not a hardcoded model id', () => {
+    expect(DEFAULTS.talk.chat.model).toBe('')
+    expect(parseSettings('').talk.chat.model).toBe('')
+  })
+
+  it('reads command and args for CLI providers', () => {
+    const s = parseSettings(
+      '[talk.chat]\nprovider = "cli"\ncommand = "/opt/homebrew/bin/claude"\nargs = ["-p", "--verbose"]'
+    )
+    expect(s.talk.chat.command).toBe('/opt/homebrew/bin/claude')
+    expect(s.talk.chat.args).toEqual(['-p', '--verbose'])
+    // missing command/args fall back to defaults
+    expect(parseSettings('[talk.chat]\nprovider = "codex-cli"').talk.chat).toEqual({
+      provider: 'codex-cli',
+      model: '',
+      baseUrl: '',
+      command: '',
+      args: []
+    })
+  })
+
+  it('filters non-string entries out of args', () => {
+    expect(
+      parseSettings('[talk.chat]\nargs = ["ok", 1, true, "also-ok"]').talk.chat.args
+    ).toEqual(['ok', 'also-ok'])
+    // non-array args falls back to []
+    expect(parseSettings('[talk.chat]\nargs = "not-an-array"').talk.chat.args).toEqual([])
   })
 
   it('keeps followSystem default unless it is a real boolean', () => {

@@ -153,6 +153,14 @@ Settings (`[talk.chat]`).
   - `anthropic` — Claude (cloud); set `ANTHROPIC_API_KEY` in your environment.
   - `openai-compat` — any OpenAI-style endpoint (OpenAI, a gateway, or LM Studio)
     via `baseUrl`; set `OPENAI_API_KEY` if it needs one.
+  - `codex-cli` — already pay for **ChatGPT** and have its **Codex** command-line
+    app installed and signed in? Turn this on and skip the API key entirely.
+    Nodebook runs the Codex app on your own computer; what you ask counts
+    against your ChatGPT plan's usage limits, and the answer appears all at
+    once rather than streaming in.
+  - `cli` (advanced) — runs any command you supply: your question goes to the
+    command, and whatever it prints comes back as the answer. For anyone
+    comfortable with a terminal.
   - `none` keeps things search-only.
 
   Prefer the environment variable for keys; you *can* put one in the settings

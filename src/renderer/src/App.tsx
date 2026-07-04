@@ -920,7 +920,9 @@ export default function App() {
             // Settings instead of hiding it.
             <button className="ask-cta" onClick={openSettings}>
               💬 Ask your notes — set up a chat provider{' '}
-              <span className="talk-cta-note">(local Ollama works)</span>
+              <span className="talk-cta-note">
+                (Ollama or your ChatGPT plan's Codex app work)
+              </span>
             </button>
           ))}
         {vault && stagedRuns.length > 0 && (

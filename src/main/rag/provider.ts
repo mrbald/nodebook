@@ -32,6 +32,11 @@ export interface ChatRequest {
 export interface ChatModel {
   readonly id: string
   chat(req: ChatRequest): AsyncIterable<string>
+  /** Optional cheap health check (binary found, signed in). When present,
+   *  `probeChat` uses it instead of a real model round-trip — CLI backends
+   *  bill every chat call against the user's subscription quota, so the
+   *  pre-flight must not spend it. */
+  probe?(signal?: AbortSignal): Promise<void>
 }
 
 /**
@@ -44,16 +49,35 @@ export interface ChatModel {
  * `'ollama'` is a zero-config convenience over `'openai-compat'`: a local Ollama
  * server at its default URL, no key. (`'local'` is reserved for a future
  * in-process model — not the same thing as talking to a local server.)
+ *
+ * `'codex-cli'` runs the user's own installed OpenAI Codex CLI (`codex exec`)
+ * under their ChatGPT sign-in — no API key. `'cli'` is the generic escape
+ * hatch: any user-supplied command that reads a prompt on stdin and prints the
+ * answer on stdout (see docs/cli-providers.md, including why Claude Code is
+ * reached this way rather than as a named preset).
  */
-export type ProviderKind = 'local' | 'ollama' | 'openai-compat' | 'anthropic' | 'mcp'
+export type ProviderKind =
+  | 'local'
+  | 'ollama'
+  | 'openai-compat'
+  | 'anthropic'
+  | 'codex-cli'
+  | 'cli'
+  | 'mcp'
 
 export interface ProviderConfig {
   kind: ProviderKind
-  /** Model name/id for the chosen backend. */
+  /** Model name/id for the chosen backend. Empty = the backend's own default. */
   model?: string
   /** OpenAI-compatible endpoints (OpenAI, Ollama, LM Studio, gateways, …). */
   baseUrl?: string
   apiKey?: string
+  /** CLI backends: the executable ('codex-cli' defaults to `codex`; required
+   *  for 'cli'). A bare name is resolved against PATH plus the usual install
+   *  dirs — GUI-launched Electron does not inherit the shell PATH. */
+  command?: string
+  /** 'cli' only: arguments placed before the stdin-fed prompt. */
+  args?: string[]
 }
 
 /** Produces an embedder and/or chat model from its config (lazy, async). */
