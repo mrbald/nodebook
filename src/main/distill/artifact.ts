@@ -55,17 +55,46 @@ export interface PlannedFile {
 /**
  * The files a run consists of: the source book as a note (so `source::` resolves
  * to a real node, not a ghost), each emitted note, and a `meta.json`. Pure —
- * decides the layout without touching disk.
+ * decides the layout without touching disk. `stats` (the pipeline's run stats)
+ * is persisted so a bad run — say, zero notes because every claim failed quote
+ * verification — stays diagnosable after the completion banner is dismissed.
  */
-export function planRunFiles(source: RunSource, notes: EmittedNote[]): PlannedFile[] {
+export function planRunFiles(
+  source: RunSource,
+  notes: EmittedNote[],
+  stats?: Record<string, number>
+): PlannedFile[] {
   const sourceFile = `${sourceNoteName(source.file)}.md`
   const files: PlannedFile[] = [{ relPath: join('notes', sourceFile), content: source.text }]
   for (const n of notes) files.push({ relPath: join('notes', n.fileName), content: n.content })
   files.push({
     relPath: 'meta.json',
-    content: JSON.stringify({ source: sourceFile, notes: notes.length }, null, 2)
+    content: JSON.stringify(
+      { source: sourceFile, notes: notes.length, ...(stats ? { stats } : {}) },
+      null,
+      2
+    )
   })
   return files
+}
+
+/** What `meta.json` records about a run (see `planRunFiles`). */
+export interface RunMeta {
+  source: string
+  notes: number
+  stats?: Record<string, number>
+}
+
+/** Read a run's `meta.json`; null when missing/unreadable (pre-stats runs
+ *  still parse — `stats` is simply absent). */
+export function readRunMeta(vaultRoot: string, runId: string): RunMeta | null {
+  try {
+    const raw = readFileSync(join(runDir(vaultRoot, runId), 'meta.json'), 'utf8')
+    const m = JSON.parse(raw) as RunMeta
+    return typeof m.source === 'string' && typeof m.notes === 'number' ? m : null
+  } catch {
+    return null
+  }
 }
 
 export interface RunArtifact {
@@ -83,13 +112,14 @@ export function writeRunArtifact(
   vaultRoot: string,
   runId: string,
   source: RunSource,
-  notes: EmittedNote[]
+  notes: EmittedNote[],
+  stats?: Record<string, number>
 ): RunArtifact {
   const dir = runDir(vaultRoot, runId)
   rmSync(dir, { recursive: true, force: true })
   mkdirSync(join(dir, 'notes'), { recursive: true })
   const notePaths: string[] = []
-  for (const f of planRunFiles(source, notes)) {
+  for (const f of planRunFiles(source, notes, stats)) {
     const abs = join(dir, f.relPath)
     writeFileSync(abs, f.content)
     if (f.relPath.startsWith(`notes${sep}`)) notePaths.push(abs)

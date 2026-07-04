@@ -86,10 +86,17 @@ test('distills a document into a staged, cited run of notes', async () => {
   expect(result.stats.dropped).toBe(0) // stub quotes are real substrings → grounding keeps all
 })
 
+test('staged runs are listed with note counts and merge state', async () => {
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(runs.length).toBeGreaterThan(0)
+  expect(runs[0].notes).toBeGreaterThan(0)
+  expect(runs[0].merged).toBe(false)
+})
+
 test('the run map wires distilled notes to the source book', async () => {
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
   expect(runs.length).toBeGreaterThan(0)
-  const g = await page.evaluate((id) => window.nodebook.distillGraph(id), runs[0])
+  const g = await page.evaluate((id) => window.nodebook.distillGraph(id), runs[0].id)
   expect(g.nodes.length).toBeGreaterThan(1)
   expect(g.nodes.some((n) => n.id === 'on-government')).toBe(true) // source is a node
   expect(g.edges.some((e) => e.relation === 'source')).toBe(true) // notes cite it
@@ -97,7 +104,7 @@ test('the run map wires distilled notes to the source book', async () => {
 
 test('FIREWALL: distilled notes never enter the canonical index', async () => {
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
-  const g = await page.evaluate((id) => window.nodebook.distillGraph(id), runs[0])
+  const g = await page.evaluate((id) => window.nodebook.distillGraph(id), runs[0].id)
   const canonNames = await page.evaluate(() => window.nodebook.noteNames())
   // Not one of the run's nodes (source or distilled concepts) leaked into the vault index.
   for (const node of g.nodes) expect(canonNames).not.toContain(node.id)
@@ -105,7 +112,7 @@ test('FIREWALL: distilled notes never enter the canonical index', async () => {
 
 test('OVERLAY unions the vault + the run with provenance, writing nothing', async () => {
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
-  const overlay = await page.evaluate((id) => window.nodebook.distillOverlayGraph(id), runs[0])
+  const overlay = await page.evaluate((id) => window.nodebook.distillOverlayGraph(id), runs[0].id)
   const sources = new Set(overlay.nodes.map((n) => n.source))
   expect(sources.has('run')).toBe(true) // the book's nodes
   expect(sources.has('vault')).toBe(true) // your existing notes, shown alongside
@@ -128,6 +135,43 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(page.locator('.graph-node').first()).toBeVisible()
   expect(await page.locator('.graph-node').count()).toBeGreaterThan(1)
   await expect(page.locator('.graph-edge').first()).toBeVisible()
+
+  // The completion banner says what happened and that nothing is merged yet.
+  await expect(page.locator('.distill-coverage-banner')).toContainText(/Staged \d+ notes?/)
+  await expect(page.locator('.distill-coverage-banner')).toContainText('Merge')
+  await page.locator('.distill-coverage-close').click()
+})
+
+test('a closed run map is reachable again from the sidebar "Distilled runs" list', async () => {
+  // Close the run map opened by the previous test — the run must NOT be lost.
+  await page.locator('.graph-close').click()
+  await expect(page.locator('.graph-view')).toHaveCount(0)
+
+  const section = page.locator('.runs-section')
+  await expect(section).toBeVisible()
+  await expect(section.locator('.runs-header')).toHaveText('Distilled runs')
+  const row = section.locator('.run-item').first()
+  await expect(row.locator('.run-item-meta')).toContainText(/\d+ notes?/)
+
+  // Clicking the row reopens the staged run's map (the graph loads async).
+  await row.click()
+  await expect(page.locator('.graph-view')).toBeVisible()
+  await expect.poll(() => page.locator('.graph-node').count()).toBeGreaterThan(1)
+})
+
+test('same-source re-distill gets its own run id; discarding removes only that run', async () => {
+  // Distill the same book again: the id must NOT silently replace the first
+  // run (a "-2" suffix de-collides). Then discard the copy.
+  const before = await page.evaluate(() => window.nodebook.distillListRuns())
+  await page.evaluate((p) => window.nodebook.distillRun(p), bookPath)
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(runs.length).toBe(before.length + 1)
+
+  const newId = runs.map((r) => r.id).find((id) => !before.some((b) => b.id === id))!
+  await page.evaluate((id) => window.nodebook.distillRemove(id), newId)
+  const after = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(after.map((r) => r.id)).not.toContain(newId)
+  expect(after.length).toBe(before.length)
 })
 
 test('distills a PDF via pdf.js text extraction → cited notes', async () => {
@@ -169,7 +213,7 @@ test('the run map toggles Standalone ⟷ Overlay (overlay adds the vault notes)'
 
 test('MERGE writes the run into the vault (now canonical); UNDO reverses it', async () => {
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
-  const id = runs[0]
+  const id = runs[0].id
   expect(await page.evaluate(() => window.nodebook.noteNames())).not.toContain('on-government')
   const res = await page.evaluate((r) => window.nodebook.distillMerge(r), id)
   expect(res.count).toBeGreaterThan(0)

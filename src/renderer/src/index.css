@@ -985,6 +985,61 @@ body {
 .talk-cta-note {
   opacity: 0.7;
 }
+
+/* Distilled runs — staged (not-yet-merged) distill results in the sidebar. */
+.runs-section {
+  margin: 0 12px 8px;
+}
+.runs-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 4px 0;
+}
+.run-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.run-item:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+.run-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.run-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-item-meta {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.run-item-del {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 4px;
+}
+.run-item-del:hover {
+  color: var(--text);
+  background: rgba(127, 127, 127, 0.2);
+}
 .talk-setup {
   margin: 0 12px 8px;
   padding: 10px;

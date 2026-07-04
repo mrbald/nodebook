@@ -5,6 +5,7 @@ import type {
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
+  DistillRunInfo,
   DistillRunResult,
   GraphData,
   MenuState,
@@ -149,7 +150,8 @@ const api = {
     focus?: string | null,
     opts?: { depth?: number; cap?: number }
   ): Promise<GraphData> => ipcRenderer.invoke('distill:overlayGraph', runId, focus ?? null, opts),
-  distillListRuns: (): Promise<string[]> => ipcRenderer.invoke('distill:listRuns'),
+  /** Staged runs with note counts + merged flags (newest data read from disk). */
+  distillListRuns: (): Promise<DistillRunInfo[]> => ipcRenderer.invoke('distill:listRuns'),
   distillRemove: (runId: string): Promise<void> => ipcRenderer.invoke('distill:remove', runId),
   /** Merge a run into the vault (reversible). */
   distillMerge: (runId: string): Promise<DistillMergeResult> =>

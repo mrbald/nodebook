@@ -4,6 +4,7 @@ import type {
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
+  DistillRunInfo,
   DistillRunResult,
   GraphData,
   MenuState,
@@ -72,7 +73,7 @@ export interface NodebookApi {
     focus?: string | null,
     opts?: { depth?: number; cap?: number }
   ) => Promise<GraphData>
-  distillListRuns: () => Promise<string[]>
+  distillListRuns: () => Promise<DistillRunInfo[]>
   distillRemove: (runId: string) => Promise<void>
   distillMerge: (runId: string) => Promise<DistillMergeResult>
   distillUnmerge: (runId: string) => Promise<boolean>

@@ -176,6 +176,9 @@ of small, linked notes, each backed by **quotes from the original**. Start it wi
 - **Nothing touches your vault yet** — the result opens as its **own map**, kept in a
   staging area. Explore it like the knowledge map. The **⧉ Overlay** button shows your
   vault and the run *together* (a preview — still nothing written).
+- **Runs are kept** — every distilled run appears under **Distilled runs** in the
+  sidebar until you discard it, so closing the map loses nothing. Click a run to
+  reopen its map; **✕** discards it.
 - **Merge when happy** — **⤓ Merge** copies the run's notes into your vault under a
   `Distilled/…` folder. It's reversible: **Undo** in the banner removes exactly what
   was written.

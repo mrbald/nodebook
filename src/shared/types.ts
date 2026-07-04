@@ -230,6 +230,15 @@ export interface DistillRunResult {
   stats: DistillStats
 }
 
+/** A staged run as shown in the "Distilled runs" list. */
+export interface DistillRunInfo {
+  id: string
+  /** Emitted (concept) notes in the run — 0 means nothing survived grounding. */
+  notes: number
+  /** Whether the run has already been merged into the vault. */
+  merged: boolean
+}
+
 export interface DistillProgress {
   phase: 'chunking' | 'embedding' | 'clustering' | 'extracting' | 'finalizing' | 'done'
   done: number

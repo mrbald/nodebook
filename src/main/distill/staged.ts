@@ -35,10 +35,16 @@ export class StagedRunStore {
   }
 
   /** Write a run's notes to disk and index them into its own db. Replaces any
-   *  previous run with the same id (closes its index first). */
-  create(runId: string, source: RunSource, notes: EmittedNote[]): { runId: string; dir: string } {
+   *  previous run with the same id (closes its index first). `stats` is
+   *  persisted into meta.json for later diagnosis (see artifact.planRunFiles). */
+  create(
+    runId: string,
+    source: RunSource,
+    notes: EmittedNote[],
+    stats?: Record<string, number>
+  ): { runId: string; dir: string } {
     this.closeOne(runId)
-    const { dir, notePaths } = writeRunArtifact(this.vaultRoot, runId, source, notes)
+    const { dir, notePaths } = writeRunArtifact(this.vaultRoot, runId, source, notes, stats)
     const idx = this.indexOf(runId)
     for (const p of notePaths) idx.indexFile(p, readFileSync(p, 'utf8'), 0)
     return { runId, dir }

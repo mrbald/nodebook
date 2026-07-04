@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { MarkdownFile, SearchHit, Settings } from '@shared/types'
+import type { DistillRunInfo, MarkdownFile, SearchHit, Settings } from '@shared/types'
 import { Editor, type ViewMode } from './editor/Editor'
 import { BacklinksPanel } from './BacklinksPanel'
 import { parseCitations, resolveCitationSpan, type NoteCitation } from './citations'
@@ -76,9 +76,12 @@ export default function App() {
   const [mergeInfo, setMergeInfo] = useState<{ runId: string; folder: string; count: number } | null>(
     null
   )
-  // Coverage honesty: set after a run completes if it sampled rather than
-  // fully covered the source (see distill/run.ts stats.coverage).
-  const [distillCoverageNote, setDistillCoverageNote] = useState<string | null>(null)
+  // Completion summary for the last distill run: how many notes were staged
+  // (and why zero, when zero), plus the sampling-coverage honesty note.
+  const [distillDoneNote, setDistillDoneNote] = useState<string | null>(null)
+  // Staged (unmerged or merged) distill runs, listed in the sidebar so a run
+  // is never lost once its map is closed.
+  const [stagedRuns, setStagedRuns] = useState<DistillRunInfo[]>([])
   const [distilling, setDistilling] = useState<{
     runId?: string
     phase: string
@@ -312,6 +315,8 @@ export default function App() {
       setFiles(listing.files)
       setDirs(listing.dirs)
       setNoteNames(await window.nodebook.noteNames())
+      setDistillRun(null)
+      setStagedRuns(await window.nodebook.distillListRuns())
       talk.onVaultOpened() // resume embedding for the newly-opened vault
     },
     [flushCurrent, talk]
@@ -694,6 +699,11 @@ export default function App() {
   // Defined after the handlers it dispatches to so their identities are in scope.
   // Distill a document: pick a file → run the pipeline (with live progress) →
   // show the resulting staged run as its own map.
+  // Refresh the sidebar's staged-runs list (after a run, a delete, vault open).
+  const refreshRuns = useCallback(async () => {
+    setStagedRuns(await window.nodebook.distillListRuns())
+  }, [])
+
   const runDistill = useCallback(async () => {
     const path = await window.nodebook.distillPick()
     if (!path) return
@@ -701,20 +711,32 @@ export default function App() {
     const off = window.nodebook.onDistillProgress((runId, p) =>
       setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })
     )
-    setDistillCoverageNote(null)
+    setDistillDoneNote(null)
     try {
       const res = await window.nodebook.distillRun(path)
       setGraphOpen(false)
       setAskOpen(false)
       setDistillOverlay(false) // a fresh run opens standalone
       setDistillRun({ runId: res.runId })
-      // A big source is clustered + sampled, not read in full — say so when
-      // that sampling was substantial, so "Distilled" doesn't imply full coverage.
-      if (res.stats.coverage < 0.95) {
-        const pct = Math.round(res.stats.coverage * 100)
-        const shown = Math.round(res.stats.coverage * res.stats.chunks)
-        setDistillCoverageNote(
-          `Distilled — sampled ${pct}% of the text (${shown} of ${res.stats.chunks} sections)`
+      void refreshRuns()
+      // Always say what happened: the run is STAGED, not in the vault — and a
+      // zero-note run must explain itself instead of showing a blank map.
+      const s = res.stats
+      if (s.notes === 0) {
+        const why: string[] = []
+        if (s.dropped > 0) why.push(`${s.dropped} claim${s.dropped === 1 ? '' : 's'} had no verifiable quote`)
+        if (s.failedClusters > 0)
+          why.push(`${s.failedClusters} of ${s.clusters} sections got an unusable model response`)
+        setDistillDoneNote(
+          `Distilled, but no notes survived verification${why.length ? ` (${why.join('; ')})` : ''} — a stronger chat model in Settings usually fixes this.`
+        )
+      } else {
+        // A big source is clustered + sampled, not read in full — say so when
+        // that sampling was substantial, so "Distilled" doesn't imply full coverage.
+        const cov =
+          s.coverage < 0.95 ? ` It read ${Math.round(s.coverage * 100)}% of the text, representatively.` : ''
+        setDistillDoneNote(
+          `Staged ${s.notes} note${s.notes === 1 ? '' : 's'} — nothing is in your vault until you press ⤓ Merge on this map.${cov}`
         )
       }
     } catch (e) {
@@ -723,7 +745,41 @@ export default function App() {
       off()
       setDistilling(null)
     }
-  }, [])
+  }, [refreshRuns])
+
+  // Reopen a staged run's map from the sidebar list (a closed run map used to
+  // be unreachable — the run looked lost even though it was staged on disk).
+  const openStagedRun = useCallback(
+    (id: string) => {
+      flushCurrent()
+      setGraphOpen(false)
+      setAskOpen(false)
+      setHelpOpen(false)
+      setSettingsOpen(false)
+      setDistillOverlay(false)
+      setDistillRun({ runId: id })
+    },
+    [flushCurrent]
+  )
+
+  const discardStagedRun = useCallback(
+    (run: DistillRunInfo) => {
+      setConfirm({
+        message: `Discard the distilled run “${run.id}”? Its staged notes are deleted${
+          run.merged ? ' (notes already merged into your vault stay, but Undo stops working)' : ''
+        }.`,
+        confirmLabel: 'Discard',
+        onConfirm: () => {
+          setConfirm(null)
+          void window.nodebook.distillRemove(run.id).then(() => {
+            setDistillRun((cur) => (cur?.runId === run.id ? null : cur))
+            void refreshRuns()
+          })
+        }
+      })
+    },
+    [refreshRuns]
+  )
 
   // Stable graph loader for the run map, so the reused GraphView doesn't refetch
   // every render. Only called while a run map is shown (distillRun set).
@@ -747,11 +803,14 @@ export default function App() {
         setConfirm(null)
         void window.nodebook
           .distillMerge(runId)
-          .then((res) => setMergeInfo({ runId, folder: res.folder, count: res.count }))
+          .then((res) => {
+            setMergeInfo({ runId, folder: res.folder, count: res.count })
+            void refreshRuns() // the run's "merged" tag changed
+          })
           .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       }
     })
-  }, [distillRun])
+  }, [distillRun, refreshRuns])
 
   // Restore the merged/undo state when a run map opens (and clear it on close).
   useEffect(() => {
@@ -864,6 +923,44 @@ export default function App() {
               <span className="talk-cta-note">(local Ollama works)</span>
             </button>
           ))}
+        {vault && stagedRuns.length > 0 && (
+          <div className="runs-section">
+            <div className="runs-header">Distilled runs</div>
+            {stagedRuns.map((r) => (
+              <div
+                key={r.id}
+                className="run-item"
+                role="button"
+                tabIndex={0}
+                onClick={() => openStagedRun(r.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    openStagedRun(r.id)
+                  }
+                }}
+              >
+                <span className="run-item-name" title={r.id}>
+                  {r.id}
+                </span>
+                <span className="run-item-meta">
+                  {r.merged ? 'merged' : `${r.notes} note${r.notes === 1 ? '' : 's'}`}
+                </span>
+                <button
+                  className="run-item-del"
+                  aria-label={`Discard run ${r.id}`}
+                  title="Discard this staged run"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    discardStagedRun(r)
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {query.trim() ? (
           <ul className="search-results">
             {results.length === 0 ? (
@@ -1002,6 +1099,7 @@ export default function App() {
           <GraphView
             key={`distill-${distillRun.runId}`}
             loadGraph={distillLoad}
+            emptyMessage="This run staged no notes — none of the model's claims could be verified against the source. Try a stronger chat model in Settings, then distill again."
             focusPath={null}
             focusName=""
             vaultRoot={vault}
@@ -1196,7 +1294,10 @@ export default function App() {
             className="distill-undo"
             onClick={() => {
               const runId = mergeInfo.runId
-              void window.nodebook.distillUnmerge(runId).then(() => setMergeInfo(null))
+              void window.nodebook.distillUnmerge(runId).then(() => {
+                setMergeInfo(null)
+                void refreshRuns() // the run's "merged" tag changed
+              })
             }}
           >
             Undo
@@ -1210,13 +1311,13 @@ export default function App() {
           </button>
         </div>
       )}
-      {distillCoverageNote && (
+      {distillDoneNote && (
         <div className="distill-coverage-banner" role="status">
-          <span>{distillCoverageNote}</span>
+          <span>{distillDoneNote}</span>
           <button
             className="distill-coverage-close"
             aria-label="Dismiss"
-            onClick={() => setDistillCoverageNote(null)}
+            onClick={() => setDistillDoneNote(null)}
           >
             ✕
           </button>

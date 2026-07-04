@@ -21,7 +21,7 @@ import { overlayGraph } from './graph'
 import { distill, probeChat, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
 import { convertDocument } from './distill/convert'
-import { mergeRun, unmergeRun, readMergeManifest } from './distill/artifact'
+import { mergeRun, unmergeRun, readMergeManifest, readRunMeta } from './distill/artifact'
 import { Telemetry } from './telemetry'
 import {
   ensureSettingsFile,
@@ -41,6 +41,7 @@ import type {
   Citation,
   TalkStatus,
   DistillRunResult,
+  DistillRunInfo,
   DistillMergeResult,
   DistillMergeStatus
 } from '../shared/types'
@@ -815,7 +816,7 @@ function registerIpc(): void {
           onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p)
         }
       )
-      distillRuns.create(runId, source, result.notes)
+      distillRuns.create(runId, source, result.notes, { ...result.stats })
       return { runId, stats: result.stats }
     } finally {
       distillAbort.delete(runId)
@@ -842,7 +843,17 @@ function registerIpc(): void {
     }
   )
 
-  ipcMain.handle('distill:listRuns', () => distillRuns?.list() ?? [])
+  // Staged runs with enough context to render a list: note count (from the
+  // run's meta.json) and whether the run is already merged into the vault.
+  ipcMain.handle('distill:listRuns', (): DistillRunInfo[] => {
+    if (!distillRuns || !vaultRoot) return []
+    const root = vaultRoot
+    return distillRuns.list().map((id) => ({
+      id,
+      notes: readRunMeta(root, id)?.notes ?? 0,
+      merged: readMergeManifest(root, id) !== null
+    }))
+  })
 
   ipcMain.handle('distill:remove', (_e, runId: string) => distillRuns?.remove(runId))
 

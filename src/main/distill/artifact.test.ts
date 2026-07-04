@@ -12,7 +12,8 @@ import {
   removeRun,
   mergeRun,
   unmergeRun,
-  readMergeManifest
+  readMergeManifest,
+  readRunMeta
 } from './artifact'
 import { emitNotes } from './emit'
 import type { GroundedNote } from './extract'
@@ -71,6 +72,30 @@ describe('planRunFiles', () => {
     expect(rels).toContain(join('notes', 'Union.md'))
     expect(rels).toContain('meta.json')
     expect(JSON.parse(files.at(-1)!.content)).toMatchObject({ source: 'Federalist.md', notes: 2 })
+  })
+
+  it('persists run stats into meta.json when given (diagnosable after the banner)', () => {
+    const stats = { chunks: 10, notes: 2, dropped: 3, failedClusters: 1 }
+    const files = planRunFiles({ file: 'Federalist.md', text: 'x' }, emitNotes(grounded()), stats)
+    expect(JSON.parse(files.at(-1)!.content)).toMatchObject({ notes: 2, stats })
+  })
+})
+
+describe('readRunMeta', () => {
+  it('round-trips meta.json (with stats) and is null for a missing run', () => {
+    const v = tmpVault()
+    const stats = { chunks: 5, notes: 0, dropped: 5, failedClusters: 0 }
+    writeRunArtifact(v, 'r1', { file: 'B.md', text: 'x' }, [], stats)
+    expect(readRunMeta(v, 'r1')).toMatchObject({ source: 'B.md', notes: 0, stats })
+    expect(readRunMeta(v, 'no-such-run')).toBeNull()
+  })
+
+  it('still reads a pre-stats meta.json (stats simply absent)', () => {
+    const v = tmpVault()
+    writeRunArtifact(v, 'r1', { file: 'B.md', text: 'x' }, [])
+    const m = readRunMeta(v, 'r1')
+    expect(m).toMatchObject({ source: 'B.md', notes: 0 })
+    expect(m!.stats).toBeUndefined()
   })
 })
 
