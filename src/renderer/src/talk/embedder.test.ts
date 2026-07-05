@@ -57,6 +57,27 @@ describe('rolePrefix', () => {
   it('matches on a model-id substring, surviving a mirror/org prefix', () => {
     expect(rolePrefix('some-mirror/bge-base-en-v1.5', 'query')).not.toBe('')
   })
+
+  it('adds asymmetric e5 prefixes for both roles (the shipped default)', () => {
+    expect(rolePrefix('Xenova/multilingual-e5-base', 'query')).toBe('query: ')
+    expect(rolePrefix('Xenova/multilingual-e5-base', 'document')).toBe('passage: ')
+    expect(rolePrefix('intfloat/e5-base-v2', 'query')).toBe('query: ')
+    expect(rolePrefix('Xenova/multilingual-e5-small', 'document')).toBe('passage: ')
+  })
+
+  it('does not e5-match mid-token ids or -instruct variants', () => {
+    // "…base5-…" contains "e5-" but is not an e5 model.
+    expect(rolePrefix('acme/base5-embed', 'query')).toBe('')
+    // -instruct e5 models want an instruction template we don't emit; they
+    // must run unprefixed rather than get the plain e5 wording.
+    expect(rolePrefix('intfloat/multilingual-e5-large-instruct', 'query')).toBe('')
+    expect(rolePrefix('intfloat/multilingual-e5-large-instruct', 'document')).toBe('')
+  })
+
+  it('gives bge-m3 no prefix (multilingual bge is trained without one)', () => {
+    expect(rolePrefix('Xenova/bge-m3', 'query')).toBe('')
+    expect(rolePrefix('Xenova/bge-m3', 'document')).toBe('')
+  })
 })
 
 /**

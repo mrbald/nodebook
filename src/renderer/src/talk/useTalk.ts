@@ -23,6 +23,10 @@ export interface UseTalk {
   ask: (question: string, onToken: (t: string) => void) => Promise<AskResult>
   /** Call after a vault is (re)opened to resume indexing for the new vault. */
   onVaultOpened: () => void
+  /** Call when `[talk.embed]` settings changed while the app runs. Reloads the
+   *  embedder; a model change (vs. threads-only) also rebuilds the index —
+   *  vectors from two models never mix. No-op beyond disposal when disabled. */
+  onEmbedConfigChanged: (modelChanged: boolean) => Promise<void>
 }
 
 /**
@@ -38,6 +42,10 @@ export function useTalk(): UseTalk {
   const [canAsk, setCanAsk] = useState(false)
   const embedderRef = useRef<Embedder | null>(null)
   const drainingRef = useRef(false)
+  // A drain requested while one is already running (e.g. a talk:dirty poke
+  // landing mid-loop, or an embedder swap) must not be lost — the running
+  // drain may be about to exit on a stale error. Queue exactly one re-run.
+  const drainQueuedRef = useRef(false)
 
   const ensureEmbedder = useCallback(async (): Promise<Embedder> => {
     if (embedderRef.current) return embedderRef.current
@@ -55,7 +63,10 @@ export function useTalk(): UseTalk {
 
   // Pull pending chunks, embed them in batches, store the vectors — until dry.
   const drain = useCallback(async (): Promise<void> => {
-    if (drainingRef.current) return
+    if (drainingRef.current) {
+      drainQueuedRef.current = true
+      return
+    }
     drainingRef.current = true
     try {
       const e = await ensureEmbedder()
@@ -65,6 +76,10 @@ export function useTalk(): UseTalk {
         const batch = await window.nodebook.talkPending(32)
         if (batch.length === 0) break
         const vectors = await e.embed(batch.map((c) => c.text))
+        // A settings change may have swapped the embedder mid-batch; these
+        // vectors are from the old model's space — drop them, the queued
+        // re-drain re-embeds with the new embedder.
+        if (embedderRef.current !== e) return
         st = await window.nodebook.talkPutEmbeddings(
           batch.map((c, i) => ({ id: c.id, vector: Array.from(vectors[i]) }))
         )
@@ -79,6 +94,10 @@ export function useTalk(): UseTalk {
       setPhase('error')
     } finally {
       drainingRef.current = false
+      if (drainQueuedRef.current) {
+        drainQueuedRef.current = false
+        void drain()
+      }
     }
   }, [ensureEmbedder])
 
@@ -96,6 +115,33 @@ export function useTalk(): UseTalk {
     setProgress(null)
     setPhase('off')
   }, [])
+
+  // A live [talk.embed] settings change. The embedder singleton is
+  // first-model-wins, so it must be dropped either way; when the MODEL changed
+  // and the feature is on, re-running enable() rebuilds the whole index (the
+  // store resets chunks+vectors on the model-id change — see
+  // VectorStore.setDims) and re-embeds in the new model's space. A
+  // threads-only change just reloads the worker: the vectors stay valid.
+  // Never enables a disabled feature: the new settings are picked up lazily
+  // by the next enable (or distill embed request).
+  const onEmbedConfigChanged = useCallback(
+    async (modelChanged: boolean): Promise<void> => {
+      disposeEmbedder()
+      embedderRef.current = null
+      try {
+        const st = await window.nodebook.talkStatus()
+        if (!st.enabled) return
+        if (modelChanged) await enable()
+        else await ensureEmbedder()
+      } catch (err) {
+        // e.g. a half-typed model id that 404s on the Hub — surface the error
+        // state; the next settings save retries.
+        console.error('[talk] embed config change failed', err)
+        setPhase('error')
+      }
+    },
+    [enable, ensureEmbedder]
+  )
 
   const searchSemantic = useCallback(async (query: string): Promise<SearchHit[]> => {
     const e = embedderRef.current
@@ -151,6 +197,7 @@ export function useTalk(): UseTalk {
     searchSemantic,
     canAsk,
     ask,
-    onVaultOpened
+    onVaultOpened,
+    onEmbedConfigChanged
   }
 }

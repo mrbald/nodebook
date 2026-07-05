@@ -55,12 +55,17 @@ export interface VectorHit {
  */
 /**
  * Pure: whether a (dims, modelId) change requires dropping stored vectors and
- * marking every chunk unembedded again — see `VectorStore.setDims`. A model
- * swap is treated exactly like a dims change even when the width matches
- * (e.g. MiniLM → bge-small, both 384-dim): two different models never share a
- * vector space, so silently keeping old vectors would corrupt retrieval.
- * `next.modelId` undefined (a caller that only knows dims) never triggers a
- * reset by itself. Exported for unit tests.
+ * chunks — see `VectorStore.setDims`. A model swap is treated exactly like a
+ * dims change even when the width matches (e.g. MiniLM → bge-small, both
+ * 384-dim): two different models never share a vector space, so silently
+ * keeping old vectors would corrupt retrieval. `next.modelId` undefined (a
+ * caller that only knows dims) never triggers a reset by itself.
+ *
+ * The model id is the ONLY reset key. If anything else that shapes the vector
+ * space ever changes for a model — its role prefixes (`rolePrefix`), pooling,
+ * normalization — encode it into the model string written here (e.g.
+ * `Xenova/bge-…#cls`): stored vectors made with the old convention won't be
+ * distinguishable any other way. Exported for unit tests.
  */
 export function needsEmbeddingReset(
   current: { dims: number; modelId: string },
@@ -143,13 +148,19 @@ export class VectorStore {
   }
 
   /**
-   * Set the embedding width + model id (from the loaded model). Recreates the
-   * vec table and resets all embeddings if either changed — a model swap is
-   * treated exactly like a dims change even when the new model happens to
-   * share the old one's width (e.g. MiniLM → bge-small, both 384-dim), since
-   * two same-dim models don't share a vector space and silently mixing them
-   * would corrupt retrieval. `modelId` is optional so existing call sites that
-   * only know dims keep working; omitting it never triggers a reset by itself.
+   * Set the embedding width + model id (from the loaded model). If either
+   * changed, drops the stored vectors AND the chunks (with their content-hash
+   * gate), so the vault is re-chunked and re-embedded from scratch — a model
+   * swap is treated exactly like a dims change even when the new model happens
+   * to share the old one's width (e.g. MiniLM → bge-small, both 384-dim),
+   * since two same-dim models don't share a vector space. Chunks go too, not
+   * just vectors: chunking policy evolves with the model (token windows, CJK
+   * budgets), and a swap is the natural moment to rebuild them — re-chunking
+   * is cheap next to re-embedding, and keeping stale chunks would silently pin
+   * old policy until a note happens to be edited. The caller (talk:enable)
+   * re-chunks right after via chunkUnchunkedFiles. `modelId` is optional so
+   * existing call sites that only know dims keep working; omitting it never
+   * triggers a reset by itself.
    */
   setDims(dims: number, modelId?: string): void {
     if (!needsEmbeddingReset({ dims: this.dims, modelId: this.modelId }, { dims, modelId })) {
@@ -171,7 +182,7 @@ export class VectorStore {
           .run(modelId)
       }
       this.ensureVecTable()
-      this.db.exec(`UPDATE chunks SET embedded = 0`)
+      this.db.exec(`DELETE FROM chunks; DELETE FROM chunk_file; DELETE FROM chunks_fts;`)
       this.gen++ // every stored vector was just dropped
     })()
   }

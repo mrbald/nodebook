@@ -59,8 +59,8 @@ describe('topCosine', () => {
  * `talk_meta` now gates on the embedding model id, not just its dims — two
  * different models can share a width (MiniLM → bge-small, both 384) but never
  * a vector space, so a model swap must be treated exactly like a dims change:
- * `VectorStore.setDims` drops the vectors and marks every chunk unembedded
- * whenever this returns true.
+ * `VectorStore.setDims` drops the vectors and the chunks (so the vault is
+ * re-chunked under current chunking policy too) whenever this returns true.
  */
 describe('needsEmbeddingReset', () => {
   it('is a no-op when both dims and model id are unchanged', () => {

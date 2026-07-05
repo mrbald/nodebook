@@ -2,8 +2,10 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, writeFileSync, readFileSync } from 'fs'
 import { parse as parseToml } from 'smol-toml'
-import type { Settings } from '../shared/types'
+import { DEFAULT_EMBED_MODEL, type Settings } from '../shared/types'
 import type { ProviderConfig } from './rag/provider'
+
+export { DEFAULT_EMBED_MODEL }
 
 /**
  * App-level settings, stored as hand-editable TOML at
@@ -13,10 +15,11 @@ import type { ProviderConfig } from './rag/provider'
  * never crashes the app — it just reverts a value.
  */
 
-/** Default local embedding model (a transformers.js/HF Hub repo id) — a small,
- *  fast, retrieval-tuned model. Needs the query-side prefix handled by the
- *  renderer embedder (see src/renderer/src/talk/embedder.ts). */
-export const DEFAULT_EMBED_MODEL = 'Xenova/bge-small-en-v1.5'
+/** Embed-model defaults this app shipped with in the past. A settings file
+ *  whose model still equals one of these was never customized by the user
+ *  (the value was written verbatim from DEFAULT_TOML at first run), so
+ *  `migrateEmbedModel` may upgrade it to the current default in place. */
+const LEGACY_EMBED_MODELS = ['Xenova/bge-small-en-v1.5']
 
 export const DEFAULTS: Settings = {
   editor: { fontSize: 15, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
@@ -251,6 +254,25 @@ export function setTalkEnabled(raw: string, enabled: boolean): string {
   return `${raw.replace(/\s*$/, '')}\n\n[talk]\nenabled = ${val}\n`
 }
 
+/**
+ * Pure: upgrade `[talk.embed] model` to the current default iff it still holds
+ * an old shipped default (i.e. the user never customized it — the literal was
+ * written from DEFAULT_TOML at first run). Anything else, including a custom
+ * value or a missing key, is left byte-for-byte untouched. Returns the
+ * rewritten TOML, or null when nothing needs to change. Matching on key AND
+ * exact legacy value keeps it unambiguous even though `[talk.chat]` also has a
+ * `model` key. The store then re-indexes on its own: the model id recorded in
+ * talk_meta no longer matches, which resets embeddings on the next enable.
+ */
+export function migrateEmbedModel(raw: string): string | null {
+  for (const legacy of LEGACY_EMBED_MODELS) {
+    const esc = legacy.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+    const re = new RegExp(`^(\\s*model\\s*=\\s*")${esc}("\\s*(?:#.*)?)$`, 'm')
+    if (re.test(raw)) return raw.replace(re, `$1${DEFAULT_EMBED_MODEL}$2`)
+  }
+  return null
+}
+
 export function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.toml')
 }
@@ -270,7 +292,15 @@ let lastGood: Settings | null = null
 export function readSettings(): Settings {
   ensureSettingsFile()
   try {
-    const raw = readFileSync(settingsPath(), 'utf8')
+    let raw = readFileSync(settingsPath(), 'utf8')
+    // One-time default-model upgrade for files that still carry an old shipped
+    // default (see migrateEmbedModel) — written back so the file shows the
+    // model actually in use.
+    const migrated = migrateEmbedModel(raw)
+    if (migrated !== null) {
+      writeFileSync(settingsPath(), migrated, 'utf8')
+      raw = migrated
+    }
     if (settingsSyntaxError(raw) !== null) return lastGood ?? structuredClone(DEFAULTS)
     lastGood = parseSettings(raw)
     return lastGood

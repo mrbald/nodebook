@@ -1,3 +1,12 @@
+/** Default local embedding model (a transformers.js/HF Hub repo id):
+ *  multilingual-e5-base — ~100 languages in one vector space, so notes retrieve
+ *  by meaning whatever language they (or the query) are written in. Asymmetric:
+ *  needs the query:/passage: prefixes handled by the renderer embedder (see
+ *  src/renderer/src/talk/embedder.ts). Lives in shared/ because both main
+ *  (settings defaults) and the renderer (embed fallback) need it — a renderer
+ *  copy of this string once drifted stale. */
+export const DEFAULT_EMBED_MODEL = 'Xenova/multilingual-e5-base'
+
 /** A markdown file discovered inside the open vault. */
 export interface MarkdownFile {
   /** Absolute path on disk. */

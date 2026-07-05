@@ -28,11 +28,21 @@ export interface Embedder {
  * it's the side that owns the loaded model. Exported for unit tests.
  */
 export function rolePrefix(model: string, role: EmbedRole): string {
+  // bge-m3 (the multilingual bge) is trained WITHOUT instruction prefixes —
+  // it must not inherit the English bge- branch below.
+  if (model.includes('bge-m3')) return ''
   if (model.includes('bge-')) {
     return role === 'query' ? 'Represent this sentence for searching relevant passages: ' : ''
   }
   if (model.includes('nomic-embed')) {
     return role === 'query' ? 'search_query: ' : 'search_document: '
+  }
+  // The e5 family (multilingual-e5-*, e5-*-v2, …) prefixes BOTH roles. The
+  // boundary check keeps ids like "…base5-…" from false-matching. -instruct
+  // variants want an "Instruct: {task}\nQuery:" template we don't emit; they
+  // run unprefixed (degraded, not broken).
+  if (/(^|[^a-z0-9])e5-/i.test(model) && !model.includes('-instruct')) {
+    return role === 'query' ? 'query: ' : 'passage: '
   }
   return ''
 }
@@ -120,16 +130,28 @@ function workerEmbedder(model: string, { threads, onProgress }: EmbedderOptions)
         onProgress?.(aggregateProgress([...fileProgress.values()]))
       } else if (m.type === 'ready') {
         onProgress?.(1) // download complete (or served from cache)
+        // Disposal must settle every in-flight and future embed(): a terminated
+        // worker never answers, and an unsettled promise would leave the caller
+        // (e.g. useTalk's drain loop) hanging forever.
+        let disposed = false
         resolve({
           dims: m.dims,
           embed: (texts, role = 'document') =>
-            new Promise<Float32Array[]>((res, rej) => {
-              const id = ++seq
-              waiters.set(id, res)
-              rejecters.set(id, rej)
-              worker.postMessage({ type: 'embed', id, texts, role })
-            }),
-          dispose: () => worker.terminate()
+            disposed
+              ? Promise.reject(new Error('embedder disposed'))
+              : new Promise<Float32Array[]>((res, rej) => {
+                  const id = ++seq
+                  waiters.set(id, res)
+                  rejecters.set(id, rej)
+                  worker.postMessage({ type: 'embed', id, texts, role })
+                }),
+          dispose: () => {
+            disposed = true
+            for (const rej of rejecters.values()) rej(new Error('embedder disposed'))
+            waiters.clear()
+            rejecters.clear()
+            worker.terminate()
+          }
         })
       } else if (m.type === 'embedded') {
         waiters.get(m.id)?.(m.vectors)

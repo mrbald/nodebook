@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DistillRunInfo, MarkdownFile, SearchHit, Settings } from '@shared/types'
+import {
+  DEFAULT_EMBED_MODEL,
+  type DistillRunInfo,
+  type MarkdownFile,
+  type SearchHit,
+  type Settings
+} from '@shared/types'
 import { Editor, type ViewMode } from './editor/Editor'
 import { BacklinksPanel } from './BacklinksPanel'
 import { parseCitations, resolveCitationSpan, type NoteCitation } from './citations'
@@ -146,12 +152,25 @@ export default function App() {
   }
 
   const applySettings = (s: Settings): void => {
+    const prev = settingsRef.current
     settingsRef.current = s
     applyTheme(resolveThemeName(s), s.editor.fontSize)
     setAutosave({ delayMs: s.editor.autosaveDelayMs, onSwitch: s.editor.autosaveOnSwitch })
     setTelemetryOn(s.telemetry.enabled)
     // The quick selector collapses the theme config to system / dark / light.
     setThemeMode(s.theme.followSystem ? 'system' : getTheme(s.theme.name).dark ? 'dark' : 'light')
+    // A live [talk.embed] change (settings save or "Reset to defaults"; prev is
+    // null on the mount-time load, where the enable path handles it). Deferred
+    // while a distill run is embedding — swapping models mid-run would mix two
+    // vector spaces inside one clustering.
+    const modelChanged = prev !== null && prev.talk.embed.model !== s.talk.embed.model
+    const threadsChanged = prev !== null && prev.talk.embed.threads !== s.talk.embed.threads
+    if (modelChanged || threadsChanged) {
+      pendingEmbedSwap.current = {
+        modelChanged: modelChanged || pendingEmbedSwap.current?.modelChanged === true
+      }
+      if (!distillingRef.current) runPendingEmbedSwap()
+    }
   }
 
   const pickThemeMode = (mode: string): void => {
@@ -181,12 +200,33 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // A [talk.embed] settings change waiting to be applied. A ref (nothing
+  // renders it), checked against distillingRef so a change saved mid-distill
+  // is deferred to the run's end — swapping the embedder inside one run would
+  // cluster vectors from two different models. `modelChanged` is sticky across
+  // coalesced changes: any model change in the batch means a full re-index.
+  const pendingEmbedSwap = useRef<{ modelChanged: boolean } | null>(null)
+  const distillingRef = useRef(false)
+  const runPendingEmbedSwap = (): void => {
+    const swap = pendingEmbedSwap.current
+    if (!swap) return
+    pendingEmbedSwap.current = null
+    void talk.onEmbedConfigChanged(swap.modelChanged)
+  }
+  useEffect(() => {
+    distillingRef.current = distilling !== null
+    if (distilling === null) runPendingEmbedSwap()
+    // runPendingEmbedSwap is stable enough (talk callbacks are memoized); this
+    // must fire exactly on distill-run boundaries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [distilling])
+
   // Answer distill's embed requests with the renderer's WASM embedder (the same
   // one "talk" uses). Main bridges here because the embedder lives in the
   // renderer; this keeps a distilled run's chunks off the canonical store.
   useEffect(() => {
     return window.nodebook.onDistillEmbedRequest(async (texts) => {
-      const model = settingsRef.current?.talk.embed.model ?? 'Xenova/all-MiniLM-L6-v2'
+      const model = settingsRef.current?.talk.embed.model ?? DEFAULT_EMBED_MODEL
       const emb = await getEmbedder(model, { threads: settingsRef.current?.talk.embed.threads })
       const vecs = await emb.embed(texts)
       return vecs.map((v) => Array.from(v))

@@ -4,8 +4,10 @@ import {
   setThemeMode,
   setTalkEnabled,
   settingsSyntaxError,
+  migrateEmbedModel,
   DEFAULTS,
-  DEFAULT_TOML
+  DEFAULT_TOML,
+  DEFAULT_EMBED_MODEL
 } from './settings'
 
 describe('settingsSyntaxError', () => {
@@ -94,6 +96,29 @@ describe('parseSettings', () => {
     expect(parseSettings('').talk.enabled).toBe(false)
     expect(parseSettings('[talk.embed]\nruntime = "cuda"').talk.embed.runtime).toBe('wasm')
     expect(parseSettings('[talk]\nenabled = "yes"').talk.enabled).toBe(false)
+  })
+
+  it('upgrades an old shipped default embed model in place, and only that', () => {
+    // The shape ensureSettingsFile wrote historically: key, old default, comment.
+    const legacy = '[talk.embed]\nruntime = "wasm"\n# Embedding model.\nmodel = "Xenova/bge-small-en-v1.5"\n\n[talk.chat]\nmodel = ""\n'
+    const out = migrateEmbedModel(legacy)
+    expect(out).toContain(`model = "${DEFAULT_EMBED_MODEL}"`)
+    expect(out).not.toContain('bge-small-en-v1.5')
+    // Everything else byte-identical (comments, the chat model line, spacing).
+    expect(out!.replace(`model = "${DEFAULT_EMBED_MODEL}"`, 'model = "Xenova/bge-small-en-v1.5"')).toBe(legacy)
+    // A trailing comment on the model line survives.
+    expect(migrateEmbedModel('model = "Xenova/bge-small-en-v1.5" # mine')).toBe(
+      `model = "${DEFAULT_EMBED_MODEL}" # mine`
+    )
+  })
+
+  it('leaves customized or missing embed models untouched', () => {
+    expect(migrateEmbedModel('[talk.embed]\nmodel = "Xenova/all-MiniLM-L6-v2"')).toBeNull()
+    expect(migrateEmbedModel(`[talk.embed]\nmodel = "${DEFAULT_EMBED_MODEL}"`)).toBeNull()
+    expect(migrateEmbedModel('[talk.embed]\nruntime = "wasm"')).toBeNull()
+    expect(migrateEmbedModel('')).toBeNull()
+    // The legacy id as a substring of a custom id is not a match.
+    expect(migrateEmbedModel('model = "mine/Xenova/bge-small-en-v1.5-tuned"')).toBeNull()
   })
 
   it('reads [talk.embed] threads and rejects negatives and non-integers', () => {

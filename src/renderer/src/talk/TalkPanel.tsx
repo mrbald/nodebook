@@ -23,8 +23,9 @@ export function TalkPanel({ talk }: { talk: UseTalk }): React.JSX.Element | null
       <div className="talk-setup">
         <div className="talk-setup-title">✨ Search by meaning</div>
         <p className="talk-setup-body">
-          Runs entirely on your machine — your notes never leave it. Downloads a small model once,
-          then indexes your notes in the background.
+          Runs entirely on your machine — your notes never leave it. Downloads a model once
+          (~285&nbsp;MB; it understands ~100 languages), then indexes your notes in the
+          background.
         </p>
         <div className="talk-setup-actions">
           <button
