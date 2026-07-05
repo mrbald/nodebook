@@ -141,8 +141,12 @@ AI-assisted **search by meaning** over your notes, on top of keyword search. It 
 **off by default**; turn it on from the **✨ Search by meaning** link under the
 search box.
 
-- **Local & private** — embeddings are computed on your machine with a small model
-  that downloads once on enable. Your notes never leave your computer; no API key.
+- **Local & private** — embeddings are computed on your machine with a model that
+  downloads once on enable (~285 MB). Your notes never leave your computer; no API key.
+- **Any language** — the model understands ~100 languages in one index: write notes
+  in English, Russian, Chinese, … and search across all of them in whichever
+  language you ask. (All-English vault and want a ~34 MB model instead? Set
+  `[talk.embed] model = "Xenova/bge-small-en-v1.5"` in Settings — English-only.)
 - Once on, the search box **fuses keyword + meaning** automatically — there is no
   mode to switch. A **✨** marks hits surfaced by meaning.
 - Indexing runs in the background; new and edited notes are re-embedded on save.

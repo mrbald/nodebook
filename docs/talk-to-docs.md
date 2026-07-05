@@ -22,9 +22,10 @@ they belong in `.nodebook`, re-creatable by re-embedding.
 ## Components
 
 - **Embeddings — local, on-device** via `@huggingface/transformers` (transformers.js,
-  ONNX Runtime). No API key; notes never leave the machine. Default model: a small
-  CPU model (**bge-small-en-v1.5** ~33M for speed, or **EmbeddingGemma-300M** /
-  **nomic-embed-text** for quality) — configurable in settings.
+  ONNX Runtime). No API key; notes never leave the machine. Default model:
+  **multilingual-e5-base** (~285 MB one-time download) — one vector space across
+  ~100 languages, so notes retrieve by meaning whatever language they (or the
+  query) are in. Configurable in settings; cheaper trade-offs below.
 - **Retrieval — hybrid.** Fuse our existing **FTS5 BM25** (exact terms) with
   **sqlite-vec KNN** (meaning) via Reciprocal Rank Fusion. Hybrid beats pure-vector
   for notes (you want both the keyword and the concept).
@@ -68,17 +69,32 @@ lifecycle, and error models; don't fold them into one kind):**
   hosts) is a **separate outbound feature**, not part of this abstraction at all.
   Strategically interesting, tracked elsewhere.
 
-**Default model pairs** (configurable): *local* — embed `bge-small-en-v1.5` (as
-shipped; `EmbeddingGemma-300M`/`nomic-embed-text` are quality-leaning
-alternatives), chat (later) a small local model (`Qwen2.5-3B`/`Llama-3.2-3B`)
-via llama.cpp; *cloud* — embed `text-embedding-3-small`/`voyage-3`, chat Claude
-or GPT.
+**Default model pairs** (configurable): *local* — embed
+`Xenova/multilingual-e5-base` (as shipped: ~285 MB, ~100 languages — ask in
+Russian, find the English note). Cheaper alternatives, one TOML line away
+(`[talk.embed] model`; a swap re-indexes automatically):
+`Xenova/multilingual-e5-small` (~115 MB, still multilingual, a quality notch
+down) and `Xenova/bge-small-en-v1.5` (~34 MB, **English-only** — the old
+default; fine when the whole vault is English). Chat (later) a small local
+model (`Qwen2.5-3B`/`Llama-3.2-3B`) via llama.cpp; *cloud* — embed
+`text-embedding-3-small`/`voyage-3`, chat Claude or GPT. (EmbeddingGemma is
+*not* recommended: it wants prompt prefixes our prefix table doesn't emit, so
+it retrieves below its benchmark numbers here.)
 
-bge-small and nomic-embed are *asymmetric* retrieval models — trained with
+e5, bge-small and nomic-embed are *asymmetric* retrieval models — trained with
 different query/document wording — so the renderer embedder tags each call
 with a role (`'query'` for search/ask, `'document'` for note-chunk indexing)
-and prepends the matching prefix (a small table keyed by model id substring;
-MiniLM and anything unrecognized get no prefix).
+and prepends the matching prefix (a small table keyed by model id substring:
+e5 gets `query: `/`passage: ` on both sides, bge-en a query-side instruction,
+nomic `search_query: `/`search_document: `; bge-m3, MiniLM and anything
+unrecognized get no prefix). The prefix convention is part of the vector
+space: if it ever changes for a model, the stored model id must change with it
+(see `needsEmbeddingReset`).
+
+Embedding uses a WASM thread pool when the platform allows it (about half the
+cores, capped at 4 — raise `[talk.embed] threads` for a faster first index of
+a big vault). Chunk budgets are token-cost-weighted so CJK text doesn't
+overflow the model's 512-token window (see `chunk.ts`).
 
 ## Pipeline (and the event-loop angle)
 
@@ -102,9 +118,10 @@ clearly-private opt-in**.
    sidebar search shows one subtle line under the box:
    *"✨ Search by meaning — set up AI (local & private)."* It opens a small setup
    card: "Runs entirely on your machine — your notes never leave it. Downloads a
-   ~30 MB model once, then indexes in the background." `[Enable]` + an **Advanced**
-   disclosure (runtime WASM/native, model). Also in Settings (`[talk]`). The entry
-   only promises what enabling delivers.
+   model once (~285 MB; it understands ~100 languages), then indexes in the
+   background." `[Enable]` + an **Advanced** disclosure (runtime WASM/native,
+   model). Also in Settings (`[talk]`). The entry only promises what enabling
+   delivers.
 2. **Activation states are designed.** Enable → model-download progress →
    "Indexing 120/450…" (background, non-blocking) → ready. Offline/error → message
    + Retry. Disable → stop + offer to delete the embeddings (they live in
@@ -131,7 +148,8 @@ enabled = false            # whole feature is opt-in; nothing loads until true
 
 [talk.embed]
 runtime = "wasm"           # wasm (default, lean, cross-platform) | native (faster)
-model = "bge-small-en-v1.5"
+model = "Xenova/multilingual-e5-base"  # ~100 languages; see alternatives above
+threads = 0                # embedding CPU threads; 0 = auto (≈half the cores, max 4)
 # provider = "local"       # local | openai-compat (baseUrl/apiKey) for remote
 
 [talk.chat]

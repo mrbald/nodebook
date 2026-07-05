@@ -65,8 +65,9 @@ name = "dark"
 
 [talk]
 # "Talk to docs" — AI semantic search over your notes. Off by default and fully
-# local: when enabled, a small embedding model downloads once and your notes are
-# indexed on-device — they never leave your machine. Nothing loads until enabled.
+# local: when enabled, an embedding model downloads once (~285 MB) and your notes
+# are indexed on-device — they never leave your machine. Nothing loads until
+# enabled.
 enabled = false
 # How alike two notes must be (0..1) for the map's ✨ "related" overlay and
 # "colour by meaning" to connect them. Higher = stricter (fewer, surer hints);
@@ -77,7 +78,11 @@ relatedMinScore = 0.5
 # Embedding runtime: "wasm" (lean, cross-platform, no native binary) or
 # "native" (faster, larger). WASM runs in a background worker.
 runtime = "wasm"
-# Embedding model (a transformers.js repo). Downloaded on first enable.
+# Embedding model (a transformers.js repo). Downloaded on first enable. The
+# default understands ~100 languages (search in one language, find notes in
+# another). Changing it re-indexes automatically. Lighter options:
+# "Xenova/multilingual-e5-small" (~115 MB, still multilingual) or
+# "Xenova/bge-small-en-v1.5" (~34 MB, English-only).
 model = "${DEFAULT_EMBED_MODEL}"
 # CPU threads for embedding. 0 = auto: about half the cores, at most 4 — fast
 # indexing without starving the app while you type. Raise it to speed up a big
