@@ -186,9 +186,11 @@ Settings (`[talk.chat]`).
 
 ## Distill a document
 
-Turn a long document — a **PDF, EPUB, Markdown, or plain-text** file — into a set
-of small, linked notes, each backed by **quotes from the original**. Start it with
-**File ▸ Distill a Document…** (it needs a chat provider, same as Ask).
+Turn a long document — a **PDF, EPUB, Word (.docx), HTML, Markdown, or plain-text**
+file — into a set of small, linked notes, each backed by **quotes from the
+original**. Start it with **File ▸ Distill a Document…** (it needs a chat
+provider, same as Ask). Legacy binary `.doc` isn't readable — save it as `.docx`
+first.
 
 - **What happens** — Nodebook reads the document, groups its ideas by topic, and asks
   the model to write one short note per concept. Every claim in a note carries a

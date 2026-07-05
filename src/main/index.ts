@@ -786,7 +786,12 @@ function registerIpc(): void {
     const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
       title: 'Distill a document',
       properties: ['openFile'],
-      filters: [{ name: 'Documents', extensions: ['pdf', 'epub', 'md', 'markdown', 'txt', 'text'] }]
+      filters: [
+        {
+          name: 'Documents',
+          extensions: ['pdf', 'epub', 'docx', 'html', 'htm', 'xhtml', 'md', 'markdown', 'txt', 'text']
+        }
+      ]
     })
     if (res.canceled || res.filePaths.length === 0) return null
     return res.filePaths[0]

@@ -53,6 +53,41 @@ function xmlAttr(tag: string, name: string): string {
   return m ? m[1] : ''
 }
 
+/** HTML → markdown (turndown): body-only, scripts/styles/head dropped. The
+ *  shared last leg of the EPUB, HTML, and DOCX converters. */
+async function htmlBodyToMarkdown(html: string): Promise<string> {
+  const TurndownService = (await import('turndown')).default
+  const td = new TurndownService({ headingStyle: 'atx' })
+  td.remove(['script', 'style', 'noscript'])
+  const body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html
+  return td.turndown(body).trim()
+}
+
+/**
+ * Convert an HTML file's text to markdown. Real headings survive (turndown
+ * keeps h1-h6), so the chunker's heading paths give provenance for free —
+ * no artificial `## Section N` needed.
+ */
+export async function htmlToMarkdown(html: string): Promise<string> {
+  const md = await htmlBodyToMarkdown(html)
+  if (!md) throw new Error('No extractable text in this HTML file.')
+  return md
+}
+
+/**
+ * Convert a Word document (.docx) to markdown: mammoth (pure JS) turns the
+ * OOXML into clean HTML — mapping Word heading styles to h1-h6 — and turndown
+ * takes it the rest of the way. Legacy binary .doc is rejected in
+ * `convertDocument` (no dependable pure-JS reader exists for it).
+ */
+export async function docxToMarkdown(data: Uint8Array): Promise<string> {
+  const mammoth = await import('mammoth')
+  const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(data) })
+  const md = await htmlBodyToMarkdown(html)
+  if (!md) throw new Error('No extractable text in this Word document.')
+  return md
+}
+
 /**
  * Extract an EPUB's text as markdown, one `## Section N` per spine chapter (=
  * provenance, like PDF's pages). EPUB is a zip of XHTML: unzip (fflate) → find
@@ -61,7 +96,6 @@ function xmlAttr(tag: string, name: string): string {
  */
 export async function epubToMarkdown(data: Uint8Array): Promise<string> {
   const { unzipSync, strFromU8 } = await import('fflate')
-  const TurndownService = (await import('turndown')).default
   const files = unzipSync(data)
   const read = (p: string): string => (files[p] ? strFromU8(files[p]) : '')
 
@@ -78,7 +112,6 @@ export async function epubToMarkdown(data: Uint8Array): Promise<string> {
     if (id && href) manifest.set(id, href.split('#')[0])
   }
 
-  const td = new TurndownService({ headingStyle: 'atx' })
   const sections: string[] = []
   let n = 0
   for (const m of opf.matchAll(/<itemref\b[^>]*>/g)) {
@@ -86,8 +119,7 @@ export async function epubToMarkdown(data: Uint8Array): Promise<string> {
     if (!href) continue
     const html = read(opfDir + href)
     if (!html) continue
-    const body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html
-    const md = td.turndown(body).trim()
+    const md = await htmlBodyToMarkdown(html)
     if (md) sections.push(`## Section ${++n}\n\n${md}`)
   }
 
@@ -97,12 +129,20 @@ export async function epubToMarkdown(data: Uint8Array): Promise<string> {
 }
 
 const TEXT_EXT = new Set(['.md', '.markdown', '.txt', '.text'])
+const HTML_EXT = new Set(['.html', '.htm', '.xhtml'])
 
 /** Convert a document at `filePath` into the markdown the distill pipeline reads. */
 export async function convertDocument(filePath: string): Promise<string> {
   const ext = extname(filePath).toLowerCase()
   if (ext === '.pdf') return pdfToMarkdown(new Uint8Array(readFileSync(filePath)))
   if (ext === '.epub') return epubToMarkdown(new Uint8Array(readFileSync(filePath)))
+  if (ext === '.docx') return docxToMarkdown(new Uint8Array(readFileSync(filePath)))
+  if (HTML_EXT.has(ext)) return htmlToMarkdown(readFileSync(filePath, 'utf8'))
   if (TEXT_EXT.has(ext)) return readFileSync(filePath, 'utf8')
-  throw new Error(`Unsupported document type "${ext}". Use PDF, EPUB, Markdown, or text.`)
+  if (ext === '.doc') {
+    throw new Error(
+      'Legacy .doc isn’t supported — open it in Word or LibreOffice and save as .docx first.'
+    )
+  }
+  throw new Error(`Unsupported document type "${ext}". Use PDF, EPUB, Word (.docx), HTML, Markdown, or text.`)
 }

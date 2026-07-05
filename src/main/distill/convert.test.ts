@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { zipSync, strToU8 } from 'fflate'
-import { pdfToMarkdown, epubToMarkdown, convertDocument } from './convert'
+import { pdfToMarkdown, epubToMarkdown, htmlToMarkdown, docxToMarkdown, convertDocument } from './convert'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
 
@@ -87,6 +87,48 @@ describe('epubToMarkdown', () => {
   })
 })
 
+/** A minimal valid DOCX: OPC container with one heading + one paragraph. */
+function makeDocx(): Uint8Array {
+  const contentTypes =
+    '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
+  const rels =
+    '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
+  const doc =
+    '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Faction arises from property.</w:t></w:r></w:p><w:p><w:r><w:t>Representatives refine public views.</w:t></w:r></w:p></w:body></w:document>'
+  return zipSync({
+    '[Content_Types].xml': strToU8(contentTypes),
+    '_rels/.rels': strToU8(rels),
+    'word/document.xml': strToU8(doc)
+  })
+}
+
+describe('htmlToMarkdown', () => {
+  it('converts body content and keeps real headings (provenance for the chunker)', async () => {
+    const html =
+      '<html><head><title>ignored</title><style>p{color:red}</style></head>' +
+      '<body><h1>Faction</h1><p>Property divides people.</p><script>alert(1)</script></body></html>'
+    const md = await htmlToMarkdown(html)
+    expect(md).toContain('# Faction')
+    expect(md).toContain('Property divides people.')
+    expect(md).not.toContain('alert(1)') // scripts dropped
+    expect(md).not.toContain('color:red') // styles dropped
+  })
+
+  it('throws on an HTML file with no text', async () => {
+    await expect(htmlToMarkdown('<html><body><script>x()</script></body></html>')).rejects.toThrow(
+      /No extractable text/i
+    )
+  })
+})
+
+describe('docxToMarkdown', () => {
+  it('extracts paragraphs from a Word document', async () => {
+    const md = await docxToMarkdown(makeDocx())
+    expect(md).toContain('Faction arises from property.')
+    expect(md).toContain('Representatives refine public views.')
+  })
+})
+
 describe('convertDocument', () => {
   it('reads markdown / text files as-is', async () => {
     tmp = mkdtempSync(join(tmpdir(), 'convert-'))
@@ -95,7 +137,21 @@ describe('convertDocument', () => {
     expect(await convertDocument(f)).toBe('# Hi\n\nsome text')
   })
 
+  it('routes .html and .docx to their converters', async () => {
+    tmp = mkdtempSync(join(tmpdir(), 'convert-'))
+    const h = join(tmp, 'page.html')
+    writeFileSync(h, '<body><p>hello html</p></body>')
+    expect(await convertDocument(h)).toContain('hello html')
+    const d = join(tmp, 'doc.docx')
+    writeFileSync(d, makeDocx())
+    expect(await convertDocument(d)).toContain('Faction arises from property.')
+  })
+
+  it('explains that legacy .doc needs saving as .docx', async () => {
+    await expect(convertDocument('/x/file.doc')).rejects.toThrow(/save.*\.docx|\.docx first/i)
+  })
+
   it('rejects unsupported document types', async () => {
-    await expect(convertDocument('/x/file.docx')).rejects.toThrow(/Unsupported/)
+    await expect(convertDocument('/x/file.xlsx')).rejects.toThrow(/Unsupported/)
   })
 })
