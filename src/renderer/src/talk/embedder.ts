@@ -85,6 +85,14 @@ export function aggregateProgress(files: { loaded: number; total: number }[]): n
   return Math.min(1, loaded / total)
 }
 
+/** Rejection message for work cut off by `disposeEmbedder()`. Callers treat it
+ *  as "superseded — a newer embedder owns this now", never as a failure. */
+export const EMBEDDER_DISPOSED = 'embedder disposed'
+
+export function isDisposedError(err: unknown): boolean {
+  return err instanceof Error && err.message === EMBEDDER_DISPOSED
+}
+
 export interface EmbedderOptions {
   /** The `[talk.embed] threads` setting; 0/undefined = auto (see `wasmThreads`). */
   threads?: number
@@ -98,12 +106,26 @@ let pending: Promise<Embedder> | null = null
  *  singleton is first-model-wins: a different `model` on a later call returns
  *  the existing embedder until `disposeEmbedder()` is called. */
 export function getEmbedder(model: string, opts: EmbedderOptions = {}): Promise<Embedder> {
-  if (!pending) pending = create(model, opts)
+  if (!pending) {
+    const p = create(model, opts)
+    pending = p
+    // A failed load (bad model id, offline) must not be cached forever —
+    // clear the slot so the UI's Retry actually retries.
+    p.catch(() => {
+      if (pending === p) pending = null
+    })
+  }
   return pending
 }
 
 export function disposeEmbedder(): void {
-  void pending?.then((e) => e.dispose())
+  // The rejection case is already handled where the load was awaited; without
+  // the no-op handler here, disposing a failed load would surface the same
+  // error again as an unhandled rejection.
+  void pending?.then(
+    (e) => e.dispose(),
+    () => {}
+  )
   pending = null
 }
 
@@ -138,7 +160,7 @@ function workerEmbedder(model: string, { threads, onProgress }: EmbedderOptions)
           dims: m.dims,
           embed: (texts, role = 'document') =>
             disposed
-              ? Promise.reject(new Error('embedder disposed'))
+              ? Promise.reject(new Error(EMBEDDER_DISPOSED))
               : new Promise<Float32Array[]>((res, rej) => {
                   const id = ++seq
                   waiters.set(id, res)
@@ -147,7 +169,7 @@ function workerEmbedder(model: string, { threads, onProgress }: EmbedderOptions)
                 }),
           dispose: () => {
             disposed = true
-            for (const rej of rejecters.values()) rej(new Error('embedder disposed'))
+            for (const rej of rejecters.values()) rej(new Error(EMBEDDER_DISPOSED))
             waiters.clear()
             rejecters.clear()
             worker.terminate()
@@ -163,10 +185,18 @@ function workerEmbedder(model: string, { threads, onProgress }: EmbedderOptions)
           rej(new Error(m.message))
           waiters.delete(m.id)
           rejecters.delete(m.id)
-        } else reject(new Error(m.message))
+        } else {
+          // Init failed (bad model id, network) — the worker has nothing left
+          // to do; terminating stops any partial download it still holds.
+          worker.terminate()
+          reject(new Error(m.message))
+        }
       }
     }
-    worker.onerror = (e): void => reject(new Error(e.message))
+    worker.onerror = (e): void => {
+      worker.terminate()
+      reject(new Error(e.message))
+    }
     worker.postMessage({ type: 'init', model, threads: threads ?? 0 })
   })
 }

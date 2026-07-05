@@ -204,6 +204,15 @@ describe('weightOf', () => {
  *  several chunks that each fit the weight budget — under a plain char budget
  *  it would come out as one chunk ~3× over the model's token window. */
 describe('chunkMarkdown with CJK text', () => {
+  it('splits a single-line CJK paragraph that is under the CHAR budget but over the weight budget', () => {
+    // 200 Han chars on one line: length 200 < 300 but weight 600 > 300. A
+    // char-length gate would pass it through as one over-window chunk.
+    const doc = `# 标题\n\n${'很长的中文段落用来测试。'.repeat(20)}`
+    const chunks = chunkMarkdown(doc, 300)
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const c of chunks) expect(weightOf(c.text)).toBeLessThanOrEqual(300 + 30 + 3)
+  })
+
   it('splits a long Chinese section into weight-bounded chunks', () => {
     const sentence = '这是一个很长的句子，用来测试分块。'
     const doc = `# 标题\n\n${sentence.repeat(30)}`

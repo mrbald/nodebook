@@ -268,6 +268,11 @@ export function setTalkEnabled(raw: string, enabled: boolean): string {
  * exact legacy value keeps it unambiguous even though `[talk.chat]` also has a
  * `model` key. The store then re-indexes on its own: the model id recorded in
  * talk_meta no longer matches, which resets embeddings on the next enable.
+ *
+ * Applied exactly ONCE per install, at startup, guarded by a marker file (see
+ * applySettingsMigrations in main/index.ts) — a bare value-match re-run on
+ * every read would make it impossible to ever deliberately choose the legacy
+ * model again (it is still documented as the lighter English-only option).
  */
 export function migrateEmbedModel(raw: string): string | null {
   for (const legacy of LEGACY_EMBED_MODELS) {
@@ -297,15 +302,7 @@ let lastGood: Settings | null = null
 export function readSettings(): Settings {
   ensureSettingsFile()
   try {
-    let raw = readFileSync(settingsPath(), 'utf8')
-    // One-time default-model upgrade for files that still carry an old shipped
-    // default (see migrateEmbedModel) — written back so the file shows the
-    // model actually in use.
-    const migrated = migrateEmbedModel(raw)
-    if (migrated !== null) {
-      writeFileSync(settingsPath(), migrated, 'utf8')
-      raw = migrated
-    }
+    const raw = readFileSync(settingsPath(), 'utf8')
     if (settingsSyntaxError(raw) !== null) return lastGood ?? structuredClone(DEFAULTS)
     lastGood = parseSettings(raw)
     return lastGood

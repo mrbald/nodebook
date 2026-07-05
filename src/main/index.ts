@@ -31,6 +31,7 @@ import {
   settingsPath as settingsFilePath,
   settingsSyntaxError,
   chatProviderConfig,
+  migrateEmbedModel,
   DEFAULT_TOML,
   type ThemeMode
 } from './settings'
@@ -988,7 +989,27 @@ function refreshAppMenu(): void {
   buildAppMenu(() => mainWindow, menuState)
 }
 
+// One-shot settings migrations, applied at startup and recorded in a marker
+// file — so upgrading an old shipped default happens exactly once per install,
+// and a user who later deliberately picks that legacy value keeps it. Writes
+// go through atomicWrite + trackMtime like every other settings writer, so an
+// open settings editor never sees a phantom "changed on disk" conflict.
+function applySettingsMigrations(): void {
+  const marker = join(app.getPath('userData'), '.migrations')
+  const applied = existsSync(marker) ? readFileSync(marker, 'utf8').split('\n').filter(Boolean) : []
+  const id = 'embed-model-multilingual-e5'
+  if (applied.includes(id)) return
+  const path = ensureSettingsFile()
+  const migrated = migrateEmbedModel(readFileSync(path, 'utf8'))
+  if (migrated !== null) {
+    atomicWrite(path, migrated)
+    trackMtime(path)
+  }
+  atomicWrite(marker, [...applied, id].join('\n') + '\n')
+}
+
 app.whenReady().then(() => {
+  applySettingsMigrations()
   registerIpc()
   refreshAppMenu()
   createWindow()

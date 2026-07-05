@@ -158,7 +158,10 @@ export class VectorStore {
    * budgets), and a swap is the natural moment to rebuild them — re-chunking
    * is cheap next to re-embedding, and keeping stale chunks would silently pin
    * old policy until a note happens to be edited. The caller (talk:enable)
-   * re-chunks right after via chunkUnchunkedFiles. `modelId` is optional so
+   * re-chunks right after via chunkUnchunkedFiles. Known trade-off: chunk-level
+   * keyword search (chunks_fts, the FTS leg of talk search/ask) is empty for
+   * the seconds re-chunking takes — note-level search is unaffected, and the
+   * vector leg is down anyway until re-embedding. `modelId` is optional so
    * existing call sites that only know dims keep working; omitting it never
    * triggers a reset by itself.
    */

@@ -238,7 +238,14 @@ export function chunkMarkdown(content: string, maxChars = DEFAULT_MAX_CHARS): Ch
       continue // heading is metadata, not body
     }
 
-    const pieces = line.length > maxChars ? splitLine(line, maxChars) : [{ start: 0, end: line.length }]
+    // Gate on weight, not length: a 600-char single-line Chinese paragraph is
+    // under the char count but ~3× over the token budget. The length check is
+    // just a cheap pre-filter (weight ≥ length always) saving a scan of the
+    // many short lines.
+    const pieces =
+      line.length * 3 > maxChars && weightOf(line) > maxChars
+        ? splitLine(line, maxChars)
+        : [{ start: 0, end: line.length }]
     pieces.forEach((p, i) => {
       const isLast = i === pieces.length - 1
       addAtom(lineStart + p.start, isLast ? lineEnd : lineStart + p.end)

@@ -747,6 +747,10 @@ export default function App() {
   const runDistill = useCallback(async () => {
     const path = await window.nodebook.distillPick()
     if (!path) return
+    // Sync the ref before the state commits: a settings save landing in this
+    // same tick must already see the run as active and defer its embed swap
+    // (the effect that normally maintains the ref runs a render later).
+    distillingRef.current = true
     setDistilling({ phase: 'starting', done: 0, total: 0 })
     const off = window.nodebook.onDistillProgress((runId, p) =>
       setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })

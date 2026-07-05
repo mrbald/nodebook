@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AskResult, SearchHit, TalkStatus } from '@shared/types'
-import { getEmbedder, disposeEmbedder, type Embedder } from './embedder'
+import {
+  getEmbedder,
+  disposeEmbedder,
+  isDisposedError,
+  EMBEDDER_DISPOSED,
+  type Embedder
+} from './embedder'
 
 export type TalkPhase = 'off' | 'loading-model' | 'indexing' | 'ready' | 'error'
 
@@ -46,9 +52,14 @@ export function useTalk(): UseTalk {
   // landing mid-loop, or an embedder swap) must not be lost — the running
   // drain may be about to exit on a stale error. Queue exactly one re-run.
   const drainQueuedRef = useRef(false)
+  // Bumped whenever the embedder is disposed (settings swap, disable). An
+  // ensureEmbedder that awaited across a bump must not publish its now-stale
+  // embedder — nor let its caller register the stale dims with main.
+  const embedEpochRef = useRef(0)
 
   const ensureEmbedder = useCallback(async (): Promise<Embedder> => {
     if (embedderRef.current) return embedderRef.current
+    const epoch = embedEpochRef.current
     setPhase('loading-model')
     setModelProgress(null)
     const settings = await window.nodebook.readSettings()
@@ -56,6 +67,7 @@ export function useTalk(): UseTalk {
       threads: settings.talk.embed.threads,
       onProgress: (f) => setModelProgress(f)
     })
+    if (epoch !== embedEpochRef.current) throw new Error(EMBEDDER_DISPOSED) // superseded
     embedderRef.current = e
     setModelProgress(null)
     return e
@@ -77,8 +89,8 @@ export function useTalk(): UseTalk {
         if (batch.length === 0) break
         const vectors = await e.embed(batch.map((c) => c.text))
         // A settings change may have swapped the embedder mid-batch; these
-        // vectors are from the old model's space — drop them, the queued
-        // re-drain re-embeds with the new embedder.
+        // vectors are from the old model's space — drop them, the swap's own
+        // enable/drain path re-embeds with the new embedder.
         if (embedderRef.current !== e) return
         st = await window.nodebook.talkPutEmbeddings(
           batch.map((c, i) => ({ id: c.id, vector: Array.from(vectors[i]) }))
@@ -90,8 +102,12 @@ export function useTalk(): UseTalk {
       setPhase('ready')
       setStatus(st)
     } catch (err) {
-      console.error('[talk] indexing failed', err)
-      setPhase('error')
+      // A disposal is a swap in progress, not a failure — the swap's own
+      // enable/drain path finishes the indexing; don't flash the error state.
+      if (!isDisposedError(err)) {
+        console.error('[talk] indexing failed', err)
+        setPhase('error')
+      }
     } finally {
       drainingRef.current = false
       if (drainQueuedRef.current) {
@@ -102,13 +118,23 @@ export function useTalk(): UseTalk {
   }, [ensureEmbedder])
 
   const enable = useCallback(async (): Promise<void> => {
-    const e = await ensureEmbedder()
-    setStatus(await window.nodebook.talkEnable(e.dims))
-    await drain()
+    try {
+      const e = await ensureEmbedder()
+      setStatus(await window.nodebook.talkEnable(e.dims))
+      await drain()
+    } catch (err) {
+      if (isDisposedError(err)) return // superseded by a newer swap/enable
+      // e.g. the model download failed (offline, bad model id) — land on the
+      // error state so the panel offers Retry instead of sticking on
+      // "loading-model" forever.
+      console.error('[talk] enable failed', err)
+      setPhase('error')
+    }
   }, [ensureEmbedder, drain])
 
   const disable = useCallback(async (): Promise<void> => {
     const st = await window.nodebook.talkDisable()
+    embedEpochRef.current++
     disposeEmbedder()
     embedderRef.current = null
     setStatus(st)
@@ -126,21 +152,29 @@ export function useTalk(): UseTalk {
   // by the next enable (or distill embed request).
   const onEmbedConfigChanged = useCallback(
     async (modelChanged: boolean): Promise<void> => {
+      embedEpochRef.current++
       disposeEmbedder()
       embedderRef.current = null
       try {
         const st = await window.nodebook.talkStatus()
         if (!st.enabled) return
         if (modelChanged) await enable()
-        else await ensureEmbedder()
+        else {
+          // Threads-only: same model, same vectors — reload the worker, then
+          // drain to restore the phase and pick up anything the interrupted
+          // drain left pending.
+          await ensureEmbedder()
+          await drain()
+        }
       } catch (err) {
+        if (isDisposedError(err)) return // an even newer swap took over
         // e.g. a half-typed model id that 404s on the Hub — surface the error
         // state; the next settings save retries.
         console.error('[talk] embed config change failed', err)
         setPhase('error')
       }
     },
-    [enable, ensureEmbedder]
+    [enable, ensureEmbedder, drain]
   )
 
   const searchSemantic = useCallback(async (query: string): Promise<SearchHit[]> => {
