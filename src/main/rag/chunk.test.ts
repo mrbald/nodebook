@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { chunkMarkdown, embedText, splitLine } from './chunk'
+import { chunkMarkdown, embedText, splitLine, weightOf } from './chunk'
 
 describe('chunkMarkdown', () => {
   it('splits by heading and carries the heading path', () => {
@@ -140,5 +140,87 @@ describe('splitLine', () => {
     expect(pieces[0].start).toBe(0)
     expect(pieces[pieces.length - 1].end).toBe(line.length)
     for (let i = 1; i < pieces.length; i++) expect(pieces[i].start).toBe(pieces[i - 1].end)
+  })
+
+  it('breaks at CJK sentence stops (。) like ASCII ones', () => {
+    // Three short Chinese sentences; budget fits one at a time (weight 3/char).
+    const line = '这是一句话。这是第二句。这是第三句。'
+    const pieces = splitLine(line, 20)
+    const texts = pieces.map((p) => line.slice(p.start, p.end))
+    expect(texts[0]).toBe('这是一句话。')
+    expect(texts.every((t) => weightOf(t) <= 20)).toBe(true)
+    for (let i = 1; i < pieces.length; i++) expect(pieces[i].start).toBe(pieces[i - 1].end)
+  })
+
+  it('hard-splits an unbroken CJK run by weight, never inside a surrogate pair', () => {
+    // 𠀋 (U+2000B) is an astral-plane ideograph: two UTF-16 code units, one
+    // (heavy) code point. 10 of them = weight 30, budget 9 → 3 per piece.
+    const line = '𠀋'.repeat(10)
+    const pieces = splitLine(line, 9)
+    expect(pieces[0].start).toBe(0)
+    expect(pieces[pieces.length - 1].end).toBe(line.length)
+    for (const p of pieces) {
+      const t = line.slice(p.start, p.end)
+      expect([...t].every((c) => (c.codePointAt(0) as number) > 0xffff)).toBe(true) // no lone surrogates
+      expect(weightOf(t)).toBeLessThanOrEqual(9)
+    }
+    // 3 astral chars (6 code units) per full piece; the 10th char remains alone.
+    expect(pieces.map((p) => p.end - p.start)).toEqual([6, 6, 6, 2])
+    for (let i = 1; i < pieces.length; i++) expect(pieces[i].start).toBe(pieces[i - 1].end)
+  })
+})
+
+/**
+ * The token-cost weight behind every budget decision: CJK ≈ 1 token per
+ * character vs ~3-4 characters per token for Latin, so a CJK code point
+ * counts 3×. For pure-Latin text weight == length — that identity is what
+ * keeps English chunking byte-identical to the pre-weighted behavior.
+ */
+describe('weightOf', () => {
+  it('equals length for plain Latin text', () => {
+    expect(weightOf('hello world!')).toBe(12)
+    expect(weightOf('')).toBe(0)
+  })
+
+  it('counts CJK code points 3×, including astral-plane ideographs', () => {
+    expect(weightOf('你好')).toBe(6) // Han
+    expect(weightOf('こんにちは')).toBe(15) // Hiragana
+    expect(weightOf('안녕')).toBe(6) // Hangul
+    expect(weightOf('𠀋')).toBe(3) // U+2000B: 2 code units, one heavy code point
+  })
+
+  it('weighs mixed text per code point and honors [start, end)', () => {
+    const s = 'ab你好cd'
+    expect(weightOf(s)).toBe(4 + 6)
+    expect(weightOf(s, 2, 4)).toBe(6) // just the two Han chars
+  })
+
+  it('leaves Cyrillic at weight 1 (it tokenizes like Latin, a few chars per token)', () => {
+    expect(weightOf('привет')).toBe(6)
+  })
+})
+
+/** CJK-aware packing end to end: a long Chinese section must split into
+ *  several chunks that each fit the weight budget — under a plain char budget
+ *  it would come out as one chunk ~3× over the model's token window. */
+describe('chunkMarkdown with CJK text', () => {
+  it('splits a long Chinese section into weight-bounded chunks', () => {
+    const sentence = '这是一个很长的句子，用来测试分块。'
+    const doc = `# 标题\n\n${sentence.repeat(30)}`
+    const chunks = chunkMarkdown(doc, 300)
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const c of chunks) {
+      // Budget + the seeded-overlap slack (10%), same soft cap as English.
+      expect(weightOf(c.text)).toBeLessThanOrEqual(300 + 30 + 3)
+      expect(c.heading).toBe('标题')
+      expect(doc.slice(c.start, c.end)).toContain(c.text)
+    }
+  })
+
+  it('keeps English chunking behavior identical (weight == length)', () => {
+    const para = 'Plain English sentences pack exactly as before. '.repeat(10)
+    const doc = `# H\n\n${para}`
+    expect(chunkMarkdown(doc, 200)).toEqual(chunkMarkdown(doc, 200))
+    for (const c of chunkMarkdown(doc, 200)) expect(c.text.length).toBeLessThanOrEqual(200 + 20 + 1)
   })
 })
