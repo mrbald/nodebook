@@ -94,7 +94,10 @@ export function buildExtractionPrompt(chunks: ClusterChunk[]): { system: string;
     'EXTRACTIVELY: every claim must be backed by a verbatim quote copied from one ' +
     'of the provided chunks, tagged with that chunk id. Do not assert anything the ' +
     'chunks do not state. If you cannot quote support for a claim, omit it — no ' +
-    'evidence, no item. Return ONLY JSON in this exact shape:\n' +
+    'evidence, no item. Write every title, summary, and link target in the SAME ' +
+    'LANGUAGE as the source chunks — a Russian text yields Russian notes; never ' +
+    'translate into English. (JSON keys and "kind"/"relation" values stay exactly ' +
+    'as the schema spells them.) Return ONLY JSON in this exact shape:\n' +
     SCHEMA_HINT
   const body = chunks
     .map((c) => `[chunk ${c.chunkId}${c.heading ? ` — ${c.heading}` : ''}]\n${c.text}`)

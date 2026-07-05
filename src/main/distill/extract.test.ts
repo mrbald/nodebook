@@ -17,6 +17,12 @@ describe('buildExtractionPrompt', () => {
     expect(user).toContain('[chunk 42 — Intro]')
     expect(user).toContain('A republic checks faction.')
   })
+
+  it('pins the output language to the source language (a Russian book yields Russian notes)', () => {
+    const { system } = buildExtractionPrompt([{ chunkId: 1, heading: '', text: 'Дао рождает одно.' }])
+    expect(system).toMatch(/same\s+language/i)
+    expect(system).toMatch(/never\s+translate/i)
+  })
 })
 
 describe('locateQuote', () => {
