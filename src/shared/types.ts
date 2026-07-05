@@ -190,8 +190,10 @@ export interface Settings {
     embed: {
       /** 'wasm' (lean, cross-platform, default) or 'native' (faster) runtime. */
       runtime: 'wasm' | 'native'
-      /** Embedding model id (transformers.js repo, e.g. Xenova/all-MiniLM-L6-v2). */
+      /** Embedding model id (transformers.js repo, e.g. Xenova/multilingual-e5-base). */
       model: string
+      /** Embedding CPU threads. 0 = auto (about half the cores, max 4). */
+      threads: number
     }
     /** "Ask" chat provider. 'none' = search-only (no LLM). The API key is read
      *  from the env/settings in main and never sent to the renderer. */

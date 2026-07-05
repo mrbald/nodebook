@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { aggregateProgress, rolePrefix } from './embedder'
+import { aggregateProgress, rolePrefix, wasmThreads } from './embedder'
 
 /**
  * The model-download progress bar aggregates per-file byte counts into one
@@ -56,5 +56,29 @@ describe('rolePrefix', () => {
 
   it('matches on a model-id substring, surviving a mirror/org prefix', () => {
     expect(rolePrefix('some-mirror/bge-base-en-v1.5', 'query')).not.toBe('')
+  })
+})
+
+/**
+ * The ONNX WASM thread count: explicit setting wins, auto = half the cores
+ * capped at 4, and no SharedArrayBuffer always means single-threaded (threads
+ * physically need shared memory).
+ */
+describe('wasmThreads', () => {
+  it('is 1 without SharedArrayBuffer, whatever the setting', () => {
+    expect(wasmThreads(0, 12, false)).toBe(1)
+    expect(wasmThreads(8, 12, false)).toBe(1)
+  })
+
+  it('auto = half the cores, capped at 4', () => {
+    expect(wasmThreads(0, 4, true)).toBe(2)
+    expect(wasmThreads(0, 12, true)).toBe(4)
+    expect(wasmThreads(0, 1, true)).toBe(1)
+    expect(wasmThreads(0, 0, true)).toBe(2) // unknown cores → assume 4
+  })
+
+  it('an explicit positive setting wins over auto', () => {
+    expect(wasmThreads(8, 12, true)).toBe(8)
+    expect(wasmThreads(1, 12, true)).toBe(1)
   })
 })

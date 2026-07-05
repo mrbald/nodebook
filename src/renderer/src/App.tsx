@@ -187,7 +187,7 @@ export default function App() {
   useEffect(() => {
     return window.nodebook.onDistillEmbedRequest(async (texts) => {
       const model = settingsRef.current?.talk.embed.model ?? 'Xenova/all-MiniLM-L6-v2'
-      const emb = await getEmbedder(model)
+      const emb = await getEmbedder(model, { threads: settingsRef.current?.talk.embed.threads })
       const vecs = await emb.embed(texts)
       return vecs.map((v) => Array.from(v))
     })

@@ -24,7 +24,7 @@ export const DEFAULTS: Settings = {
   talk: {
     enabled: false,
     relatedMinScore: 0.5,
-    embed: { runtime: 'wasm', model: DEFAULT_EMBED_MODEL },
+    embed: { runtime: 'wasm', model: DEFAULT_EMBED_MODEL, threads: 0 },
     chat: { provider: 'none', model: '', baseUrl: '', command: '', args: [] }
   },
   telemetry: { enabled: false }
@@ -76,6 +76,10 @@ relatedMinScore = 0.5
 runtime = "wasm"
 # Embedding model (a transformers.js repo). Downloaded on first enable.
 model = "${DEFAULT_EMBED_MODEL}"
+# CPU threads for embedding. 0 = auto: about half the cores, at most 4 — fast
+# indexing without starving the app while you type. Raise it to speed up a big
+# first index; it never uses more than you set.
+threads = 0
 
 [talk.chat]
 # "Ask" chat over your notes. Only the retrieved note passages are sent to the
@@ -185,7 +189,14 @@ export function parseSettings(raw: string): Settings {
         Number(talk.relatedMinScore) <= 1
           ? Number(talk.relatedMinScore)
           : DEFAULTS.talk.relatedMinScore,
-      embed: { runtime, model: str(embed.model, DEFAULTS.talk.embed.model) },
+      embed: {
+        runtime,
+        model: str(embed.model, DEFAULTS.talk.embed.model),
+        threads:
+          Number.isInteger(embed.threads) && (embed.threads as number) >= 0
+            ? (embed.threads as number)
+            : DEFAULTS.talk.embed.threads
+      },
       chat: {
         provider: chatProvider,
         model: str(chat.model, DEFAULTS.talk.chat.model),

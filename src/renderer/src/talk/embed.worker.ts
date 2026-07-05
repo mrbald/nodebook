@@ -12,13 +12,27 @@ import {
   type FeatureExtractionPipeline,
   type ProgressInfo
 } from '@huggingface/transformers'
-import { rolePrefix, type EmbedRole } from './embedder'
+// The ONNX WASM runtime, bundled by vite so the app never fetches it from a
+// CDN at launch (transformers.js points wasmPaths at jsDelivr when unset).
+// The asyncify variant is the one ort picks on Chromium; passing an explicit
+// {wasm, mjs} pair makes it use exactly these files. `@ort-wasm` is a vite
+// alias (see electron.vite.config.ts) around onnxruntime-web's `exports` map.
+import ortWasmUrl from '@ort-wasm/ort-wasm-simd-threaded.asyncify.wasm?url'
+import ortMjsUrl from '@ort-wasm/ort-wasm-simd-threaded.asyncify.mjs?url'
+import { rolePrefix, wasmThreads, type EmbedRole } from './embedder'
 
 // We always pull models from the Hub (there's no local model dir in the app).
 env.allowLocalModels = false
+const onnxWasm = env.backends.onnx?.wasm
+if (onnxWasm) {
+  onnxWasm.wasmPaths = {
+    wasm: new URL(ortWasmUrl, self.location.href).href,
+    mjs: new URL(ortMjsUrl, self.location.href).href
+  }
+}
 
 type InMsg =
-  | { type: 'init'; model: string }
+  | { type: 'init'; model: string; threads?: number }
   | { type: 'embed'; id: number; texts: string[]; role?: EmbedRole }
 
 let extractor: FeatureExtractionPipeline | null = null
@@ -43,6 +57,16 @@ self.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   try {
     if (msg.type === 'init') {
       modelId = msg.model
+      const threads = wasmThreads(
+        msg.threads ?? 0,
+        navigator.hardwareConcurrency,
+        typeof SharedArrayBuffer !== 'undefined'
+      )
+      if (onnxWasm) onnxWasm.numThreads = threads
+      console.info(
+        `[embed] wasm threads: ${threads}` +
+          (typeof SharedArrayBuffer === 'undefined' ? ' (SharedArrayBuffer unavailable)' : '')
+      )
       // Forward transformers.js download progress so the UI can show a real bar
       // instead of an indeterminate "Loading model…". Events that carry byte
       // counts (one per file being fetched) are the ones worth surfacing; the

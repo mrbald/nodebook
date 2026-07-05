@@ -37,6 +37,24 @@ export function rolePrefix(model: string, role: EmbedRole): string {
   return ''
 }
 
+/**
+ * Pure: the WASM thread count to run the ONNX session with. An explicit user
+ * setting (> 0) wins; auto (0) = about half the cores, capped at 4 — q8 matmul
+ * in WASM is memory-bandwidth-bound (gains flatten past ~4 threads), and
+ * embedding is a background job that must not starve the UI while the user
+ * types. Threads need SharedArrayBuffer (main exposes it via a Chromium flag,
+ * see src/main/index.ts); without it the answer is always 1 — same behavior as
+ * before threading. An explicit count is required even with SAB present: ort's
+ * own auto path is gated on crossOriginIsolated, which is never true under
+ * file://. Lives here (not embed.worker.ts) so it's plain and unit-testable;
+ * the worker feeds in its real environment. Exported for unit tests.
+ */
+export function wasmThreads(setting: number, cores: number, sabAvailable: boolean): number {
+  if (!sabAvailable) return 1
+  if (setting > 0) return Math.floor(setting)
+  return Math.min(4, Math.ceil((cores || 4) / 2))
+}
+
 /** Model-download progress: a 0..1 fraction, or null while no size is known. */
 export type ProgressFn = (fraction: number | null) => void
 
@@ -57,12 +75,20 @@ export function aggregateProgress(files: { loaded: number; total: number }[]): n
   return Math.min(1, loaded / total)
 }
 
+export interface EmbedderOptions {
+  /** The `[talk.embed] threads` setting; 0/undefined = auto (see `wasmThreads`). */
+  threads?: number
+  /** Called with download progress while the model is first fetched. */
+  onProgress?: ProgressFn
+}
+
 let pending: Promise<Embedder> | null = null
 
-/** Get (or lazily create) the singleton embedder for `model`. `onProgress` is
- *  called with download progress while the model is first fetched. */
-export function getEmbedder(model: string, onProgress?: ProgressFn): Promise<Embedder> {
-  if (!pending) pending = create(model, onProgress)
+/** Get (or lazily create) the singleton embedder for `model`. Note the
+ *  singleton is first-model-wins: a different `model` on a later call returns
+ *  the existing embedder until `disposeEmbedder()` is called. */
+export function getEmbedder(model: string, opts: EmbedderOptions = {}): Promise<Embedder> {
+  if (!pending) pending = create(model, opts)
   return pending
 }
 
@@ -71,14 +97,14 @@ export function disposeEmbedder(): void {
   pending = null
 }
 
-function create(model: string, onProgress?: ProgressFn): Promise<Embedder> {
+function create(model: string, opts: EmbedderOptions): Promise<Embedder> {
   if ((window as unknown as Record<string, unknown>).__NODEBOOK_FAKE_EMBED__) {
     return Promise.resolve(fakeEmbedder())
   }
-  return workerEmbedder(model, onProgress)
+  return workerEmbedder(model, opts)
 }
 
-function workerEmbedder(model: string, onProgress?: ProgressFn): Promise<Embedder> {
+function workerEmbedder(model: string, { threads, onProgress }: EmbedderOptions): Promise<Embedder> {
   const worker = new Worker(new URL('./embed.worker.ts', import.meta.url), { type: 'module' })
   let seq = 0
   const waiters = new Map<number, (vs: Float32Array[]) => void>()
@@ -119,7 +145,7 @@ function workerEmbedder(model: string, onProgress?: ProgressFn): Promise<Embedde
       }
     }
     worker.onerror = (e): void => reject(new Error(e.message))
-    worker.postMessage({ type: 'init', model })
+    worker.postMessage({ type: 'init', model, threads: threads ?? 0 })
   })
 }
 

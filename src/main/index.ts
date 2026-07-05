@@ -46,6 +46,15 @@ import type {
   DistillMergeStatus
 } from '../shared/types'
 
+// Expose SharedArrayBuffer to the renderer so onnxruntime-web can run its WASM
+// threaded (embedding otherwise pins a single core). The renderer is never
+// crossOriginIsolated (prod loads file://, which can't carry COOP/COEP
+// headers), so this Chromium feature flag is the only route to SAB — verified:
+// it works from here but NOT as a CLI switch. ort still needs an explicit
+// numThreads because its auto path is gated on crossOriginIsolated (see
+// embed.worker.ts). Must run before app is ready.
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
+
 // Name the app so the macOS menu bar / dialogs say "Nodebook", not "Electron".
 // (In `npm run dev` the bold app-menu title is still read from the Electron.app
 // bundle and shows "Electron"; the packaged build uses productName "Nodebook"

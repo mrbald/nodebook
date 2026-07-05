@@ -87,13 +87,21 @@ describe('parseSettings', () => {
     expect(s.talk).toEqual({
       enabled: true,
       relatedMinScore: DEFAULTS.talk.relatedMinScore, // no key in input → default
-      embed: { runtime: 'native', model: 'Xenova/bge-small-en-v1.5' },
+      embed: { runtime: 'native', model: 'Xenova/bge-small-en-v1.5', threads: 0 },
       chat: DEFAULTS.talk.chat // no [talk.chat] in the input → defaults
     })
     // defaults off; unknown runtime + non-boolean enabled fall back
     expect(parseSettings('').talk.enabled).toBe(false)
     expect(parseSettings('[talk.embed]\nruntime = "cuda"').talk.embed.runtime).toBe('wasm')
     expect(parseSettings('[talk]\nenabled = "yes"').talk.enabled).toBe(false)
+  })
+
+  it('reads [talk.embed] threads and rejects negatives and non-integers', () => {
+    expect(parseSettings('[talk.embed]\nthreads = 6').talk.embed.threads).toBe(6)
+    expect(parseSettings('').talk.embed.threads).toBe(0) // default = auto
+    expect(parseSettings('[talk.embed]\nthreads = -2').talk.embed.threads).toBe(0)
+    expect(parseSettings('[talk.embed]\nthreads = 1.5').talk.embed.threads).toBe(0)
+    expect(parseSettings('[talk.embed]\nthreads = "all"').talk.embed.threads).toBe(0)
   })
 
   it('reads [talk] relatedMinScore and clamps it to 0..1', () => {

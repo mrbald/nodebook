@@ -44,7 +44,10 @@ export function useTalk(): UseTalk {
     setPhase('loading-model')
     setModelProgress(null)
     const settings = await window.nodebook.readSettings()
-    const e = await getEmbedder(settings.talk.embed.model, (f) => setModelProgress(f))
+    const e = await getEmbedder(settings.talk.embed.model, {
+      threads: settings.talk.embed.threads,
+      onProgress: (f) => setModelProgress(f)
+    })
     embedderRef.current = e
     setModelProgress(null)
     return e

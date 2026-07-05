@@ -21,7 +21,12 @@ export default defineConfig({
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src'),
-        '@shared': resolve('src/shared')
+        '@shared': resolve('src/shared'),
+        // The ONNX wasm runtime files, imported as bundled assets by the embed
+        // worker (see embed.worker.ts) so the app never fetches them from a
+        // CDN. An alias because onnxruntime-web's package `exports` does not
+        // expose ./dist/* for direct import.
+        '@ort-wasm': resolve('node_modules/onnxruntime-web/dist')
       }
     },
     plugins: [react()]
