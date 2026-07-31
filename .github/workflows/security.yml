@@ -23,7 +23,10 @@ jobs:
           cache: npm
       # --ignore-scripts: an audit needs the dep tree, not the native rebuild.
       - run: npm ci --ignore-scripts
-      - run: npm audit --audit-level=high
+      # --omit=dev: this gate covers what ships. Dev-tooling advisories still
+      # surface via osv-scanner below (full tree), where an unfixable one can
+      # be ignored with a written justification (osv-scanner.toml).
+      - run: npm audit --omit=dev --audit-level=high
 
   # Thorough scan against OSV.dev (aggregates NVD + GitHub + ecosystem advisories);
   # results also surface in the repo's Security tab.
