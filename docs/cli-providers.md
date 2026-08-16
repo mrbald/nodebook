@@ -1,7 +1,7 @@
 # CLI chat providers — use the AI subscription you already have
 
-*Status: designed 2026-07-04, shipping `codex-cli` + generic `cli`. Anthropic
-approval for a first-class Claude preset: pending (see "The Claude question").*
+*Status: designed 2026-07-04; shipping `codex-cli`, `claude-cli` and generic
+`cli`.*
 
 ## Why
 
@@ -17,55 +17,29 @@ behind an API key they don't have.
 
 ## What ships
 
-Two new values for `[talk.chat] provider`:
+Three values for `[talk.chat] provider`:
 
 - **`codex-cli`** — a named, tested preset for the OpenAI Codex CLI. Runs
   `codex exec --json` with the prompt on stdin, under the user's ChatGPT
   sign-in. Zero config beyond flipping the provider; `model` empty means "the
   user's own Codex default".
+- **`claude-cli`** — the same deal for Anthropic's Claude Code CLI, under the
+  user's Claude sign-in. Runs `claude -p` with the prompt on stdin and streams
+  the answer back token by token. `model` empty means the user's own default;
+  it also takes an alias like `opus` or `sonnet`.
 - **`cli`** — the generic escape hatch, nerdified per the explainability
   filter (advanced option, out of the default path). The user supplies
   `command` (+ optional `args`); Nodebook writes the prompt to stdin and reads
   the whole answer from stdout. Any tool with that contract works — including
   a user's own wrapper script.
 
-Both are chat-only. Embeddings stay on the existing local WASM path; a CLI
+All three are chat-only. Embeddings stay on the existing local WASM path; a CLI
 provider changes nothing about indexing or search.
 
-## The policy question (why Claude is not a preset yet)
-
-The two vendors are not symmetric:
-
-- **OpenAI supports this pattern explicitly.** The official `@openai/codex-sdk`
-  itself spawns the `codex` CLI and reuses the saved ChatGPT login; scripted
-  `codex exec` is a documented, first-class feature.
-  Sources: <https://developers.openai.com/codex/noninteractive>,
-  <https://github.com/openai/codex> (sdk/typescript README),
-  <https://developers.openai.com/codex/auth>.
-- **Anthropic requires approval.** The Agent SDK docs state: *"Unless
-  previously approved, Anthropic does not allow third party developers to
-  offer claude.ai login or rate limits for their products."*
-  Source: <https://code.claude.com/docs/en/agent-sdk/overview.md>.
-
-The line we draw: an individual scripting their own subscription on their own
-machine is normal, documented use (both vendors ship headless modes for exactly
-that). What needs approval is Nodebook-the-product *shipping a Claude
-subscription backend*. So:
-
-- `codex-cli` is a first-class preset (vendor-blessed pattern).
-- Claude is reachable today only through the generic `cli` provider, configured
-  by the user, on the user's own responsibility — Nodebook never handles login,
-  tokens, or keys, and does not document it in the default setup path.
-- A `claude-cli` preset is a one-line factory branch once approved.
-
-**Approval request channel** (no dedicated process is documented; these are the
-official routes): the Claude Partner Network application form
-<https://claude.com/form/cpn-partner-application> (primary), and the sales
-contact referenced from the Agent SDK docs
-<https://www.anthropic.com/contact-sales> (fallback). The request should say:
-open-source AGPL desktop app, local-first, spawns the user's own installed and
-signed-in `claude` CLI at the user's request, no OAuth-token extraction, no
-hosted service, asking for pre-approval per the Agent SDK policy sentence.
+Every provider is off by default and switched on by the user. Nodebook never
+handles credentials for any of them: sign-in happens in the user's own terminal
+(`codex login`, `claude auth login`), before Nodebook is in the picture, and the
+traffic is the user's own subscription talking to the vendor directly.
 
 ## How it works
 
@@ -96,13 +70,33 @@ provider-agnostic and unchanged.
   events. Consequence: with `codex-cli`, Ask shows the whole answer at once
   instead of streaming. Token streaming exists behind `codex app-server`
   (persistent JSON-RPC process) — deferred until the spinner actually hurts.
+- **Claude output — and why it streams.** `claude -p --output-format
+  stream-json --include-partial-messages --verbose` emits JSONL that *does*
+  carry `content_block_delta` / `text_delta` events, so Ask streams normally.
+  `parseClaudeLine()` (pure, unit-tested against a recorded real transcript)
+  reads one line at a time; `runCliLines()` is the streaming sibling of
+  `runCli()`, yielding stdout lines as they arrive instead of buffering. The
+  `assistant` event is deliberately ignored — it repeats the text the deltas
+  already carried, and taking both would duplicate the answer. If a future
+  build stops emitting partial messages, the final `result` event still holds
+  the whole answer and is used as a fallback.
+- **Claude runs as a chat model, not a coding agent.** Four flags do that, and
+  they are load-bearing rather than cosmetic: `--tools ""` (no file access, no
+  web — the backend can only answer the question it was handed),
+  `--strict-mcp-config` (the user's MCP servers stay out of it),
+  `--disable-slash-commands` (a note starting with `/` is text, not a command),
+  and `--system-prompt` replacing Claude Code's own agent prompt. Windows note:
+  Node does not quote arguments when it goes through a shell for a `.cmd` shim,
+  where a bare empty string would vanish and `--tools` would swallow the next
+  flag — so the empty value is passed as `""` on that path.
 - **Cheap pre-flight.** A chat round-trip through Codex costs ~12k input
   tokens of harness overhead against the user's plan, so the distill
   pre-flight must not "ping" the model. `ChatModel` gained an optional
   `probe()`: `codex-cli` runs `codex login status` (instant, free, exits
-  non-zero when signed out); `cli` just resolves the command. `probeChat()`
-  in `src/main/distill/run.ts` prefers `probe()` and falls back to the old
-  first-token pull for HTTP providers.
+  non-zero when signed out); `claude-cli` runs `claude auth status --json` and
+  trusts its `loggedIn` field over the exit code; `cli` just resolves the
+  command. `probeChat()` in `src/main/distill/run.ts` prefers `probe()` and
+  falls back to the old first-token pull for HTTP providers.
 
 ## Configuration
 
@@ -113,11 +107,15 @@ provider = "codex-cli"
 model = ""            # empty = your Codex default (~/.codex/config.toml)
 command = ""          # optional: full path to codex if not on a standard PATH
 
+# Claude subscriber with the Claude Code CLI installed and signed in:
+# provider = "claude-cli"
+# model = ""          # empty = your Claude default; or an alias like "opus"
+# command = ""        # optional: full path to claude
+
 # Advanced: any command that reads the question on stdin and prints the
 # answer on stdout. You supply it; Nodebook just runs it.
 # provider = "cli"
-# command = "claude"
-# args = ["-p"]
+# command = "my-wrapper.sh"
 ```
 
 `model` now defaults to empty everywhere, meaning "the provider's own
@@ -134,9 +132,18 @@ id to a non-Anthropic server, which is what the old default did).
 - Each `codex exec` call re-sends Codex's own system harness (~12k input
   tokens, mostly cache-hits). That is the vendor's design, not tunable from
   here.
+- **`claude -p` overhead is tunable, and the difference is large.** Measured
+  against claude-code 2.1.233 on a trivial round-trip: **51,216** input tokens
+  with default flags, **537** with the four isolation flags above, and 0 new
+  tokens on the next call (a 537-token cache read). Almost all of the
+  difference was the developer's own MCP servers being loaded into a chat call
+  that has no use for them. A distill run makes one call per cluster (capped at
+  24), so this is the difference between a visible slice of a plan's window and
+  a rounding error. Anyone changing those flags should re-measure.
 - Latency: a trivial `codex exec` round-trip measured ~6.5 s wall (process
-  start is small; the model call dominates). The distill pre-flight timeout is
-  30 s to accommodate cold starts.
+  start is small; the model call dominates); the same through `claude -p`
+  measured ~3 s. The distill pre-flight timeout is 30 s to accommodate cold
+  starts.
 
 ## Failure modes
 
@@ -144,26 +151,27 @@ All fail fast in the pre-flight, before any embedding work:
 
 | Failure | Behaviour |
 | --- | --- |
-| Binary not found | "Codex CLI not found — install it, or set its full path in `[talk.chat] command`." |
-| Signed out | "Codex isn't signed in — run `codex login` in a terminal, then try again." |
-| Bad `model` value | Fails on the first extraction call with the CLI's own error (login status can't validate model ids). |
+| Binary not found | "Codex CLI not found — install it, or set its full path in `[talk.chat] command`." Same shape for Claude, naming `npm install -g @anthropic-ai/claude-code`. |
+| Signed out | "Codex isn't signed in — run `codex login` in a terminal, then try again." / "Claude Code isn't signed in — run `claude auth login`…". |
+| Bad `model` value | Fails on the first extraction call with the CLI's own error (a sign-in check can't validate model ids). `claude` exits 1 with `[claude-code:unrecognized_model]` on stderr, which is surfaced verbatim. |
 | Mid-run abort | Process killed via the run's `AbortSignal`, same path as HTTP cancellation. |
 
 ## Testing
 
-- Pure parts (`flattenChatRequest`, `parseCodexEvents`, `resolveCommand`) are
-  unit-tested; the Codex parser against a real recorded `exec --json`
-  transcript.
+- Pure parts (`flattenChatRequest`, `parseCodexEvents`, `parseClaudeLine`,
+  `resolveCommand`) are unit-tested; both CLI parsers against real recorded
+  transcripts.
 - The spawn path is tested for real in vitest by running `node -e` scripts as
-  the generic provider (echo, non-zero exit, abort) and a fake `codex`
-  executable emitting the recorded JSONL — no network, no quota.
+  the generic provider (echo, non-zero exit, abort) and fake `codex` / `claude`
+  executables emitting the recorded JSONL — no network, no quota. The Claude
+  fakes cover the cases the parser alone can't: chunk-by-chunk streaming, the
+  prompt reaching stdin, the no-partial-messages fallback, abort, and a
+  `auth status` that exits 0 while reporting `loggedIn: false`.
 - e2e is unchanged: `NODEBOOK_E2E` still short-circuits `makeChatModel` to the
   deterministic stub before any CLI code runs.
 
 ## Future
 
-- `claude-cli` preset (streaming via `--output-format stream-json
-  --include-partial-messages`) once Anthropic approval lands.
 - `codex app-server` for streamed Ask answers, if whole-answer display feels
   bad in practice.
 - Other CLIs (e.g. Gemini) need no code — they are `provider = "cli"` recipes.

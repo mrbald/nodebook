@@ -171,6 +171,11 @@ Settings (`[talk.chat]`).
     Nodebook runs the Codex app on your own computer; what you ask counts
     against your ChatGPT plan's usage limits, and the answer appears all at
     once rather than streaming in.
+  - `claude-cli` — the same, for a **Claude** plan and the **Claude Code**
+    command-line app: install it, run `claude auth login`, no API key. What you
+    ask counts against your Claude plan's usage limits. Answers stream in as
+    they're written. Nodebook runs it with no tools and no access to your files
+    — it only answers the question it is given.
   - `cli` (advanced) — runs any command you supply: your question goes to the
     command, and whatever it prints comes back as the answer. For anyone
     comfortable with a terminal.

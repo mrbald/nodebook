@@ -812,7 +812,7 @@ function registerIpc(): void {
       await probeChat(chat, AbortSignal.timeout(30_000))
     } catch (err) {
       throw new Error(
-        `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login). ${err instanceof Error ? err.message : ''}`.trim(),
+        `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login, claude auth login). ${err instanceof Error ? err.message : ''}`.trim(),
         { cause: err }
       )
     }

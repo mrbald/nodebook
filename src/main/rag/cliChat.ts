@@ -12,6 +12,8 @@ import type { ChatModel, ChatRequest, ProviderConfig } from './provider'
  * - `codexCliChat` — preset for the OpenAI Codex CLI: `codex exec --json`,
  *   prompt on stdin, answer parsed from its JSONL events (no incremental
  *   deltas, so the whole answer arrives as one chunk).
+ * - `claudeCliChat` — preset for Anthropic's Claude Code CLI: `claude -p`,
+ *   prompt on stdin, answer streamed token-by-token from its JSONL events.
  * - `genericCliChat` — user-supplied `command`/`args`; contract: prompt on
  *   stdin, answer on stdout.
  *
@@ -184,6 +186,73 @@ function runCli(
   })
 }
 
+/** Sibling of `runCli` for backends that emit incremental output: spawn, feed
+ *  stdin, and yield complete stdout lines as they arrive instead of buffering
+ *  the whole answer. `label` names the command in the non-zero-exit message.
+ *  The child is killed on abort and on early consumer exit (the `finally`). */
+async function* runCliLines(
+  file: string,
+  args: string[],
+  label: string,
+  opts: { input?: string; signal?: AbortSignal; cwd?: string } = {}
+): AsyncIterable<string> {
+  if (opts.signal?.aborted) throw abortError()
+  const shell = /\.(cmd|bat)$/i.test(file)
+  const child = spawn(file, args, { cwd: opts.cwd, env: process.env, shell })
+  const onAbort = (): void => {
+    child.kill('SIGTERM')
+    // Killing the child does not reap a grandchild that inherited this pipe (a
+    // shell wrapper leaves one behind), and the iteration below would wait for
+    // *every* writer to let go. Drop our end instead of stalling past the abort.
+    child.stdout.destroy()
+  }
+  opts.signal?.addEventListener('abort', onAbort, { once: true })
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (d: string) => (stderr += d))
+  // Spawn failure (ENOENT) and exit code both land here; `close` fires after
+  // both stdio streams end, so awaiting it below never truncates output.
+  const closed = new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject)
+    child.on('close', (code) => resolve(code))
+  })
+  // An abort returns before `closed` is awaited; mark it handled so a spawn
+  // error on the way out is not an unhandled rejection.
+  void closed.catch(() => {})
+  child.stdin.on('error', () => {})
+  child.stdin.end(opts.input ?? '')
+  try {
+    child.stdout.setEncoding('utf8')
+    let buf = ''
+    try {
+      for await (const chunk of child.stdout as AsyncIterable<string>) {
+        buf += chunk
+        let nl: number
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl)
+          buf = buf.slice(nl + 1)
+          if (line.trim()) yield line
+        }
+      }
+      if (buf.trim()) yield buf
+    } catch (err) {
+      // Destroying stdout on abort surfaces here as a premature close; the
+      // abort is the real story.
+      if (opts.signal?.aborted) throw abortError()
+      throw err
+    }
+    // Report the abort before waiting on the exit code: a killed child exits
+    // non-zero, and `close` may lag behind a grandchild that outlived it.
+    if (opts.signal?.aborted) throw abortError()
+    const code = await closed
+    if (code !== 0)
+      throw new Error(`${label} failed (exit ${code}): ${tail(stderr) || 'no error output'}`)
+  } finally {
+    opts.signal?.removeEventListener('abort', onAbort)
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+  }
+}
+
 /** The user's own OpenAI Codex CLI (`codex exec`) under their ChatGPT sign-in. */
 export function codexCliChat(cfg: ProviderConfig): ChatModel {
   const cmd = cfg.command || 'codex'
@@ -226,6 +295,130 @@ export function codexCliChat(cfg: ProviderConfig): ChatModel {
       const { code } = await runCli(file, ['login', 'status'], { signal })
       if (code !== 0)
         throw new Error('Codex isn\'t signed in — run "codex login" in a terminal, then try again.')
+    }
+  }
+}
+
+interface ClaudeEvent {
+  type?: string
+  event?: { type?: string; delta?: { type?: string; text?: string } }
+  is_error?: boolean
+  subtype?: string
+  result?: string
+}
+
+/** Parse one line of `claude -p --output-format stream-json`: a token delta, the
+ *  whole answer, or an error. Unparseable lines are skipped (warnings, partial
+ *  writes). The `assistant` event is ignored on purpose — it repeats the text
+ *  the deltas already carried, and taking both would duplicate the answer. */
+export function parseClaudeLine(
+  line: string
+): { delta?: string; final?: string; error?: string } | null {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+  let ev: ClaudeEvent
+  try {
+    ev = JSON.parse(trimmed) as ClaudeEvent
+  } catch {
+    return null
+  }
+  if (ev.type === 'stream_event') {
+    const inner = ev.event
+    if (inner?.type === 'content_block_delta' && inner.delta?.type === 'text_delta')
+      return typeof inner.delta.text === 'string' ? { delta: inner.delta.text } : null
+    return null
+  }
+  if (ev.type === 'result') {
+    if (ev.is_error) return { error: ev.result || ev.subtype || 'the run failed' }
+    // Fallback: a build that doesn't emit partial messages still puts the whole
+    // answer on the terminal `result` event.
+    return typeof ev.result === 'string' && ev.result ? { final: ev.result } : null
+  }
+  return null
+}
+
+/** Replaces Claude Code's own coding-agent system prompt. Nodebook wants a plain
+ *  chat model here — the grounding instructions travel with the request — and the
+ *  agent persona would both skew the answer and cost tokens on every call. */
+const CLAUDE_SYSTEM_PROMPT = 'You are a helpful assistant. Answer the request directly and completely.'
+
+/** The user's own Claude Code CLI (`claude -p`) under their Claude sign-in.
+ *
+ *  The flags make it a pure chat backend rather than a coding agent: no tools
+ *  (it cannot read files or reach the web), no MCP servers, no slash commands,
+ *  and its own system prompt replaced. That is also what makes it cheap —
+ *  measured against claude-code 2.1.233, the per-call overhead drops from
+ *  ~51k input tokens to ~540, cached to near-nothing on the calls after the
+ *  first. A distill run makes one call per cluster, so this matters. */
+export function claudeCliChat(cfg: ProviderConfig): ChatModel {
+  const cmd = cfg.command || 'claude'
+  const resolve = (): string => {
+    const file = resolveCommand(cmd)
+    if (!file)
+      throw new Error(
+        'Claude Code CLI not found — install it (npm install -g @anthropic-ai/claude-code), or set its full path in [talk.chat] command.'
+      )
+    return file
+  }
+  return {
+    id: `claude-cli:${cfg.model || 'default'}`,
+    async *chat(req: ChatRequest): AsyncIterable<string> {
+      const file = resolve()
+      // Node does not quote arguments when it goes through a shell (the .cmd
+      // case on Windows), where a bare empty string would vanish and `--tools`
+      // would swallow the next flag.
+      const none = /\.(cmd|bat)$/i.test(file) ? '""' : ''
+      const args = [
+        '-p',
+        '--output-format',
+        'stream-json',
+        '--include-partial-messages',
+        '--verbose',
+        '--tools',
+        none,
+        '--strict-mcp-config',
+        '--disable-slash-commands',
+        '--system-prompt',
+        CLAUDE_SYSTEM_PROMPT,
+        ...(cfg.model ? ['--model', cfg.model] : [])
+      ]
+      let streamed = false
+      let final = ''
+      let failure: string | null = null
+      for await (const line of runCliLines(file, args, 'Claude CLI', {
+        input: flattenChatRequest(req),
+        signal: req.signal,
+        cwd: scratchCwd()
+      })) {
+        const ev = parseClaudeLine(line)
+        if (!ev) continue
+        if (ev.error) failure ??= ev.error
+        else if (ev.delta) {
+          streamed = true
+          yield ev.delta
+        } else if (ev.final) final = ev.final
+      }
+      if (failure) throw new Error(`Claude: ${failure}`)
+      if (streamed) return
+      if (!final) throw new Error('Claude CLI returned no answer.')
+      yield final
+    },
+    // `claude auth status` is instant and free; a real chat round-trip bills the
+    // user's plan. It reports sign-in as JSON, so trust that over the exit code.
+    async probe(signal?: AbortSignal): Promise<void> {
+      const file = resolve()
+      const { code, stdout } = await runCli(file, ['auth', 'status', '--json'], { signal })
+      let loggedIn = code === 0
+      try {
+        const status = JSON.parse(stdout) as { loggedIn?: boolean }
+        if (typeof status.loggedIn === 'boolean') loggedIn = status.loggedIn
+      } catch {
+        /* keep the exit-code verdict */
+      }
+      if (!loggedIn)
+        throw new Error(
+          'Claude Code isn\'t signed in — run "claude auth login" in a terminal, then try again.'
+        )
     }
   }
 }

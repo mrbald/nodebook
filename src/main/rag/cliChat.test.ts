@@ -2,7 +2,15 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { codexCliChat, genericCliChat, flattenChatRequest, parseCodexEvents, resolveCommand } from './cliChat'
+import {
+  claudeCliChat,
+  codexCliChat,
+  genericCliChat,
+  flattenChatRequest,
+  parseClaudeLine,
+  parseCodexEvents,
+  resolveCommand
+} from './cliChat'
 import type { ChatRequest } from './provider'
 
 const collect = async (stream: AsyncIterable<string>): Promise<string> => {
@@ -81,6 +89,54 @@ describe('parseCodexEvents', () => {
 
   it('returns empties for empty output', () => {
     expect(parseCodexEvents('')).toEqual({ text: '', error: null })
+  })
+})
+
+// Real lines from `claude -p --output-format stream-json --include-partial-messages`
+// (claude-code 2.1.233), answering "Reply with exactly: hello from claude".
+const CLAUDE_TRANSCRIPT = [
+  '{"type":"system","subtype":"init","cwd":"/tmp/empty","session_id":"46d82be3","tools":[],"mcp_servers":[],"model":"claude-opus-5","permissionMode":"default"}',
+  '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"session_id":"46d82be3","uuid":"b6b0cae1"}',
+  '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"h"}},"session_id":"46d82be3","uuid":"e6efd69f"}',
+  '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ello from claude"}},"session_id":"46d82be3","uuid":"602eef09"}',
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello from claude"}]},"session_id":"46d82be3"}',
+  '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"session_id":"46d82be3","uuid":"f2d5bbc4"}',
+  '{"type":"stream_event","event":{"type":"message_stop"},"session_id":"46d82be3","uuid":"85ee405f"}',
+  '{"type":"result","subtype":"success","is_error":false,"result":"hello from claude","session_id":"46d82be3","num_turns":1}'
+]
+
+describe('parseClaudeLine', () => {
+  it('pulls the text deltas out of a real transcript and nothing else', () => {
+    const deltas = CLAUDE_TRANSCRIPT.map(parseClaudeLine)
+      .filter((e) => e?.delta)
+      .map((e) => e!.delta)
+    expect(deltas).toEqual(['h', 'ello from claude'])
+  })
+
+  it('ignores the assistant event, which repeats what the deltas already carried', () => {
+    const assistant = CLAUDE_TRANSCRIPT.find((l) => l.includes('"type":"assistant"'))!
+    expect(parseClaudeLine(assistant)).toBeNull()
+  })
+
+  it('reads the whole answer off the final result event', () => {
+    expect(parseClaudeLine(CLAUDE_TRANSCRIPT[CLAUDE_TRANSCRIPT.length - 1])).toEqual({
+      final: 'hello from claude'
+    })
+  })
+
+  it('surfaces an errored result, preferring its message over the subtype', () => {
+    expect(parseClaudeLine('{"type":"result","is_error":true,"result":"limit reached"}')).toEqual({
+      error: 'limit reached'
+    })
+    expect(parseClaudeLine('{"type":"result","is_error":true,"subtype":"error_max_turns"}')).toEqual({
+      error: 'error_max_turns'
+    })
+    expect(parseClaudeLine('{"type":"result","is_error":true}')).toEqual({ error: 'the run failed' })
+  })
+
+  it('skips blank and unparseable lines', () => {
+    expect(parseClaudeLine('')).toBeNull()
+    expect(parseClaudeLine('not json at all')).toBeNull()
   })
 })
 
@@ -227,6 +283,93 @@ describe.skipIf(process.platform === 'win32')('codexCliChat (fake codex script)'
     const model = codexCliChat({ kind: 'codex-cli', command: 'no-such-codex-xyz' })
     await expect(collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).rejects.toThrow(
       /Codex CLI not found/
+    )
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('claudeCliChat (fake claude script)', () => {
+  let dir: string
+  const script = (name: string, body: string): string => {
+    const path = join(dir, name)
+    writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+    return path
+  }
+  let ok: string
+  let echo: string
+  let loggedOut: string
+  let noDeltas: string
+  let hangs: string
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'nodebook-claudechat-'))
+    // `auth status` and the chat call share one binary, so the fakes branch on it.
+    const auth = (json: string): string => `if [ "$1" = "auth" ]; then echo '${json}'; exit 0; fi`
+    ok = script(
+      'claude-ok',
+      [auth('{"loggedIn":true,"authMethod":"claude.ai"}'), 'cat > /dev/null', "cat <<'EOF'", ...CLAUDE_TRANSCRIPT, 'EOF'].join('\n')
+    )
+    echo = script(
+      'claude-echo',
+      [
+        'IN=$(cat)',
+        `printf '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"%s"}}}\\n' "$IN"`
+      ].join('\n')
+    )
+    loggedOut = script('claude-out', auth('{"loggedIn":false}'))
+    noDeltas = script(
+      'claude-nodeltas',
+      ['cat > /dev/null', `echo '{"type":"result","subtype":"success","is_error":false,"result":"whole answer"}'`].join('\n')
+    )
+    // Backgrounds a sleep that inherits stdout, so killing the shell leaves a
+    // grandchild holding the pipe open — what a real shell wrapper does, and
+    // what stalled the reader past the abort until runCliLines dropped its own
+    // end of the pipe. Without that, this hangs for the full 10s.
+    hangs = script('claude-hangs', 'cat > /dev/null\nsleep 10 &\nsleep 10')
+  })
+
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('streams the answer as separate chunks, not one blob', async () => {
+    const model = claudeCliChat({ kind: 'claude-cli', command: ok })
+    const chunks: string[] = []
+    for await (const tok of model.chat({ messages: [{ role: 'user', content: 'ping' }] })) chunks.push(tok)
+    expect(chunks).toEqual(['h', 'ello from claude'])
+  })
+
+  it('feeds the flattened prompt to stdin', async () => {
+    const model = claudeCliChat({ kind: 'claude-cli', command: echo })
+    const out = await collect(model.chat({ messages: [{ role: 'user', content: 'ping' }] }))
+    expect(out).toBe('ping')
+  })
+
+  it('falls back to the result event when the CLI emits no partial messages', async () => {
+    const model = claudeCliChat({ kind: 'claude-cli', command: noDeltas })
+    expect(await collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).toBe('whole answer')
+  })
+
+  it('probe trusts the reported sign-in state over the exit code', async () => {
+    await expect(claudeCliChat({ kind: 'claude-cli', command: ok }).probe!()).resolves.toBeUndefined()
+    // `auth status` exits 0 here; only the JSON says the user is signed out.
+    await expect(claudeCliChat({ kind: 'claude-cli', command: loggedOut }).probe!()).rejects.toThrow(
+      /claude auth login/
+    )
+  })
+
+  it('kills the child on abort', async () => {
+    const model = claudeCliChat({ kind: 'claude-cli', command: hangs })
+    const ctrl = new AbortController()
+    setTimeout(() => ctrl.abort(), 50)
+    const started = Date.now()
+    await expect(
+      collect(model.chat({ messages: [{ role: 'user', content: 'x' }], signal: ctrl.signal }))
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(Date.now() - started).toBeLessThan(5000)
+  })
+
+  it('reports a missing binary with an install hint', async () => {
+    const model = claudeCliChat({ kind: 'claude-cli', command: 'no-such-claude-xyz' })
+    await expect(collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).rejects.toThrow(
+      /Claude Code CLI not found/
     )
   })
 })

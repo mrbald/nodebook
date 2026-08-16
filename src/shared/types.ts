@@ -209,10 +209,10 @@ export interface Settings {
     chat: {
       /** 'none' = search-only; 'ollama' = a local Ollama server (zero-config);
        *  'openai-compat' = any OpenAI-style endpoint (set baseUrl); 'anthropic' = Claude;
-       *  'codex-cli' = the user's installed OpenAI Codex CLI under their ChatGPT
-       *  sign-in (no API key); 'cli' = advanced — any user command that reads
-       *  the prompt on stdin and prints the answer. */
-      provider: 'none' | 'anthropic' | 'openai-compat' | 'ollama' | 'codex-cli' | 'cli'
+       *  'codex-cli' / 'claude-cli' = the user's installed OpenAI Codex or Claude
+       *  Code CLI under their own sign-in (no API key); 'cli' = advanced — any
+       *  user command that reads the prompt on stdin and prints the answer. */
+      provider: 'none' | 'anthropic' | 'openai-compat' | 'ollama' | 'codex-cli' | 'claude-cli' | 'cli'
       /** Chat model id (e.g. claude-sonnet-4-6, llama3.2, or an OpenAI-compat name).
        *  Empty = the provider's own default. */
       model: string
