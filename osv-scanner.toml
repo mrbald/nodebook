@@ -1,10 +1,7 @@
 # Vulnerability ignores for the osv-scanner job (security.yml).
 # Each entry needs a reason and should be re-checked when the dep tree moves.
-
-[[IgnoredVulns]]
-id = "GHSA-mh99-v99m-4gvg"
-# brace-expansion OOM DoS. Fixed only in 5.0.8+; the vulnerable 1.x/2.x copies
-# sit under minimatch@3 pinned deep in electron-builder's tree (build tooling,
-# never shipped), and forcing 5.x there breaks minimatch@3's CJS require().
-# Drop this when electron-builder's chain moves off brace-expansion <5.0.8.
-reason = "dev-only (electron-builder tree); no compatible fix upstream"
+#
+# Currently empty: the one entry we carried (GHSA-mh99-v99m-4gvg, brace-expansion
+# OOM DoS under electron-builder's minimatch@3) was reported by the scanner as an
+# unused ignore once the dep tree moved, so it was dropped rather than left as
+# stale config that reads like a live exception.
