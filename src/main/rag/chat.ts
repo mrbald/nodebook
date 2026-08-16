@@ -1,5 +1,5 @@
 import type { ChatModel, ChatRequest, ProviderConfig } from './provider'
-import { codexCliChat, genericCliChat } from './cliChat'
+import { claudeCliChat, codexCliChat, genericCliChat } from './cliChat'
 
 /**
  * Chat adapters for "Ask" — each turns a grounded request into a token stream.
@@ -159,6 +159,7 @@ export function makeChatModel(cfg: ProviderConfig): ChatModel {
   if (cfg.kind === 'ollama')
     return openaiCompatChat({ ...cfg, baseUrl: cfg.baseUrl ?? OLLAMA_DEFAULT_URL })
   if (cfg.kind === 'codex-cli') return codexCliChat(cfg)
+  if (cfg.kind === 'claude-cli') return claudeCliChat(cfg)
   if (cfg.kind === 'cli') return genericCliChat(cfg)
   throw new Error(`Unsupported chat provider: ${cfg.kind}`)
 }

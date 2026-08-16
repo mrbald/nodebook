@@ -50,11 +50,11 @@ export interface ChatModel {
  * server at its default URL, no key. (`'local'` is reserved for a future
  * in-process model — not the same thing as talking to a local server.)
  *
- * `'codex-cli'` runs the user's own installed OpenAI Codex CLI (`codex exec`)
- * under their ChatGPT sign-in — no API key. `'cli'` is the generic escape
- * hatch: any user-supplied command that reads a prompt on stdin and prints the
- * answer on stdout (see docs/cli-providers.md, including why Claude Code is
- * reached this way rather than as a named preset).
+ * `'codex-cli'` and `'claude-cli'` run the user's own installed CLI — OpenAI
+ * Codex under their ChatGPT sign-in, Anthropic's Claude Code under their Claude
+ * sign-in — with no API key. `'cli'` is the generic escape hatch: any
+ * user-supplied command that reads a prompt on stdin and prints the answer on
+ * stdout (see docs/cli-providers.md).
  */
 export type ProviderKind =
   | 'local'
@@ -62,6 +62,7 @@ export type ProviderKind =
   | 'openai-compat'
   | 'anthropic'
   | 'codex-cli'
+  | 'claude-cli'
   | 'cli'
   | 'mcp'
 
@@ -72,9 +73,10 @@ export interface ProviderConfig {
   /** OpenAI-compatible endpoints (OpenAI, Ollama, LM Studio, gateways, …). */
   baseUrl?: string
   apiKey?: string
-  /** CLI backends: the executable ('codex-cli' defaults to `codex`; required
-   *  for 'cli'). A bare name is resolved against PATH plus the usual install
-   *  dirs — GUI-launched Electron does not inherit the shell PATH. */
+  /** CLI backends: the executable ('codex-cli' defaults to `codex`, 'claude-cli'
+   *  to `claude`; required for 'cli'). A bare name is resolved against PATH plus
+   *  the usual install dirs — GUI-launched Electron does not inherit the shell
+   *  PATH. */
   command?: string
   /** 'cli' only: arguments placed before the stdin-fed prompt. */
   args?: string[]

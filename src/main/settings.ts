@@ -35,7 +35,15 @@ export const DEFAULTS: Settings = {
 
 const MODES = ['code', 'live', 'reading'] as const
 const RUNTIMES = ['wasm', 'native'] as const
-const CHAT_PROVIDERS = ['none', 'anthropic', 'openai-compat', 'ollama', 'codex-cli', 'cli'] as const
+const CHAT_PROVIDERS = [
+  'none',
+  'anthropic',
+  'openai-compat',
+  'ollama',
+  'codex-cli',
+  'claude-cli',
+  'cli'
+] as const
 
 export const DEFAULT_TOML = `# Nodebook settings — every option with its default. Edit and save; changes
 # apply live (⌘S to save now). "Reveal defaults" shows this reference next to
@@ -100,11 +108,14 @@ threads = 0
 # a remote/gateway.
 # "codex-cli" = your ChatGPT plan via the Codex CLI — install it, run
 # "codex login", no API key needed; uses your plan's own usage limits.
+# "claude-cli" = your Claude plan via the Claude Code CLI — install it, run
+# "claude auth login", no API key needed; uses your plan's own usage limits.
 # "cli" (advanced) = any command that reads the question on stdin and prints
 # the answer on stdout.
 provider = "none"
 # Chat model id. Empty = the provider's own default (Claude Sonnet for
-# "anthropic"; your own Codex default for "codex-cli"). "ollama" and
+# "anthropic"; your own CLI default for "codex-cli" and "claude-cli" — the
+# latter also takes an alias like "opus" or "sonnet"). "ollama" and
 # "openai-compat" need one set explicitly, e.g. llama3.2.
 model = ""
 # Base URL for "openai-compat". Optional for "ollama" (defaults to the local
@@ -114,8 +125,8 @@ baseUrl = ""
 # You may instead set it here, but it is stored in plain text — env is safer.
 # apiKey = ""
 # CLI providers only: the program to run. Empty resolves the default name
-# ("codex" for "codex-cli") against PATH plus the usual install dirs — set a
-# full path here if it's not found.
+# ("codex" for "codex-cli", "claude" for "claude-cli") against PATH plus the
+# usual install dirs — set a full path here if it's not found.
 command = ""
 # "cli" provider only: arguments placed before the prompt (which is written to
 # the command's stdin), e.g. args = ["-p"].
@@ -334,8 +345,11 @@ export function chatProviderConfig(): ProviderConfig | null {
       ? process.env.ANTHROPIC_API_KEY
       : process.env.OPENAI_API_KEY
   // API keys are only meaningful for HTTP providers — CLI backends authenticate
-  // via the CLI's own sign-in (codex login, etc.), never a key.
-  const isCli = s.talk.chat.provider === 'codex-cli' || s.talk.chat.provider === 'cli'
+  // via the CLI's own sign-in (codex login, claude auth login), never a key.
+  const isCli =
+    s.talk.chat.provider === 'codex-cli' ||
+    s.talk.chat.provider === 'claude-cli' ||
+    s.talk.chat.provider === 'cli'
   return {
     kind: s.talk.chat.provider,
     model: s.talk.chat.model,

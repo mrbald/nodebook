@@ -165,8 +165,9 @@ describe('parseSettings', () => {
     expect(s.talk.chat.model).toBe('llama3.2')
   })
 
-  it('accepts the "codex-cli" and "cli" providers', () => {
+  it('accepts the "codex-cli", "claude-cli" and "cli" providers', () => {
     expect(parseSettings('[talk.chat]\nprovider = "codex-cli"').talk.chat.provider).toBe('codex-cli')
+    expect(parseSettings('[talk.chat]\nprovider = "claude-cli"').talk.chat.provider).toBe('claude-cli')
     expect(parseSettings('[talk.chat]\nprovider = "cli"').talk.chat.provider).toBe('cli')
   })
 
