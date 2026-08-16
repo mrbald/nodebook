@@ -15,8 +15,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # postinstall runs `electron-builder install-app-deps`, rebuilding
-      # better-sqlite3 against the Electron ABI used by the e2e app.
+      # postinstall runs `electron-builder install-app-deps`. Since better-sqlite3
+      # 13 it rebuilds nothing — that module ships Node-API prebuilds, so one
+      # binary serves both Node and Electron. Kept as the guard that would build
+      # a future native dep against the Electron ABI the e2e app runs on.
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
