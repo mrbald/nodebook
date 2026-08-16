@@ -199,7 +199,13 @@ async function* runCliLines(
   if (opts.signal?.aborted) throw abortError()
   const shell = /\.(cmd|bat)$/i.test(file)
   const child = spawn(file, args, { cwd: opts.cwd, env: process.env, shell })
-  const onAbort = (): void => void child.kill('SIGTERM')
+  const onAbort = (): void => {
+    child.kill('SIGTERM')
+    // Killing the child does not reap a grandchild that inherited this pipe (a
+    // shell wrapper leaves one behind), and the iteration below would wait for
+    // *every* writer to let go. Drop our end instead of stalling past the abort.
+    child.stdout.destroy()
+  }
   opts.signal?.addEventListener('abort', onAbort, { once: true })
   let stderr = ''
   child.stderr.setEncoding('utf8')
@@ -210,24 +216,35 @@ async function* runCliLines(
     child.on('error', reject)
     child.on('close', (code) => resolve(code))
   })
+  // An abort returns before `closed` is awaited; mark it handled so a spawn
+  // error on the way out is not an unhandled rejection.
+  void closed.catch(() => {})
   child.stdin.on('error', () => {})
   child.stdin.end(opts.input ?? '')
   try {
     child.stdout.setEncoding('utf8')
     let buf = ''
-    for await (const chunk of child.stdout as AsyncIterable<string>) {
-      buf += chunk
-      let nl: number
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl)
-        buf = buf.slice(nl + 1)
-        if (line.trim()) yield line
+    try {
+      for await (const chunk of child.stdout as AsyncIterable<string>) {
+        buf += chunk
+        let nl: number
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl)
+          buf = buf.slice(nl + 1)
+          if (line.trim()) yield line
+        }
       }
+      if (buf.trim()) yield buf
+    } catch (err) {
+      // Destroying stdout on abort surfaces here as a premature close; the
+      // abort is the real story.
+      if (opts.signal?.aborted) throw abortError()
+      throw err
     }
-    if (buf.trim()) yield buf
-    const code = await closed
-    // A killed child exits non-zero; report the abort, not a bogus exit code.
+    // Report the abort before waiting on the exit code: a killed child exits
+    // non-zero, and `close` may lag behind a grandchild that outlived it.
     if (opts.signal?.aborted) throw abortError()
+    const code = await closed
     if (code !== 0)
       throw new Error(`${label} failed (exit ${code}): ${tail(stderr) || 'no error output'}`)
   } finally {

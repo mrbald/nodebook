@@ -320,7 +320,11 @@ describe.skipIf(process.platform === 'win32')('claudeCliChat (fake claude script
       'claude-nodeltas',
       ['cat > /dev/null', `echo '{"type":"result","subtype":"success","is_error":false,"result":"whole answer"}'`].join('\n')
     )
-    hangs = script('claude-hangs', 'cat > /dev/null\nsleep 10')
+    // Backgrounds a sleep that inherits stdout, so killing the shell leaves a
+    // grandchild holding the pipe open — what a real shell wrapper does, and
+    // what stalled the reader past the abort until runCliLines dropped its own
+    // end of the pipe. Without that, this hangs for the full 10s.
+    hangs = script('claude-hangs', 'cat > /dev/null\nsleep 10 &\nsleep 10')
   })
 
   afterAll(() => rmSync(dir, { recursive: true, force: true }))
