@@ -50,16 +50,22 @@ store) index in the main process.
 
 ## Prerequisites
 
-- **Node.js 20.19+ or 22.12+** and npm.
-- A C/C++ toolchain — `better-sqlite3` is a native module compiled during install.
-  - macOS: Xcode Command Line Tools (`xcode-select --install`).
-  - Linux: `build-essential` (gcc/g++, make) and Python 3.
-  - Windows: the "Desktop development with C++" workload (Visual Studio Build Tools).
+- **Node.js 22.13+ or 24+** and npm. Node 20 is no longer enough:
+  `better-sqlite3` needs 22 and `pdfjs-dist` needs 22.13.
+- **No compiler needed.** The native pieces — `better-sqlite3` (the index) and
+  `sqlite-vec` (the vector layer) — ship prebuilt binaries for macOS, Linux and
+  Windows on x64 and arm64. `better-sqlite3` is a Node-API addon, so the same
+  binary works under both Node and Electron with no rebuild step.
+  - Anywhere else (a 32-bit ARM board, FreeBSD, …) there is no prebuilt binary
+    and nothing compiles one for you, so you have to build `better-sqlite3`
+    from source yourself. That needs a C/C++ toolchain: Xcode Command Line
+    Tools (`xcode-select --install`) on macOS, `build-essential` and Python 3
+    on Linux, or the "Desktop development with C++" workload on Windows.
 
 ## Quick start
 
 ```bash
-npm install      # installs deps and rebuilds better-sqlite3 for Electron
+npm install      # installs deps; native modules arrive prebuilt, nothing compiles
 npm run dev      # launches the app with hot reload
 ```
 
