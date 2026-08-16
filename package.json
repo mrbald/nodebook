@@ -40,7 +40,7 @@
     "@huggingface/transformers": "^4.2.0",
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "^1.7.2",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.2",
     "chokidar": "^5.0.0",
     "fflate": "^0.8.3",
     "mammoth": "^1.12.0",
