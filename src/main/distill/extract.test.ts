@@ -213,6 +213,15 @@ describe('parseExtraction', () => {
     expect(parseExtraction('{"notitems":1}').ok).toBe(false)
   })
 
+  it('mends an unescaped quote inside a string instead of failing the window', () => {
+    // The one slip a model makes routinely: code with double-quoted literals
+    // written into a JSON string as-is (4 of 171 windows of a real book).
+    const raw = '{"items":[{"title":"groupby","kind":"concept","summary":"tips.groupby(["day", "smoker"]) groups by two keys","evidence":[{"chunkId":1,"quote":"q"}],"links":[]}]}'
+    const r = parseExtraction(raw)
+    expect(r.ok).toBe(true)
+    expect(r.items[0].summary).toBe('tips.groupby(["day", "smoker"]) groups by two keys')
+  })
+
   it('drops malformed items but keeps the well-formed ones', () => {
     const r = parseExtraction('{"items":[{"summary":"no title"},{"title":"Keep","evidence":[{"chunkId":"7","quote":"q"}]}]}')
     expect(r.ok).toBe(true)

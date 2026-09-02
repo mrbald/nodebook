@@ -144,6 +144,14 @@ describe('parseThemeNames', () => {
   })
 })
 
+describe('parseThemeNames leniency', () => {
+  it('mends an unescaped quote inside a name', () => {
+    const r = parseThemeNames('{"themes":[{"index":0,"name":"the "apply" family"}]}', 1)
+    expect(r.ok).toBe(true)
+    expect(r.names[0]).toBe('the "apply" family')
+  })
+})
+
 describe('themeNameOf', () => {
   const titles = ['Faction', 'Union', 'Liberty']
   const cluster = { members: [0, 1, 2], medoid: 1 }

@@ -22,6 +22,7 @@
  */
 
 import { kmeans, type Point } from './cluster'
+import { parseLenientObject } from './lenientJson'
 
 /** Below this many notes a run is not themed: three themes over five notes is
  *  filing, not grouping, and the map reads better flat. */
@@ -141,7 +142,7 @@ export function themeNamingPrompt(clusters: { members: ThemeMember[] }[]): {
 /**
  * Parse the naming reply into one name per group. Tolerant in the same way as
  * `parseExtraction`: the outermost `{...}` is taken, prose and code fences
- * around it are ignored, and an entry with no usable `index` falls back to its
+ * around it are ignored, a stray quote inside a name is mended, and an entry with no usable `index` falls back to its
  * position in the array. A group the model skipped stays `null` — the caller
  * names it from its medoid (`themeNameOf`). `ok` is false only when there was
  * no parseable object at all, which is what earns a repair retry.
@@ -151,15 +152,8 @@ export function parseThemeNames(
   count: number
 ): { ok: boolean; names: (string | null)[] } {
   const names = new Array<string | null>(count).fill(null)
-  const start = raw.indexOf('{')
-  const end = raw.lastIndexOf('}')
-  if (start < 0 || end <= start) return { ok: false, names }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1))
-  } catch {
-    return { ok: false, names }
-  }
+  const parsed = parseLenientObject(raw)
+  if (parsed === undefined) return { ok: false, names }
   const list = (parsed as { themes?: unknown } | null)?.themes
   if (!Array.isArray(list)) return { ok: false, names }
   list.forEach((entry, pos) => {
@@ -186,3 +180,4 @@ export function themeNameOf(
   if (named) return named
   return titles[cluster.medoid] ?? titles[cluster.members[0]] ?? 'theme'
 }
+

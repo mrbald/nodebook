@@ -11,6 +11,8 @@
  * busywork instead of knowledge.
  */
 
+import { parseLenientObject } from './lenientJson'
+
 export type ItemKind = 'concept' | 'claim' | 'entity'
 
 export interface Evidence {
@@ -227,20 +229,15 @@ function coerceItem(raw: unknown): ExtractedItem | null {
 
 /**
  * Parse the model's reply into items. Tolerant of ```json fences and surrounding
- * prose: we take the outermost {...}. `ok` is false when there is no parseable
- * JSON object at all — the caller can then retry once with a repair prompt.
- * `ok` true with items=[] means valid JSON that carried nothing usable.
+ * prose (the outermost {...} is taken) and of the one slip a model makes
+ * routinely — a quote inside a string it forgot to escape (`lenientJson.ts`).
+ * `ok` is false when there is no parseable JSON object even so — the caller can
+ * then retry once with a repair prompt. `ok` true with items=[] means valid JSON
+ * that carried nothing usable.
  */
 export function parseExtraction(raw: string): { ok: boolean; items: ExtractedItem[] } {
-  const start = raw.indexOf('{')
-  const end = raw.lastIndexOf('}')
-  if (start < 0 || end <= start) return { ok: false, items: [] }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1))
-  } catch {
-    return { ok: false, items: [] }
-  }
+  const parsed = parseLenientObject(raw)
+  if (parsed === undefined) return { ok: false, items: [] }
   const rawItems = (parsed as { items?: unknown } | null)?.items
   if (!Array.isArray(rawItems)) return { ok: false, items: [] }
   const items: ExtractedItem[] = []
