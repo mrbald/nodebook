@@ -206,10 +206,14 @@ first.
   vault and the run *together* (a preview — still nothing written).
 - **Runs are kept** — every distilled run appears under **Distilled runs** in the
   sidebar until you discard it, so closing the map loses nothing. Click a run to
-  reopen its map; **✕** discards it.
+  reopen its map; **✕** discards it. A run that hasn't been merged yet lives only in
+  the vault's `.nodebook/distill/` folder, so deleting that folder loses it.
+- **Cancel any time** — the **Cancel** button on the progress toast stops a run;
+  nothing is staged. Only one document can be distilled at a time.
 - **Merge when happy** — **⤓ Merge** copies the run's notes into your vault under a
   `Distilled/…` folder. It's reversible: **Undo** in the banner removes exactly what
-  was written.
+  was written. Any merged note you edited afterwards is moved to the **Trash**
+  instead of being deleted, so your edits are always recoverable.
 - **Click a citation** — a distilled note lists its **Sources** in the right-hand
   panel; clicking one opens the original document at the quoted passage.
 - **Sampling** — very long documents are read *representatively*, not line by line;

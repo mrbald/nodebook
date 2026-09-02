@@ -117,11 +117,16 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
 /** Deterministic, network-free chat for e2e. For "Ask" it echoes a short grounded
  *  answer with an inline `[[wikilink]]` citation; for a distill extraction prompt
  *  it returns valid JSON quoting the first chunk shown, so the whole distill
- *  vertical is testable without a key or network. */
+ *  vertical is testable without a key or network.
+ *
+ *  `NODEBOOK_E2E_CHAT_DELAY_MS` stalls each reply, so a spec can catch a run
+ *  mid-flight (e.g. to click Cancel) instead of racing an instant answer. */
 function stubChat(): ChatModel {
   return {
     id: 'stub',
     async *chat(req: ChatRequest): AsyncIterable<string> {
+      const delayMs = Number(process.env.NODEBOOK_E2E_CHAT_DELAY_MS ?? 0)
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
       if ((req.system ?? '').includes('extract structured knowledge')) {
         const user = req.messages.map((m) => m.content).join('\n')
         const m = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)

@@ -1,11 +1,13 @@
 import type {
   AskResult,
   Backlink,
+  DistillDocument,
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
   DistillRunInfo,
   DistillRunResult,
+  DistillUnmergeResult,
   GraphData,
   MenuState,
   Outbound,
@@ -63,8 +65,9 @@ export interface NodebookApi {
   onVaultChanged: (cb: () => void) => () => void
   onIndexChanged: (cb: () => void) => () => void
   onFileChanged: (cb: (path: string) => void) => () => void
-  distillPick: () => Promise<string | null>
-  distillRun: (filePath: string) => Promise<DistillRunResult>
+  distillPick: () => Promise<DistillDocument | null>
+  distillRegisterPath: (absPath: string) => Promise<string>
+  distillRun: (docId: string) => Promise<DistillRunResult>
   distillCancel: (runId: string) => Promise<void>
   distillGraph: (
     runId: string,
@@ -79,7 +82,7 @@ export interface NodebookApi {
   distillListRuns: () => Promise<DistillRunInfo[]>
   distillRemove: (runId: string) => Promise<void>
   distillMerge: (runId: string) => Promise<DistillMergeResult>
-  distillUnmerge: (runId: string) => Promise<boolean>
+  distillUnmerge: (runId: string) => Promise<DistillUnmergeResult>
   distillMergeStatus: (runId: string) => Promise<DistillMergeStatus>
   onDistillProgress: (cb: (runId: string, p: DistillProgress) => void) => () => void
   onDistillEmbedRequest: (handler: (texts: string[]) => Promise<number[][]>) => () => void

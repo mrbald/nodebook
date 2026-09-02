@@ -126,9 +126,20 @@ export function renderNote(note: GroundedNote, name = noteName(note.title)): str
  * Render a run's notes, assigning each a unique filename. Names should already
  * be unique after dedup; the numeric suffix is a backstop so two notes can never
  * clobber the same file on disk.
+ *
+ * `reserved` names are taken before the first note is placed — the run writes
+ * the source book as a note of its own (`artifact.sourceNoteName`), and an
+ * extracted concept titled like the book would otherwise overwrite it, taking
+ * the book's text out of the run and pointing every `source::` edge at a
+ * concept. De-collision is case-insensitive, matching the collision it guards
+ * against on case-insensitive filesystems.
  */
-export function emitNotes(notes: GroundedNote[]): EmittedNote[] {
+export function emitNotes(
+  notes: GroundedNote[],
+  opts: { reserved?: string[] } = {}
+): EmittedNote[] {
   const used = new Map<string, number>()
+  for (const r of opts.reserved ?? []) used.set(noteName(r).toLowerCase(), 1)
   return notes.map((note) => {
     const base = noteName(note.title)
     const seen = used.get(base.toLowerCase()) ?? 0
