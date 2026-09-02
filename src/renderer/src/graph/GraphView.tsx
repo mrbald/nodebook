@@ -426,6 +426,8 @@ export function GraphView({
   }
 
   const byFolder = colorMode === 'folder'
+  // The diamond only earns a line in the key when there is one on the map.
+  const hasThemes = (visible?.nodes ?? []).some((n) => n.kind === 'theme')
   const legend: [string, string][] = byFolder ? [...folderColors.entries()] : [...colors.entries()]
   const hidden = byFolder ? hiddenFolders : hiddenRels
   const setHidden = byFolder ? setHiddenFolders : setHiddenRels
@@ -505,6 +507,9 @@ export function GraphView({
                 const r = radius(node.id)
                 const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}${node.id === selectedId ? ' is-selected' : ''}${pinned.has(node.id) ? ' is-pinned' : ''}`
                 const fill = nodeFill(node)
+                // A theme is a group of notes, not a note — drawn as a diamond
+                // so the map's structure reads without clicking anything.
+                const side = r * 1.5
                 return (
                   <g
                     key={node.id}
@@ -516,7 +521,18 @@ export function GraphView({
                       if (!node.focus) setHiddenNodes((s) => new Set(s).add(node.id))
                     }}
                   >
-                    <circle r={r} style={fill ? { fill } : undefined} />
+                    {node.kind === 'theme' ? (
+                      <rect
+                        x={-side / 2}
+                        y={-side / 2}
+                        width={side}
+                        height={side}
+                        transform="rotate(45)"
+                        style={fill ? { fill } : undefined}
+                      />
+                    ) : (
+                      <circle r={r} style={fill ? { fill } : undefined} />
+                    )}
                     <text y={r + 13}>{node.label}</text>
                   </g>
                 )
@@ -782,6 +798,12 @@ export function GraphView({
               <div className="graph-insp-note" title="Two notes share a name, so the map had to pick one — it prefers a note in the same folder as the link.">
                 {base!.ambiguousTargets} {base!.ambiguousTargets === 1 ? 'link' : 'links'} could
                 point to more than one note
+              </div>
+            )}
+            {hasThemes && (
+              <div className="graph-insp-note graph-shape-key">
+                <span className="graph-shape-theme" aria-hidden="true" />
+                theme — a group of notes
               </div>
             )}
             {legend.length > 1 && (

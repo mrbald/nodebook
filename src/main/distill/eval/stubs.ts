@@ -14,7 +14,8 @@
  * `[chunk N — heading]` prompt `buildExtractionPrompt` (`../extract.ts`)
  * produces and returns valid `parseExtraction` JSON built only from words
  * that are actually in the chunk — so grounding never drops a stubbed item
- * for inventing a quote.
+ * for inventing a quote. It answers the theme-naming prompt (`../themes.ts`)
+ * the same way: from the prompt's own `[theme N]` blocks.
  */
 
 import type { ItemKind } from '../extract'
@@ -214,6 +215,32 @@ function extractionReply(prompt: string): string {
   return JSON.stringify({ items })
 }
 
+// --- theme naming ---------------------------------------------------------
+
+/** Answer the theme-naming prompt (`../themes.ts`) from its own `[theme N]`
+ *  blocks: each group is named after the first words of its first and last
+ *  member. Deterministic, in whatever language the notes are in, and — unlike
+ *  copying one member's title outright — not a near-duplicate of a note name,
+ *  which would show up in the eval's `duplicateTitleRate` as a fault of the
+ *  stub rather than of the pipeline. A real model writes a real name. */
+function namingReply(prompt: string): string {
+  const themes = prompt
+    .split(/\[theme \d+\]\n/)
+    .slice(1)
+    .map((block, index) => {
+      const titles = block
+        .split('\n')
+        .filter((l) => l.startsWith('- '))
+        .map((l) => l.slice(2).trim())
+        .filter(Boolean)
+      const words = [titles[0], titles[titles.length - 1]]
+        .filter(Boolean)
+        .map((t) => t.split(/\s+/)[0])
+      return { index, name: [...new Set(words)].join(' ') || `theme ${index + 1}` }
+    })
+  return JSON.stringify({ themes })
+}
+
 /** A `ChatModel` that answers a distill extraction call deterministically
  *  from the prompt's own `[chunk N — heading]` text — see the module header.
  *  Reads only `messages[0]` (the original user prompt): a repair retry
@@ -230,7 +257,9 @@ export function heuristicChat(): ChatModel {
     id: 'heuristic-stub',
     async *chat(req: ChatRequest): AsyncIterable<string> {
       const prompt = req.messages[0]?.content ?? ''
-      yield extractionReply(prompt)
+      yield (req.system ?? '').includes('name groups of related notes')
+        ? namingReply(prompt)
+        : extractionReply(prompt)
     }
   }
 }
