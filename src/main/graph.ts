@@ -273,6 +273,23 @@ export function buildGraph(
   const hiddenSources = showSources ? 0 : hubs.size
   if (!showSources && hubs.size > 0) {
     allEdges = allEdges.filter((e) => !hubs.has(e.subject) && !hubs.has(e.object))
+  } else if (hubs.size > 0) {
+    // Shown, the hub still need not be a star. Once a run has themes, every
+    // note already hangs under a theme (`part_of::`) and every theme links to
+    // the book — so the note → book edges say nothing the map does not already
+    // show, and the book keeps only its theme edges: the root of book → themes
+    // → notes, a dozen edges instead of one per note. Each note's own
+    // `source::` line stays in the note; only the drawing changes. A hub with
+    // no theme edges (a run too small to be themed) keeps its star.
+    const themed = new Set<string>()
+    for (const e of allEdges)
+      if (e.relation === 'source' && hubs.has(e.object) && kindOf.get(e.subject) === 'theme')
+        themed.add(e.object)
+    if (themed.size > 0) {
+      allEdges = allEdges.filter(
+        (e) => e.relation !== 'source' || !themed.has(e.object) || kindOf.get(e.subject) === 'theme'
+      )
+    }
   }
 
   let nodeIds: Set<string>

@@ -128,7 +128,14 @@ test('the run map wires distilled notes to the source book', async () => {
   expect(g.nodes.length).toBeGreaterThan(1)
   // Nodes are keyed by path, labelled by name — the book is a node of its own.
   expect(g.nodes.some((n) => n.label === 'on-government')).toBe(true)
-  expect(g.edges.some((e) => e.relation === 'source')).toBe(true) // notes cite it
+  // With themes, the book is reached through them: its `source` edges come from
+  // theme nodes only, so it is the root of book → themes → notes, not a star.
+  // (Each note keeps its own `source::` line; only the drawing changes.)
+  const src = g.edges.filter((e) => e.relation === 'source')
+  expect(src.length).toBeGreaterThan(0)
+  const themeIds = new Set(g.nodes.filter((n) => n.kind === 'theme').map((n) => n.id))
+  expect(themeIds.size).toBeGreaterThan(0)
+  for (const e of src) expect(themeIds).toContain(e.source)
 })
 
 test('FIREWALL: distilled notes never enter the canonical index', async () => {
