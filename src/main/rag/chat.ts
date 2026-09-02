@@ -142,10 +142,73 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
   }
 }
 
+/** One or two stub items per prose line of every chunk shown: five words from
+ *  the start of the line, and five from its end when the line is long enough.
+ *  Each quote is a verbatim substring of the chunk it cites, so grounding keeps
+ *  it, and the title is that quote. SEVERAL items per chunk (not one) is what
+ *  gives a stubbed run enough notes to be worth grouping into themes, which is
+ *  what the themes e2e needs. Headings are skipped — a heading's words repeat
+ *  in the prose under it, and an ambiguous quote is dropped by design. */
+function stubItems(prompt: string): unknown[] {
+  const items: unknown[] = []
+  const marker = /\[chunk (\d+)[^\]]*\]\n/g
+  const hits: { chunkId: number; at: number; from: number }[] = []
+  let m: RegExpExecArray | null
+  while ((m = marker.exec(prompt)))
+    hits.push({ chunkId: Number(m[1]), at: m.index, from: marker.lastIndex })
+  for (const [i, h] of hits.entries()) {
+    const lines = prompt
+      .slice(h.from, i + 1 < hits.length ? hits[i + 1].at : prompt.length)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#') && l.split(/\s+/).length >= 5)
+    for (const line of lines.slice(0, 8)) {
+      const words = line.split(/\s+/)
+      // Both ends of a long enough line: two items whose quotes are different,
+      // non-overlapping spans, so dedup keeps them apart.
+      const quotes = [words.slice(0, 5).join(' ')]
+      if (words.length >= 10) quotes.push(words.slice(-5).join(' '))
+      for (const quote of quotes)
+        items.push({
+          kind: 'concept',
+          title: quote.replace(/[.,;:!?]+$/, ''),
+          summary: 'Stubbed.',
+          evidence: [{ chunkId: h.chunkId, quote }],
+          links: []
+        })
+    }
+  }
+  return items
+}
+
+/** Name each `[theme N]` group after the first words of its first and last
+ *  member — deterministic, in the notes' own language, and (unlike copying one
+ *  member's title outright) not a near-duplicate of a note name. */
+function stubThemeNames(prompt: string): unknown[] {
+  return prompt
+    .split(/\[theme \d+\]\n/)
+    .slice(1)
+    .map((block, index) => {
+      const titles = block
+        .split('\n')
+        .filter((l) => l.startsWith('- '))
+        .map((l) => l.slice(2).trim())
+      const words = [titles[0], titles[titles.length - 1]]
+        .filter(Boolean)
+        .map((t) => t.split(/\s+/)[0])
+      return { index, name: [...new Set(words)].join(' ') || `theme ${index + 1}` }
+    })
+}
+
 /** Deterministic, network-free chat for e2e. For "Ask" it echoes a short grounded
  *  answer with an inline `[[wikilink]]` citation; for a distill extraction prompt
- *  it returns valid JSON quoting the first chunk shown, so the whole distill
- *  vertical is testable without a key or network.
+ *  it returns valid JSON quoting the chunks shown, and for the theme-naming
+ *  prompt a name per group — so the whole distill vertical is testable without a
+ *  key or network.
+ *
+ *  Only `messages[0]` is read: a repair retry resends the original prompt there
+ *  and appends the bad reply after it, and reading the whole transcript back
+ *  would let that text bleed into the last chunk's captured span.
  *
  *  `NODEBOOK_E2E_CHAT_DELAY_MS` stalls each reply, so a spec can catch a run
  *  mid-flight (e.g. to click Cancel) instead of racing an instant answer. */
@@ -155,19 +218,14 @@ function stubChat(): ChatModel {
     async *chat(req: ChatRequest): AsyncIterable<string> {
       const delayMs = Number(process.env.NODEBOOK_E2E_CHAT_DELAY_MS ?? 0)
       if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
-      if ((req.system ?? '').includes('extract structured knowledge')) {
-        const user = req.messages.map((m) => m.content).join('\n')
-        const m = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)
-        if (m) {
-          const quote = m[2].split(/\s+/).slice(0, 5).join(' ')
-          yield JSON.stringify({
-            items: [
-              { kind: 'concept', title: quote, summary: 'Stubbed.', evidence: [{ chunkId: Number(m[1]), quote }], links: [] }
-            ]
-          })
-        } else {
-          yield '{"items":[]}'
-        }
+      const system = req.system ?? ''
+      const prompt = req.messages[0]?.content ?? ''
+      if (system.includes('extract structured knowledge')) {
+        yield JSON.stringify({ items: stubItems(prompt) })
+        return
+      }
+      if (system.includes('name groups of related notes')) {
+        yield JSON.stringify({ themes: stubThemeNames(prompt) })
         return
       }
       const q = req.messages[req.messages.length - 1]?.content ?? ''

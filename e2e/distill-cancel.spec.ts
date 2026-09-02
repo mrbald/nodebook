@@ -108,7 +108,9 @@ test('Cancel stops a run in flight: it is not an error, and the run is paused', 
   // The run is PAUSED, not lost: it keeps what it already read and offers to
   // carry on. Nothing is staged as notes yet — that only happens on completion.
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
-  expect(runs).toEqual([{ id: 'on-government', notes: 0, merged: false, unfinished: true }])
+  expect(runs).toEqual([
+    { id: 'on-government', notes: 0, themes: [], merged: false, unfinished: true }
+  ])
   await expect(page.locator('.run-item-meta')).toContainText('paused')
   await expect(page.locator('.run-item-resume')).toBeVisible()
 })
