@@ -12,11 +12,21 @@
  * until an explicit promote moves them into the vault proper.
  */
 
-import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync, renameSync } from 'fs'
+import {
+  mkdirSync,
+  writeFileSync,
+  appendFileSync,
+  rmSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync
+} from 'fs'
 import { createHash } from 'crypto'
 import { join, sep } from 'path'
 import { withinRoot } from '../paths'
 import { noteName, sourceTitle, type EmittedNote } from './emit'
+import type { ExtractedItem } from './extract'
 
 /** A safe run id is one path segment: alphanumeric start, then word/space/.-, no `..`. */
 const RUN_ID_RE = /^[A-Za-z0-9][\w .-]*$/
@@ -50,6 +60,145 @@ export interface RunSource {
    *  derive from it via `sourceNoteName`; `meta.json` keeps it as-is. */
   file: string
   text: string
+}
+
+// --- A run in flight: start marker, converted text, checkpoint -------------
+// The run dir is created BEFORE the first model call, not after the last one.
+// That is what makes a run resumable: `run.json` says what is being distilled,
+// `source.md` holds the converted text (so a resume never re-converts and never
+// depends on the original file still being there), and `progress.jsonl` records
+// each window as it lands. `meta.json` appearing is what marks the run FINISHED.
+
+/** File names inside a run dir, in the order they appear during a run. */
+const RUN_FILE = 'run.json'
+const SOURCE_FILE = 'source.md'
+const CHECKPOINT_FILE = 'progress.jsonl'
+const META_FILE = 'meta.json'
+
+/** What `run.json` records: the run's identity, written at start. */
+export interface RunJson {
+  /** The document's raw file identifier, exactly as given to the run. */
+  file: string
+  /** ISO timestamp of the run's start. */
+  createdAt: string
+  /** Provider/model the run was started with (free-form, for later diagnosis). */
+  settings?: Record<string, string>
+}
+
+/** Create the run dir and record what the run is, before any model call.
+ *  Idempotent for the text; a second call rewrites `run.json`'s timestamp, so
+ *  a resume must not call it. */
+export function beginRun(
+  vaultRoot: string,
+  runId: string,
+  source: RunSource,
+  settings?: Record<string, string>
+): string {
+  const dir = runDir(vaultRoot, runId)
+  mkdirSync(dir, { recursive: true })
+  const run: RunJson = {
+    file: source.file,
+    createdAt: new Date().toISOString(),
+    ...(settings ? { settings } : {})
+  }
+  writeFileSync(join(dir, RUN_FILE), JSON.stringify(run, null, 2))
+  writeFileSync(join(dir, SOURCE_FILE), source.text)
+  return dir
+}
+
+/** A run's `run.json`, or null when it predates the start marker / is unreadable. */
+export function readRunJson(vaultRoot: string, runId: string): RunJson | null {
+  try {
+    const m = JSON.parse(readFileSync(join(runDir(vaultRoot, runId), RUN_FILE), 'utf8')) as RunJson
+    return typeof m.file === 'string' && typeof m.createdAt === 'string' ? m : null
+  } catch {
+    return null
+  }
+}
+
+/** The run's own copy of the converted document — what a resume re-reads. */
+export function readRunSource(vaultRoot: string, runId: string): RunSource | null {
+  const run = readRunJson(vaultRoot, runId)
+  if (!run) return null
+  try {
+    return { file: run.file, text: readFileSync(join(runDir(vaultRoot, runId), SOURCE_FILE), 'utf8') }
+  } catch {
+    return null
+  }
+}
+
+/** A run that started but never finished: it has a start marker and no
+ *  `meta.json`. That is the whole definition — it holds for a cancelled run, a
+ *  crashed one, and one whose provider died half-way. */
+export function isUnfinishedRun(vaultRoot: string, runId: string): boolean {
+  const dir = runDir(vaultRoot, runId)
+  return existsSync(join(dir, RUN_FILE)) && !existsSync(join(dir, META_FILE))
+}
+
+/** One line of the checkpoint log. Append-only: the plan once, then each
+ *  window as it completes or fails. */
+export type CheckpointRecord =
+  | { type: 'plan'; windows: number[][] }
+  | { type: 'window'; index: number; items: ExtractedItem[] }
+  | { type: 'window'; index: number; failed: true }
+
+/** The log replayed into the state a resume needs. */
+export interface Checkpoint {
+  /** Chunk ids shown per window — the plan the first attempt committed to, so
+   *  a resume neither re-embeds nor re-clusters. Null when not recorded yet. */
+  plan: number[][] | null
+  /** Windows already attempted: index → what came back (`failed` windows are
+   *  not retried by a resume; they are counted, exactly as in a single run). */
+  done: Map<number, { items: ExtractedItem[]; failed: boolean }>
+}
+
+/** Where the orchestrator reads and writes its progress. Pure interface: the
+ *  run loop never touches the filesystem, and a test can hand it a fake. */
+export interface CheckpointStore {
+  load(): Checkpoint | null
+  save(record: CheckpointRecord): void
+}
+
+/** Replay checkpoint lines into a Checkpoint. A crash can tear the last line,
+ *  and a torn line means "that window never landed" — skip it, don't fail. */
+export function replayCheckpoint(text: string): Checkpoint {
+  const cp: Checkpoint = { plan: null, done: new Map() }
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    let rec: CheckpointRecord
+    try {
+      rec = JSON.parse(line) as CheckpointRecord
+    } catch {
+      continue
+    }
+    if (rec.type === 'plan' && Array.isArray(rec.windows)) cp.plan = rec.windows
+    else if (rec.type === 'window' && Number.isInteger(rec.index)) {
+      const failed = 'failed' in rec && rec.failed === true
+      const items = 'items' in rec && Array.isArray(rec.items) ? rec.items : []
+      cp.done.set(rec.index, { items, failed })
+    }
+  }
+  return cp
+}
+
+/** The filesystem checkpoint for one run: a JSON line per event, appended as
+ *  the run goes, so a kill -9 loses at most the window in flight. */
+export function checkpointStore(vaultRoot: string, runId: string): CheckpointStore {
+  const path = join(runDir(vaultRoot, runId), CHECKPOINT_FILE)
+  return {
+    load(): Checkpoint | null {
+      if (!existsSync(path)) return null
+      try {
+        return replayCheckpoint(readFileSync(path, 'utf8'))
+      } catch {
+        return null
+      }
+    },
+    save(record: CheckpointRecord): void {
+      mkdirSync(runDir(vaultRoot, runId), { recursive: true })
+      appendFileSync(path, `${JSON.stringify(record)}\n`)
+    }
+  }
 }
 
 export interface PlannedFile {
@@ -125,6 +274,12 @@ export interface RunArtifact {
  * Write a run's files to disk, replacing any previous artifact for that id.
  * Filesystem only — no indexing. Returns the note paths for the caller to index
  * into the run's separate database.
+ *
+ * Finishing a run REPLACES `notes/` and `meta.json` and drops the checkpoint —
+ * it must not wipe the whole dir, because `run.json` and `source.md` were
+ * written at the start and the book note here is derived from that same text.
+ * (A caller that never called `beginRun` gets them written now, so every run
+ * dir has one shape.)
  */
 export function writeRunArtifact(
   vaultRoot: string,
@@ -134,7 +289,9 @@ export function writeRunArtifact(
   stats?: Record<string, number>
 ): RunArtifact {
   const dir = runDir(vaultRoot, runId)
-  rmSync(dir, { recursive: true, force: true })
+  if (!existsSync(join(dir, RUN_FILE)) || !existsSync(join(dir, SOURCE_FILE)))
+    beginRun(vaultRoot, runId, source)
+  rmSync(join(dir, 'notes'), { recursive: true, force: true })
   mkdirSync(join(dir, 'notes'), { recursive: true })
   const notePaths: string[] = []
   for (const f of planRunFiles(source, notes, stats)) {
@@ -142,6 +299,9 @@ export function writeRunArtifact(
     writeFileSync(abs, f.content)
     if (f.relPath.startsWith(`notes${sep}`)) notePaths.push(abs)
   }
+  // The run is finished (meta.json exists): its progress log has no more use,
+  // and leaving it would make the run look resumable.
+  rmSync(join(dir, CHECKPOINT_FILE), { force: true })
   return { dir, notePaths }
 }
 

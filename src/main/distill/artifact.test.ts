@@ -1,5 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  mkdirSync
+} from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -13,7 +22,12 @@ import {
   mergeRun,
   unmergeRun,
   readMergeManifest,
-  readRunMeta
+  readRunMeta,
+  beginRun,
+  readRunJson,
+  readRunSource,
+  isUnfinishedRun,
+  checkpointStore
 } from './artifact'
 import { emitNotes } from './emit'
 import type { GroundedNote } from './extract'
@@ -299,3 +313,81 @@ function canonicalMarkdown(dir: string): string[] {
   }
   return out
 }
+
+describe('a run in flight (start marker, checkpoint, resume)', () => {
+  const src = { file: 'Federalist.md', text: 'Faction vs Union.' }
+
+  it('records what the run is BEFORE any model call, and reads it back', () => {
+    const v = tmpVault()
+    beginRun(v, 'r1', src, { provider: 'anthropic', model: 'claude-test' })
+    const run = readRunJson(v, 'r1')
+    expect(run?.file).toBe('Federalist.md')
+    expect(run?.settings).toEqual({ provider: 'anthropic', model: 'claude-test' })
+    expect(Number.isNaN(Date.parse(run!.createdAt))).toBe(false)
+    // The converted text is the run's own copy — a resume never re-converts,
+    // and never depends on the original file still being where it was.
+    expect(readRunSource(v, 'r1')).toEqual(src)
+  })
+
+  it('is "unfinished" from the start marker until meta.json exists', () => {
+    const v = tmpVault()
+    beginRun(v, 'r1', src)
+    expect(isUnfinishedRun(v, 'r1')).toBe(true)
+    writeRunArtifact(v, 'r1', src, emitNotes(grounded()))
+    expect(isUnfinishedRun(v, 'r1')).toBe(false)
+    expect(isUnfinishedRun(v, 'never-ran')).toBe(false)
+  })
+
+  it('appends each window to the checkpoint and replays it in order', () => {
+    const v = tmpVault()
+    beginRun(v, 'r1', src)
+    const store = checkpointStore(v, 'r1')
+    expect(store.load()).toBeNull() // nothing recorded yet
+    store.save({ type: 'plan', windows: [[0, 1], [2]] })
+    store.save({ type: 'window', index: 0, items: [] })
+    store.save({ type: 'window', index: 1, failed: true })
+    const cp = store.load()!
+    expect(cp.plan).toEqual([[0, 1], [2]])
+    expect(cp.done.get(0)).toEqual({ items: [], failed: false })
+    expect(cp.done.get(1)).toEqual({ items: [], failed: true })
+    expect(cp.done.size).toBe(2)
+  })
+
+  it('survives a torn last line (a crash mid-write loses that window, not the run)', () => {
+    const v = tmpVault()
+    beginRun(v, 'r1', src)
+    const store = checkpointStore(v, 'r1')
+    store.save({ type: 'plan', windows: [[0]] })
+    store.save({ type: 'window', index: 0, items: [] })
+    appendFileSync(join(runDir(v, 'r1'), 'progress.jsonl'), '{"type":"window","ind')
+    const cp = store.load()!
+    expect(cp.plan).toEqual([[0]])
+    expect(cp.done.size).toBe(1)
+  })
+
+  it('FINISHING a run replaces notes + meta.json, keeps the start files, drops the checkpoint', () => {
+    const v = tmpVault()
+    beginRun(v, 'r1', src)
+    const created = readRunJson(v, 'r1')!.createdAt
+    const store = checkpointStore(v, 'r1')
+    store.save({ type: 'plan', windows: [[0]] })
+    // A leftover from an earlier attempt must not survive into the artifact.
+    mkdirSync(join(runDir(v, 'r1'), 'notes'), { recursive: true })
+    writeFileSync(join(runDir(v, 'r1'), 'notes', 'Stale.md'), 'x')
+
+    writeRunArtifact(v, 'r1', src, emitNotes(grounded()))
+    const dir = runDir(v, 'r1')
+    expect(existsSync(join(dir, 'notes', 'Stale.md'))).toBe(false)
+    expect(existsSync(join(dir, 'notes', 'Faction.md'))).toBe(true)
+    expect(existsSync(join(dir, 'progress.jsonl'))).toBe(false) // no longer resumable
+    expect(existsSync(join(dir, 'source.md'))).toBe(true)
+    expect(readRunJson(v, 'r1')!.createdAt).toBe(created) // the start record is not rewritten
+  })
+
+  it('a run written without a start marker still gets one (one shape per run dir)', () => {
+    const v = tmpVault()
+    writeRunArtifact(v, 'r1', src, [])
+    expect(readRunSource(v, 'r1')).toEqual(src)
+    expect(isUnfinishedRun(v, 'r1')).toBe(false)
+  })
+})

@@ -11,7 +11,7 @@
  * firewall live in artifact.ts (unit-tested); this thin wrapper is e2e-covered.
  */
 
-import { readFileSync } from 'fs'
+import { readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { VaultIndex } from '../indexer'
 import { writeRunArtifact, runDir, listRuns, removeRun, type RunSource } from './artifact'
@@ -44,6 +44,11 @@ export class StagedRunStore {
     stats?: Record<string, number>
   ): { runId: string; dir: string } {
     this.closeOne(runId)
+    // Finishing a run no longer wipes its whole folder (run.json/source.md are
+    // written at the start and a resume needs them), so a db left by an earlier
+    // attempt has to go explicitly — otherwise its rows would join the new ones.
+    for (const f of ['run.db', 'run.db-wal', 'run.db-shm'])
+      rmSync(join(runDir(this.vaultRoot, runId), f), { force: true })
     const { dir, notePaths } = writeRunArtifact(this.vaultRoot, runId, source, notes, stats)
     const idx = this.indexOf(runId)
     for (const p of notePaths) idx.indexFile(p, readFileSync(p, 'utf8'), 0)

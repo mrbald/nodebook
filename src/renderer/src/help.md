@@ -210,6 +210,9 @@ first.
   passage, Nodebook finds the right one and corrects it); a quote that isn't there, or
   that could be in two different places, is dropped rather than guessed at. The banner
   after a run says how many were dropped and why.
+- **The notes are linked to each other** — when one note's text names another, Nodebook
+  adds a link between them; and when two notes turned out to be the same idea and were
+  merged, links written for either name still land on the note that survived.
 - **Nothing touches your vault yet** — the result opens as its **own map**, kept in a
   staging area. Explore it like the knowledge map. The **⧉ Overlay** button shows your
   vault and the run *together* (a preview — still nothing written). Where the run and
@@ -219,8 +222,16 @@ first.
   sidebar until you discard it, so closing the map loses nothing. Click a run to
   reopen its map; **✕** discards it. A run that hasn't been merged yet lives only in
   the vault's `.nodebook/distill/` folder, so deleting that folder loses it.
-- **Cancel any time** — the **Cancel** button on the progress toast stops a run;
-  nothing is staged. Only one document can be distilled at a time.
+- **Cancel any time** — the **Cancel** button on the progress toast stops a run.
+  Only one document can be distilled at a time.
+- **Nothing is wasted** — a run that you cancel, or that stops because the model
+  stopped answering, keeps everything it had already read. It stays under
+  **Distilled runs** marked *paused*; press **Resume** and it carries on from where
+  it stopped instead of starting over. A call that fails for a passing reason (a
+  busy server, a dropped connection) is simply tried again, and a passage the model
+  never manages to read costs that passage, not the run.
+- **What it will cost** — before it starts, the progress toast says how many passages
+  the document has and how many steps reading them will take.
 - **Merge when happy** — **⤓ Merge** copies the run's notes into your vault under a
   `Distilled/…` folder. It's reversible: **Undo** in the banner removes exactly what
   was written. Any merged note you edited afterwards is moved to the **Trash**

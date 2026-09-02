@@ -19,10 +19,19 @@ import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
 import { overlayGraph } from './graph'
-import { distill, probeChat, type DistillEmbedder } from './distill/run'
+import { distill, probeChat, estimateDistill, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
 import { convertDocument } from './distill/convert'
-import { mergeRun, unmergeRun, readMergeManifest, readRunMeta } from './distill/artifact'
+import {
+  mergeRun,
+  unmergeRun,
+  readMergeManifest,
+  readRunMeta,
+  beginRun,
+  readRunSource,
+  isUnfinishedRun,
+  checkpointStore
+} from './distill/artifact'
 import { Telemetry } from './telemetry'
 import {
   ensureSettingsFile,
@@ -42,6 +51,7 @@ import { addRecent } from './recents'
 import type {
   Citation,
   TalkStatus,
+  DistillEstimate,
   DistillRunResult,
   DistillRunInfo,
   DistillDocument,
@@ -252,6 +262,7 @@ async function closeVault(): Promise<void> {
   for (const fail of [...pendingEmbeds.values()]) fail(new Error('Vault closed while waiting to embed.'))
   pendingEmbeds.clear()
   pickedDocs.clear()
+  lastConverted = null
   distillRuns?.close()
   distillRuns = null
   index?.close()
@@ -474,6 +485,81 @@ function uniqueRunId(base: string, taken: ReadonlySet<string>): string {
   for (let n = 2; ; n++) {
     const candidate = `${base}-${n}`
     if (!taken.has(candidate)) return candidate
+  }
+}
+
+// The converted text of the document most recently estimated, so the estimate
+// the user is shown and the run that follows convert the file once, not twice.
+// One entry, replaced on the next estimate and dropped when a vault closes.
+let lastConverted: { docId: string; text: string } | null = null
+
+/** Convert a picked document to markdown once, reusing the estimate's copy. */
+async function convertPicked(docId: string, filePath: string): Promise<string> {
+  if (lastConverted?.docId === docId) return lastConverted.text
+  const text = await convertDocument(filePath)
+  lastConverted = { docId, text }
+  return text
+}
+
+/**
+ * Drive one distill run — fresh or resumed — from converted text to a staged
+ * artifact. Both entry points share this so a resume behaves exactly like a
+ * run: same single-run slot, same pre-flight, same progress, same checkpoint.
+ *
+ * The run dir is created (`beginRun`) BEFORE the first model call: that record
+ * plus the checkpoint is what makes a cancelled or crashed run resumable, and
+ * `meta.json` — written only on success — is what marks it finished.
+ */
+async function runDistillPipeline(
+  runId: string,
+  source: { file: string; text: string },
+  opts: { resume: boolean }
+): Promise<DistillRunResult> {
+  const root = vaultRoot
+  const runs = distillRuns
+  if (!root || !runs) throw new Error('Open a vault first.')
+  // The caller has claimed `activeRunId` and releases it; this only owns the
+  // abort handle, so a cancel can reach the run while it is in flight.
+  const cfg = chatProviderConfig()
+  if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
+  const ctrl = new AbortController()
+  distillAbort.set(runId, ctrl)
+  try {
+    const chat = makeChatModel(cfg)
+    // Fail fast: confirm the model actually responds (key valid, local server up)
+    // BEFORE the expensive embedding, not half-way through the run. CLI backends
+    // have multi-second cold starts (measured ~6.5s for a trivial codex round-trip).
+    try {
+      await probeChat(chat, AbortSignal.timeout(30_000))
+    } catch (err) {
+      throw new Error(
+        `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login, claude auth login). ${err instanceof Error ? err.message : ''}`.trim(),
+        { cause: err }
+      )
+    }
+    if (!opts.resume)
+      beginRun(root, runId, source, { provider: cfg.kind, model: cfg.model ?? '' })
+    const result = await distill(
+      source,
+      { embedder: rendererEmbedder(runId), chat },
+      {
+        signal: ctrl.signal,
+        onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p),
+        checkpoint: checkpointStore(root, runId)
+      }
+    )
+    // meta.json stores a flat map of numbers, so the drop reasons are
+    // spread out of their nested shape here.
+    const { droppedByReason: why, ...flatStats } = result.stats
+    runs.create(runId, source, result.notes, {
+      ...flatStats,
+      droppedNoEvidence: why.noEvidence,
+      droppedNotFound: why.notFound,
+      droppedAmbiguous: why.ambiguous
+    })
+    return { runId, stats: result.stats }
+  } finally {
+    distillAbort.delete(runId)
   }
 }
 
@@ -841,6 +927,14 @@ function registerIpc(): void {
     return id
   })
 
+  // What a run would cost, before committing to it: the document is converted
+  // (once — the run reuses this copy) and handed to the same pure planner.
+  ipcMain.handle('distill:estimate', async (_e, docId: string): Promise<DistillEstimate> => {
+    const filePath = pickedDocs.get(docId)
+    if (!filePath) throw new Error('Unknown document — pick it again.')
+    return estimateDistill(await convertPicked(docId, filePath))
+  })
+
   // Run the distill pipeline on a document → a staged, cited run-artifact. The
   // chunks are embedded via the renderer bridge; extraction uses the chat model;
   // output lands in the run's own db (never the canonical index).
@@ -850,53 +944,37 @@ function registerIpc(): void {
       throw new Error('A document is already being distilled — wait for it to finish or cancel it.')
     const filePath = pickedDocs.get(docId)
     if (!filePath) throw new Error('Unknown document — pick it again.')
-    const cfg = chatProviderConfig()
-    if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
     // Claim the single run slot and the id BEFORE the first await, so two
     // clicks in the same tick can't both get past the guard. One document, one
     // run: the id is consumed here.
     pickedDocs.delete(docId)
     const runId = uniqueRunId(distillRunId(filePath), new Set(distillRuns.list()))
     activeRunId = runId
-    const ctrl = new AbortController()
-    distillAbort.set(runId, ctrl)
     try {
-      const chat = makeChatModel(cfg)
-      // Fail fast: confirm the model actually responds (key valid, local server up)
-      // BEFORE the expensive embedding, not half-way through the run. CLI backends
-      // have multi-second cold starts (measured ~6.5s for a trivial codex round-trip).
-      try {
-        await probeChat(chat, AbortSignal.timeout(30_000))
-      } catch (err) {
-        throw new Error(
-          `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login, claude auth login). ${err instanceof Error ? err.message : ''}`.trim(),
-          { cause: err }
-        )
-      }
       // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
       // rest of the pipeline is format-agnostic.
-      const text = await convertDocument(filePath)
-      const source = { file: basename(filePath), text }
-      const result = await distill(
-        source,
-        { embedder: rendererEmbedder(runId), chat },
-        {
-          signal: ctrl.signal,
-          onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p)
-        }
-      )
-      // meta.json stores a flat map of numbers, so the drop reasons are
-      // spread out of their nested shape here.
-      const { droppedByReason: why, ...flatStats } = result.stats
-      distillRuns.create(runId, source, result.notes, {
-        ...flatStats,
-        droppedNoEvidence: why.noEvidence,
-        droppedNotFound: why.notFound,
-        droppedAmbiguous: why.ambiguous
-      })
-      return { runId, stats: result.stats }
+      const text = await convertPicked(docId, filePath)
+      lastConverted = null // the run has the text now; don't hold a book in memory
+      return await runDistillPipeline(runId, { file: basename(filePath), text }, { resume: false })
     } finally {
-      distillAbort.delete(runId)
+      activeRunId = null
+    }
+  })
+
+  // Continue a run that was cancelled or interrupted. Everything it needs is in
+  // its own folder — the converted text and the windows already extracted — so
+  // the original document does not have to be anywhere near.
+  ipcMain.handle('distill:resume', async (_e, runId: string): Promise<DistillRunResult> => {
+    if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
+    if (activeRunId !== null)
+      throw new Error('A document is already being distilled — wait for it to finish or cancel it.')
+    if (!isUnfinishedRun(vaultRoot, runId)) throw new Error('That run has already finished.')
+    const source = readRunSource(vaultRoot, runId)
+    if (!source) throw new Error("That run can't be resumed — its saved text is missing.")
+    activeRunId = runId
+    try {
+      return await runDistillPipeline(runId, source, { resume: true })
+    } finally {
       activeRunId = null
     }
   })
@@ -956,7 +1034,8 @@ function registerIpc(): void {
     return distillRuns.list().map((id) => ({
       id,
       notes: readRunMeta(root, id)?.notes ?? 0,
-      merged: readMergeManifest(root, id)?.complete === true
+      merged: readMergeManifest(root, id)?.complete === true,
+      unfinished: isUnfinishedRun(root, id)
     }))
   })
 

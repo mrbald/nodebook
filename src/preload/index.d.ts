@@ -2,6 +2,7 @@ import type {
   AskResult,
   Backlink,
   DistillDocument,
+  DistillEstimate,
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
@@ -68,6 +69,8 @@ export interface NodebookApi {
   distillPick: () => Promise<DistillDocument | null>
   distillRegisterPath: (absPath: string) => Promise<string>
   distillRun: (docId: string) => Promise<DistillRunResult>
+  distillEstimate: (docId: string) => Promise<DistillEstimate>
+  distillResume: (runId: string) => Promise<DistillRunResult>
   distillCancel: (runId: string) => Promise<void>
   distillGraph: (
     runId: string,

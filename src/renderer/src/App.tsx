@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_EMBED_MODEL,
+  type DistillEstimate,
   type DistillRunInfo,
+  type DistillRunResult,
   type MarkdownFile,
   type SearchHit,
   type Settings
@@ -95,6 +97,9 @@ export default function App() {
     done: number
     total: number
   } | null>(null)
+  // What the run ahead will cost, worked out from the document before it starts
+  // (shown on the progress toast, so "reading a book" is never a black box).
+  const [distillEstimate, setDistillEstimate] = useState<DistillEstimate | null>(null)
   const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -749,72 +754,100 @@ export default function App() {
     setStagedRuns(await window.nodebook.distillListRuns())
   }, [])
 
+  // One run's lifecycle, shared by a fresh distill and a resume: claim the UI,
+  // follow the progress, and say what happened. `start` is what actually runs.
+  const startDistilling = useCallback(
+    async (start: () => Promise<DistillRunResult>) => {
+      // Sync the ref before the state commits: a settings save landing in this
+      // same tick must already see the run as active and defer its embed swap
+      // (the effect that normally maintains the ref runs a render later).
+      distillingRef.current = true
+      distillCancelled.current = false
+      setDistilling({ phase: 'starting', done: 0, total: 0 })
+      const off = window.nodebook.onDistillProgress((runId, p) =>
+        setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })
+      )
+      setDistillDoneNote(null)
+      try {
+        const res = await start()
+        setGraphOpen(false)
+        setAskOpen(false)
+        setDistillOverlay(false) // a fresh run opens standalone
+        setDistillRun({ runId: res.runId })
+        void refreshRuns()
+        // Always say what happened: the run is STAGED, not in the vault — and a
+        // zero-note run must explain itself instead of showing a blank map.
+        const s = res.stats
+        // What the quote check did, in plain words — the same list explains a
+        // zero-note run and annotates a good one, so a drop is never silent.
+        const why: string[] = []
+        const d = s.droppedByReason
+        if (d.noEvidence > 0) why.push(`${d.noEvidence} point${d.noEvidence === 1 ? '' : 's'} had no quote`)
+        if (d.notFound > 0)
+          why.push(
+            `${d.notFound} quote${d.notFound === 1 ? " wasn't" : "s weren't"} found in the document`
+          )
+        if (d.ambiguous > 0)
+          why.push(
+            `${d.ambiguous} quote${d.ambiguous === 1 ? '' : 's'} matched in more than one place`
+          )
+        if (s.recovered > 0)
+          why.push(
+            `${s.recovered} quote${s.recovered === 1 ? ' was' : 's were'} found under a different passage and kept`
+          )
+        if (s.failedClusters > 0)
+          why.push(`${s.failedClusters} of ${s.clusters} sections got an unusable model response`)
+        if (s.notes === 0) {
+          setDistillDoneNote(
+            `Distilled, but no notes survived verification${why.length ? ` (${why.join('; ')})` : ''} — a stronger chat model in Settings usually fixes this.`
+          )
+        } else {
+          // A big source is clustered + sampled, not read in full — say so when
+          // that sampling was substantial, so "Distilled" doesn't imply full coverage.
+          const cov =
+            s.coverage < 0.95 ? ` It read ${Math.round(s.coverage * 100)}% of the text, representatively.` : ''
+          setDistillDoneNote(
+            `Staged ${s.notes} note${s.notes === 1 ? '' : 's'} — nothing is in your vault until you press ⤓ Merge on this map.${cov}${why.length ? ` ${why.join('; ')}.` : ''}`
+          )
+        }
+      } catch (e) {
+        // Cancelling is a choice, not a fault — say what happened, don't alarm.
+        // A cancelled run is PAUSED, not lost: what it already read is kept.
+        if (distillCancelled.current) {
+          setDistillDoneNote(
+            'Distilling cancelled — what it read so far is kept. Press Resume under “Distilled runs” to carry on.'
+          )
+        } else setError(e instanceof Error ? e.message : String(e))
+        // Either way the run may be resumable now — show it in the sidebar.
+        void refreshRuns()
+      } finally {
+        off()
+        setDistilling(null)
+        setDistillEstimate(null)
+      }
+    },
+    [refreshRuns]
+  )
+
   const runDistill = useCallback(async () => {
     // main hands back an opaque id for the picked document, never a path.
     const doc = await window.nodebook.distillPick()
     if (!doc) return
-    // Sync the ref before the state commits: a settings save landing in this
-    // same tick must already see the run as active and defer its embed swap
-    // (the effect that normally maintains the ref runs a render later).
-    distillingRef.current = true
-    distillCancelled.current = false
-    setDistilling({ phase: 'starting', done: 0, total: 0 })
-    const off = window.nodebook.onDistillProgress((runId, p) =>
-      setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })
-    )
-    setDistillDoneNote(null)
-    try {
-      const res = await window.nodebook.distillRun(doc.id)
-      setGraphOpen(false)
-      setAskOpen(false)
-      setDistillOverlay(false) // a fresh run opens standalone
-      setDistillRun({ runId: res.runId })
-      void refreshRuns()
-      // Always say what happened: the run is STAGED, not in the vault — and a
-      // zero-note run must explain itself instead of showing a blank map.
-      const s = res.stats
-      // What the quote check did, in plain words — the same list explains a
-      // zero-note run and annotates a good one, so a drop is never silent.
-      const why: string[] = []
-      const d = s.droppedByReason
-      if (d.noEvidence > 0) why.push(`${d.noEvidence} point${d.noEvidence === 1 ? '' : 's'} had no quote`)
-      if (d.notFound > 0)
-        why.push(
-          `${d.notFound} quote${d.notFound === 1 ? " wasn't" : "s weren't"} found in the document`
-        )
-      if (d.ambiguous > 0)
-        why.push(
-          `${d.ambiguous} quote${d.ambiguous === 1 ? '' : 's'} matched in more than one place`
-        )
-      if (s.recovered > 0)
-        why.push(
-          `${s.recovered} quote${s.recovered === 1 ? ' was' : 's were'} found under a different passage and kept`
-        )
-      if (s.failedClusters > 0)
-        why.push(`${s.failedClusters} of ${s.clusters} sections got an unusable model response`)
-      if (s.notes === 0) {
-        setDistillDoneNote(
-          `Distilled, but no notes survived verification${why.length ? ` (${why.join('; ')})` : ''} — a stronger chat model in Settings usually fixes this.`
-        )
-      } else {
-        // A big source is clustered + sampled, not read in full — say so when
-        // that sampling was substantial, so "Distilled" doesn't imply full coverage.
-        const cov =
-          s.coverage < 0.95 ? ` It read ${Math.round(s.coverage * 100)}% of the text, representatively.` : ''
-        setDistillDoneNote(
-          `Staged ${s.notes} note${s.notes === 1 ? '' : 's'} — nothing is in your vault until you press ⤓ Merge on this map.${cov}${why.length ? ` ${why.join('; ')}.` : ''}`
-        )
-      }
-    } catch (e) {
-      // Cancelling is a choice, not a fault — say what happened, don't alarm.
-      if (distillCancelled.current)
-        setDistillDoneNote('Distilling cancelled — nothing was staged.')
-      else setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      off()
-      setDistilling(null)
-    }
-  }, [refreshRuns])
+    await startDistilling(async () => {
+      // The estimate converts the document; the run reuses that same copy, so
+      // this costs the conversion once and the toast can say what is coming.
+      setDistillEstimate(await window.nodebook.distillEstimate(doc.id).catch(() => null))
+      return window.nodebook.distillRun(doc.id)
+    })
+  }, [startDistilling])
+
+  // Carry on a run that was cancelled or interrupted, from its own checkpoint.
+  const resumeStagedRun = useCallback(
+    (runId: string) => {
+      void startDistilling(() => window.nodebook.distillResume(runId))
+    },
+    [startDistilling]
+  )
 
   // Reopen a staged run's map from the sidebar list (a closed run map used to
   // be unreachable — the run looked lost even though it was staged on disk).
@@ -834,9 +867,13 @@ export default function App() {
   const discardStagedRun = useCallback(
     (run: DistillRunInfo) => {
       setConfirm({
-        message: `Discard the distilled run “${run.id}”? Its staged notes are deleted${
-          run.merged ? ' (notes already merged into your vault stay, but Undo stops working)' : ''
-        }.`,
+        message: run.unfinished
+          ? `Discard the paused run “${run.id}”? What it has read so far is lost, and it can't be resumed.`
+          : `Discard the distilled run “${run.id}”? Its staged notes are deleted${
+              run.merged
+                ? ' (notes already merged into your vault stay, but Undo stops working)'
+                : ''
+            }.`,
         confirmLabel: 'Discard',
         onConfirm: () => {
           setConfirm(null)
@@ -1003,11 +1040,12 @@ export default function App() {
                 className="run-item"
                 role="button"
                 tabIndex={0}
-                onClick={() => openStagedRun(r.id)}
+                onClick={() => (r.unfinished ? resumeStagedRun(r.id) : openStagedRun(r.id))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
-                    openStagedRun(r.id)
+                    if (r.unfinished) resumeStagedRun(r.id)
+                    else openStagedRun(r.id)
                   }
                 }}
               >
@@ -1015,8 +1053,25 @@ export default function App() {
                   {r.id}
                 </span>
                 <span className="run-item-meta">
-                  {r.merged ? 'merged' : `${r.notes} note${r.notes === 1 ? '' : 's'}`}
+                  {r.unfinished
+                    ? 'paused'
+                    : r.merged
+                      ? 'merged'
+                      : `${r.notes} note${r.notes === 1 ? '' : 's'}`}
                 </span>
+                {r.unfinished && (
+                  <button
+                    className="run-item-resume"
+                    title="Carry on where this run stopped"
+                    disabled={distilling !== null}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      resumeStagedRun(r.id)
+                    }}
+                  >
+                    Resume
+                  </button>
+                )}
                 <button
                   className="run-item-del"
                   aria-label={`Discard run ${r.id}`}
@@ -1334,7 +1389,15 @@ export default function App() {
       {distilling && (
         <div className="distill-toast" role="status">
           <span className="distill-spinner" aria-hidden="true" />
-          <span className="distill-toast-label">
+          <span className="distill-toast-lines">
+            {distillEstimate && (
+              <span className="distill-toast-plan">
+                Reading {distillEstimate.chunks} passage
+                {distillEstimate.chunks === 1 ? '' : 's'} in {distillEstimate.calls} step
+                {distillEstimate.calls === 1 ? '' : 's'}.
+              </span>
+            )}
+            <span className="distill-toast-label">
             Distilling…{' '}
             {({
               chunking: 'reading',
@@ -1345,6 +1408,7 @@ export default function App() {
               done: 'done'
             } as Record<string, string>)[distilling.phase] ?? 'starting'}
             {distilling.total > 0 ? ` (${distilling.done}/${distilling.total})` : ''}
+            </span>
           </span>
           {distilling.runId && (
             <button

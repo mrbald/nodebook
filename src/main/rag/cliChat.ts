@@ -3,6 +3,7 @@ import { accessSync, constants, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir, tmpdir } from 'os'
 import type { ChatModel, ChatRequest, ProviderConfig } from './provider'
+import { tagError, isAuthMessage } from '../distill/retry'
 
 /**
  * CLI-backed chat adapters: run a local command the user already has installed
@@ -246,7 +247,12 @@ async function* runCliLines(
     if (opts.signal?.aborted) throw abortError()
     const code = await closed
     if (code !== 0)
-      throw new Error(`${label} failed (exit ${code}): ${tail(stderr) || 'no error output'}`)
+      // Tagged so distill's retry policy can tell "the CLI fell over" (worth
+      // another go) from "you are not signed in" (never worth another go).
+      throw tagError(
+        new Error(`${label} failed (exit ${code}): ${tail(stderr) || 'no error output'}`),
+        { exitCode: code, authFailure: isAuthMessage(stderr) }
+      )
   } finally {
     opts.signal?.removeEventListener('abort', onAbort)
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
@@ -283,8 +289,13 @@ export function codexCliChat(cfg: ProviderConfig): ChatModel {
         cwd: scratchCwd()
       })
       const { text, error } = parseCodexEvents(stdout)
-      if (error) throw new Error(`Codex: ${error}`)
-      if (code !== 0) throw new Error(`Codex failed (exit ${code}): ${tail(stderr) || 'no error output'}`)
+      if (error)
+        throw tagError(new Error(`Codex: ${error}`), { retryable: !isAuthMessage(error) })
+      if (code !== 0)
+        throw tagError(
+          new Error(`Codex failed (exit ${code}): ${tail(stderr) || 'no error output'}`),
+          { exitCode: code, authFailure: isAuthMessage(stderr) }
+        )
       if (!text) throw new Error('Codex returned no answer.')
       yield text
     },
@@ -398,7 +409,8 @@ export function claudeCliChat(cfg: ProviderConfig): ChatModel {
           yield ev.delta
         } else if (ev.final) final = ev.final
       }
-      if (failure) throw new Error(`Claude: ${failure}`)
+      if (failure)
+        throw tagError(new Error(`Claude: ${failure}`), { retryable: !isAuthMessage(failure) })
       if (streamed) return
       if (!final) throw new Error('Claude CLI returned no answer.')
       yield final
@@ -446,7 +458,11 @@ export function genericCliChat(cfg: ProviderConfig): ChatModel {
         signal: req.signal,
         cwd: scratchCwd()
       })
-      if (code !== 0) throw new Error(`"${cmd}" failed (exit ${code}): ${tail(stderr) || 'no error output'}`)
+      if (code !== 0)
+        throw tagError(
+          new Error(`"${cmd}" failed (exit ${code}): ${tail(stderr) || 'no error output'}`),
+          { exitCode: code, authFailure: isAuthMessage(stderr) }
+        )
       const out = stdout.trim()
       if (!out) throw new Error(`"${cmd}" printed no answer.`)
       yield out
