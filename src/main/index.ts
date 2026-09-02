@@ -18,7 +18,9 @@ import { withinRoot, ignoredInVault } from './paths'
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
-import { overlayGraph } from './graph'
+import { overlayGraph, noteName } from './graph'
+import { noteVector, sameAsCandidates, type NoteVec } from './distill/sameAs'
+import { chunkMarkdown, embedText } from './rag/chunk'
 import { distill, probeChat, estimateDistill, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
 import { convertDocument } from './distill/convert'
@@ -1094,7 +1096,14 @@ function registerIpc(): void {
   // notes are new, which the vault already holds verbatim, and which share a
   // name with a DIFFERENT note of yours (and so get saved beside it). Main
   // recomputes this at merge time too — the renderer only sends confirmations.
-  const planMergeFor = (runId: string): DistillMergePlan => {
+  // The twins the dialog proposed for a run (staged name → vault note name), so
+  // Merge acts on the suggestion the user ticked without a second embedding
+  // pass. Only the candidates are kept: the plan itself is recomputed at merge
+  // time, because the vault may have changed since the dialog, and a candidate
+  // whose twin is gone by then is dropped.
+  const shownCandidates = new Map<string, Map<string, string>>()
+
+  const planMergeFor = async (runId: string, mode: 'show' | 'merge'): Promise<DistillMergePlan> => {
     if (!vaultRoot || !index) throw new Error('Open a vault first.')
     const raw = readRunMeta(vaultRoot, runId)?.source ?? readRunJson(vaultRoot, runId)?.file ?? runId
     const title = sourceNoteName(raw)
@@ -1118,18 +1127,74 @@ function registerIpc(): void {
         /* unreadable — treat as a collision, which is the cautious answer */
       }
     }
-    return { sourceTitle: title, entries: mergePlan(staged, { names, hashByName }, title) }
+    const entries = mergePlan(staged, { names, hashByName }, title)
+    let pairs: Map<string, string>
+    if (mode === 'show') {
+      pairs = await findSameAsCandidates(runId, staged, entries)
+      shownCandidates.set(runId, pairs)
+    } else {
+      pairs = shownCandidates.get(runId) ?? new Map()
+      shownCandidates.delete(runId)
+    }
+    for (const e of entries) {
+      const twin = pairs.get(e.name)
+      if (twin && e.action === 'new' && names.has(twin)) e.sameAsCandidate = twin
+    }
+    return { sourceTitle: title, entries }
   }
 
-  ipcMain.handle('distill:mergePlan', (_e, runId: string): DistillMergePlan => planMergeFor(runId))
+  // A `new` note that means the same as a note you already have, under another
+  // name (`distill/sameAs.ts`): proposed, never applied. Only when talk is on —
+  // the vault's note vectors ARE the talk index — and never fatal: a merge must
+  // go ahead without suggestions rather than not at all. The staged notes are
+  // embedded the way the index embeds a note (chunk → embedText → mean), through
+  // the renderer's own embedder, so both sides use one model.
+  const findSameAsCandidates = async (
+    runId: string,
+    staged: { name: string; content: string }[],
+    entries: DistillMergePlan['entries']
+  ): Promise<Map<string, string>> => {
+    const out = new Map<string, string>()
+    if (!index) return out
+    const vault = index.talkNoteVectors()
+    if (vault.size === 0) return out
+    const fresh = new Set(entries.filter((e) => e.action === 'new').map((e) => e.name))
+    const notes = staged.filter((n) => fresh.has(n.name))
+    if (notes.length === 0) return out
+    try {
+      const embedder = rendererEmbedder(`plan:${runId}`)
+      const texts: string[] = []
+      const spans: { name: string; from: number; to: number }[] = []
+      for (const n of notes) {
+        const from = texts.length
+        for (const c of chunkMarkdown(n.content)) texts.push(embedText(c))
+        spans.push({ name: n.name, from, to: texts.length })
+      }
+      const vectors: Float32Array[] = []
+      for (let i = 0; i < texts.length; i += 64) vectors.push(...(await embedder.embed(texts.slice(i, i + 64))))
+      const run: NoteVec[] = []
+      for (const s of spans) {
+        const vec = noteVector(vectors.slice(s.from, s.to))
+        if (vec) run.push({ id: s.name, vec })
+      }
+      const vaultVecs: NoteVec[] = [...vault].map(([path, vec]) => ({ id: path, vec }))
+      const pairs = sameAsCandidates(run, vaultVecs, readSettings().talk.relatedMinScore)
+      for (const [name, path] of pairs) out.set(name, noteName(path))
+    } catch (err) {
+      console.warn('[distill] same-as candidates skipped:', err instanceof Error ? err.message : err)
+    }
+    return out
+  }
+
+  ipcMain.handle('distill:mergePlan', (_e, runId: string): Promise<DistillMergePlan> => planMergeFor(runId, 'show'))
 
   // Merge a run into the vault: copy its notes into a namespaced subfolder so the
   // canonical index picks them up. Reversible — a manifest records what we wrote.
   // `sameAs` names the staged notes the user confirmed are the same thing as
   // their vault twin; each gets a `same_as::` line the map then collapses.
-  ipcMain.handle('distill:merge', (_e, runId: string, opts?: { sameAs?: string[] }): DistillMergeResult => {
+  ipcMain.handle('distill:merge', async (_e, runId: string, opts?: { sameAs?: string[] }): Promise<DistillMergeResult> => {
     if (!vaultRoot || !index) throw new Error('Open a vault first.')
-    const plan = planMergeFor(runId)
+    const plan = await planMergeFor(runId, 'merge')
     const { manifest, written } = mergeRun(vaultRoot, runId, plan.entries, {
       sameAs: opts?.sameAs ?? []
     })

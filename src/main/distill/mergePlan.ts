@@ -54,6 +54,11 @@ export interface MergePlanEntry {
    *  `identical` entry nothing is written at all; the field still names the
    *  vault note it matched. */
   targetName: string
+  /** A vault note that looks like the same idea under another name — found by
+   *  meaning (`sameAs.ts`), attached by the caller, only ever on a `new`
+   *  entry. A suggestion: confirming it writes `same_as:: [[that note]]`,
+   *  exactly as confirming a collision does. */
+  sameAsCandidate?: string
 }
 
 /** Lowercase key for the case-insensitive name comparison. */

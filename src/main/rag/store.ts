@@ -330,6 +330,14 @@ export class VectorStore {
     return map
   }
 
+  /** Every note's centroid vector, keyed by path (documents excluded), for a
+   *  caller that brings its own vectors to compare — distill's merge plan
+   *  looks for a vault note that means the same as a staged one. Read-only:
+   *  the map is the cache itself. */
+  noteVectors(): ReadonlyMap<string, Float32Array> {
+    return this.centroids()
+  }
+
   /** The k notes most semantically similar to `focusFile` (cosine over centroids).
    *  `minScore` drops pairs below that cosine, so a sparse vault doesn't flag
    *  unrelated notes as "related" just to fill the top-k. */

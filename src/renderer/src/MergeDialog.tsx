@@ -12,6 +12,11 @@ import { useModal } from './useModal'
  * note*. Unticked (the default) means two notes, two dots on the map. Ticked
  * writes `same_as:: [[Options]]` into the merged copy — a line you can read and
  * delete — and the map then draws them as one.
+ *
+ * The other case is the same idea under ANOTHER name — a run's "Split-apply-
+ * combine" and your "Group-by pattern". When Talk to docs is on, the plan
+ * proposes such a twin for a new note (found by meaning, `distill/sameAs.ts`);
+ * it is shown unticked, and a tick means exactly what it means for a clash.
  */
 export function MergeDialog({
   plan,
@@ -38,6 +43,7 @@ export function MergeDialog({
   }, [onCancel])
 
   const fresh = plan.entries.filter((e) => e.action === 'new')
+  const twins = fresh.filter((e) => e.sameAsCandidate)
   const clashes = plan.entries.filter((e) => e.action === 'collides')
   const identical = plan.entries.filter((e) => e.action === 'identical')
   const plural = (n: number, one: string, many = `${one}s`): string => (n === 1 ? one : many)
@@ -80,8 +86,29 @@ export function MergeDialog({
                 {plural(identical.length, 'it', 'them')}
               </li>
             )}
+            {twins.length > 0 && (
+              <li>
+                {twins.length} {plural(twins.length, 'looks', 'look')} like a note you already have
+                under another name — tick to link {plural(twins.length, 'it', 'them')} as one
+              </li>
+            )}
           </ul>
         </div>
+        {twins.length > 0 && (
+          <div className="merge-clashes merge-twins">
+            {twins.map((e) => (
+              <label key={e.name} className="merge-clash merge-twin">
+                <input
+                  type="checkbox"
+                  checked={sameAs.has(e.name)}
+                  onChange={() => toggle(e.name)}
+                />
+                <span className="merge-clash-name">{e.name}</span>
+                <span className="merge-clash-hint">same as your “{e.sameAsCandidate}”</span>
+              </label>
+            ))}
+          </div>
+        )}
         {clashes.length > 0 && (
           <div className="merge-clashes">
             {clashes.map((e) => (

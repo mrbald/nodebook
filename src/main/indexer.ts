@@ -292,6 +292,12 @@ export class VaultIndex {
     }))
   }
 
+  /** Every note's centroid vector by path (see `VectorStore.noteVectors`);
+   *  empty when talk is off. */
+  talkNoteVectors(): ReadonlyMap<string, Float32Array> {
+    return this.vec?.noteVectors() ?? new Map()
+  }
+
   /** Semantic kNN edges (by note *path*, matching the map's node ids) among
    *  `paths`, for "colour by meaning". `minScore` drops weak pairs (see
    *  `talkNeighbors`). */

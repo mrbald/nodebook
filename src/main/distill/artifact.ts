@@ -831,8 +831,10 @@ export function mergeRun(
       rewriteSourceField(rewriteLinks(note.content, renames), renames),
       renames
     )
-    if (e.action === 'collides' && confirmed.has(note.name.toLowerCase()))
-      content = withSameAs(content, note.name)
+    // The twin a confirmation points at: for a clash, the vault note of the
+    // same name; for a new note, the one the plan proposed by meaning.
+    const twin = e.action === 'collides' ? note.name : e.sameAsCandidate
+    if (twin && confirmed.has(note.name.toLowerCase())) content = withSameAs(content, twin)
     planned.push({
       path: join(folder, `${e.targetName}.md`),
       bytes: Buffer.from(content, 'utf8'),
