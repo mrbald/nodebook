@@ -642,6 +642,11 @@ export function GraphView({
                 ? 'Referenced, not yet created'
                 : `${selOut.length} out · ${selIn.length} in`}
             </div>
+            {selectedNode.aliases && selectedNode.aliases.length > 0 && (
+              <div className="graph-insp-aliases" title="Notes you confirmed are the same thing">
+                also known as {selectedNode.aliases.join(', ')}
+              </div>
+            )}
             <div className="graph-insp-actions">
               {selectedNode.path && (
                 <>

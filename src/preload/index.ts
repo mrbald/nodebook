@@ -4,6 +4,7 @@ import type {
   Backlink,
   DistillDocument,
   DistillEstimate,
+  DistillMergePlan,
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
@@ -169,8 +170,14 @@ const api = {
   distillListRuns: (): Promise<DistillRunInfo[]> => ipcRenderer.invoke('distill:listRuns'),
   distillRemove: (runId: string): Promise<void> => ipcRenderer.invoke('distill:remove', runId),
   /** Merge a run into the vault (reversible). */
-  distillMerge: (runId: string): Promise<DistillMergeResult> =>
-    ipcRenderer.invoke('distill:merge', runId),
+  /** One staged note's text, for the read-only pane (main path-checks the name). */
+  distillReadNote: (runId: string, name: string): Promise<{ content: string } | null> =>
+    ipcRenderer.invoke('distill:readNote', runId, name),
+  /** What merging this run would do, before anything is written. */
+  distillMergePlan: (runId: string): Promise<DistillMergePlan> =>
+    ipcRenderer.invoke('distill:mergePlan', runId),
+  distillMerge: (runId: string, opts?: { sameAs?: string[] }): Promise<DistillMergeResult> =>
+    ipcRenderer.invoke('distill:merge', runId, opts),
   /** Undo a run's merge. */
   distillUnmerge: (runId: string): Promise<DistillUnmergeResult> =>
     ipcRenderer.invoke('distill:unmerge', runId),

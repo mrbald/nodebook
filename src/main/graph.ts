@@ -11,6 +11,13 @@ import type { GraphData, GraphEdge, GraphNode } from '../shared/types'
  * ambiguous — `ambiguousTargets` counts the targets that could have meant more
  * than one note, so the UI can say so instead of quietly guessing.
  *
+ * The one exception to "one file, one node" is a CONFIRMED alias. A merge writes
+ * `same_as:: [[Original]]` into a note only when the user ticked "same as the
+ * existing note" in the merge dialog, and that is the signal this module honours:
+ * the note is folded into the one it names, its edges are re-pointed there, and
+ * the name it used to answer to is kept as an `alias` on the surviving node. An
+ * unconfirmed name clash stays two dots — a clash is not evidence of identity.
+ *
  * `focus` (a note *path*) gives a local depth-`d` neighbourhood; `null` gives the
  * whole graph capped to the highest-degree nodes. Edges in the result always
  * have both endpoints present (no dangling references).
@@ -35,6 +42,8 @@ export interface TripleRow {
 const GHOST = 'ghost:'
 /** Synthetic overlay relation: the same note name on both sides (see `overlayGraph`). */
 export const SAME_NAME = 'same_name'
+/** The body field a merge writes when the user confirmed two notes are one thing. */
+export const SAME_AS = 'same_as'
 
 /** Base note name from a path: strip directories and the `.md` extension. */
 export function noteName(path: string): string {
@@ -154,6 +163,49 @@ export function buildGraph(
     return { id: sameFolder[0] ?? cands[0], key, ambiguous: true }
   }
 
+  // --- Confirmed aliases collapse ----------------------------------------
+  // `same_as:: [[Other]]` is a user-confirmed decision written into markdown by
+  // the merge dialog. Union the SUBJECT into the OBJECT (the note that was
+  // already in the vault wins, so a merge converges onto what you had), following
+  // chains to their end. The pairs are sorted first, so a run of triples in any
+  // order collapses to the same canonical node every time.
+  const parent = new Map<string, string>()
+  const find = (x: string): string => {
+    let r = x
+    for (let i = 0; i < 64; i++) {
+      const up = parent.get(r)
+      if (up === undefined || up === r) break
+      r = up
+    }
+    return r
+  }
+  const aliasPairs: [string, string][] = []
+  for (const t of triples) {
+    if (t.relation !== SAME_AS || !pathSet.has(t.source_file)) continue
+    const { id } = resolve(t.object, t.source_file)
+    // An alias naming a note that does not exist is not a collapse — it stays an
+    // ordinary edge to a ghost, so a typo is visible instead of silent.
+    if (pathSet.has(id)) aliasPairs.push([t.source_file, id])
+  }
+  aliasPairs.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]))
+  for (const [subject, object] of aliasPairs) {
+    const a = find(subject)
+    const b = find(object)
+    if (a !== b) parent.set(a, b)
+  }
+  const canon = parent.size === 0 ? (id: string): string => id : find
+  /** Labels folded into each surviving node — shown in the map's inspector. */
+  const aliasLabels = new Map<string, Set<string>>()
+  for (const id of new Set(aliasPairs.flat())) {
+    const c = canon(id)
+    if (c === id) continue
+    const set = aliasLabels.get(c) ?? new Set<string>()
+    set.add(noteName(id))
+    aliasLabels.set(c, set)
+  }
+  const collapsed = (t: TripleRow, object: string): boolean =>
+    t.relation === SAME_AS && pathSet.has(t.source_file) && pathSet.has(object)
+
   interface Edge {
     subject: string
     relation: string
@@ -169,12 +221,16 @@ export function buildGraph(
   let allEdges: Edge[] = []
   for (const t of triples) {
     const { id, key, ambiguous } = resolve(t.object, t.source_file)
-    if (t.source_file === id) continue // skip self-loops (self-references)
-    const dedupe = `${t.source_file} ${t.relation} ${id}`
+    if (collapsed(t, id)) continue // the alias edge itself: the fold replaces it
+    const subject = canon(t.source_file)
+    const object = canon(id)
+    // Self-loops (self-references, and pairs the fold just made one node).
+    if (subject === object) continue
+    const dedupe = `${subject} ${t.relation} ${object}`
     if (seen.has(dedupe)) continue
     seen.add(dedupe)
-    if (id.startsWith(GHOST)) ghostLabel.set(id, t.object)
-    allEdges.push({ subject: t.source_file, relation: t.relation, object: id, key, ambiguous })
+    if (object.startsWith(GHOST)) ghostLabel.set(object, t.object)
+    allEdges.push({ subject, relation: t.relation, object, key, ambiguous })
   }
 
   // A typed relation for a pair supersedes the bare `links_to`: drop the
@@ -194,12 +250,14 @@ export function buildGraph(
   // edges are dropped here, before BFS/degree-ranking, on purpose: it changes
   // reachability, so notes connected only through the book stop reading as
   // connected to each other.
+  // A focus that was itself folded into another note opens its surviving node.
+  const focusId = focus ? canon(focus) : null
   const hubs = new Set<string>()
   for (const e of allEdges) if (e.relation === 'source') hubs.add(e.object)
   // The user explicitly opened this node — never hide it, even if it's a hub.
   // Simplest correct fix: exempt it from the hub set, so both the node and its
   // edges survive (instead of special-casing "keep the node, drop its edges").
-  if (focus) hubs.delete(focus)
+  if (focusId) hubs.delete(focusId)
   const hiddenSources = showSources ? 0 : hubs.size
   if (!showSources && hubs.size > 0) {
     allEdges = allEdges.filter((e) => !hubs.has(e.subject) && !hubs.has(e.object))
@@ -207,10 +265,10 @@ export function buildGraph(
 
   let nodeIds: Set<string>
   let total: number // candidate nodes available (≥ shown when the global cap bites)
-  if (focus && pathSet.has(focus)) {
+  if (focusId && pathSet.has(focusId)) {
     // BFS out from the focus note to `depth` hops (edges are undirected for reach).
-    const included = new Set<string>([focus])
-    let frontier = new Set<string>([focus])
+    const included = new Set<string>([focusId])
+    let frontier = new Set<string>([focusId])
     for (let d = 0; d < depth; d++) {
       const next = new Set<string>()
       for (const e of allEdges) {
@@ -249,13 +307,15 @@ export function buildGraph(
 
   const nodes: GraphNode[] = [...nodeIds].map((id) => {
     const real = pathSet.has(id)
+    const folded = aliasLabels.get(id)
     return {
       id,
       label: ghostLabel.get(id) ?? noteName(id),
       path: real ? id : null,
       ghost: !real,
       degree: degree.get(id) ?? 0,
-      focus: focus === id
+      focus: focusId === id,
+      ...(folded && folded.size > 0 ? { aliases: [...folded].sort() } : {})
     }
   })
   const edges: GraphEdge[] = keptEdges.map((e) => ({

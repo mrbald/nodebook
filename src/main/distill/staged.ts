@@ -1,6 +1,6 @@
 /**
  * The staged store for distill runs: each run gets its OWN `VaultIndex` over a
- * `run.db` inside its `.nodebook/distill/<id>/` folder. Because that db is
+ * `run.db` inside its `.distill/<id>/` folder. Because that db is
  * separate from the canonical index, a run's notes can never leak into vault-wide
  * search, backlinks, or the graph — the firewall is structural, not a predicate
  * threaded through every query. Promotion (out of scope for D1) would move the
@@ -11,7 +11,7 @@
  * firewall live in artifact.ts (unit-tested); this thin wrapper is e2e-covered.
  */
 
-import { readFileSync, rmSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { VaultIndex } from '../indexer'
 import { writeRunArtifact, runDir, listRuns, removeRun, type RunSource } from './artifact'
@@ -25,13 +25,39 @@ export class StagedRunStore {
 
   constructor(private vaultRoot: string) {}
 
-  private indexOf(runId: string): VaultIndex {
+  /**
+   * The run's index, opening it on first use.
+   *
+   * `run.db` is a CACHE of `notes/*.md`, not the run itself — so a run whose db
+   * was deleted, or that arrived from a backup or a migration without one, is
+   * rebuilt from its markdown instead of rendering an empty map. The notes are
+   * the source of truth; that is the same rule `.nodebook/` lives by.
+   */
+  private indexOf(runId: string, rebuild = true): VaultIndex {
     let idx = this.indices.get(runId)
     if (!idx) {
-      idx = new VaultIndex(join(runDir(this.vaultRoot, runId), 'run.db'))
+      const dbPath = join(runDir(this.vaultRoot, runId), 'run.db')
+      const missing = !existsSync(dbPath)
+      idx = new VaultIndex(dbPath)
       this.indices.set(runId, idx)
+      if (missing && rebuild) this.reindex(runId, idx)
     }
     return idx
+  }
+
+  /** Re-index a run's staged notes into a fresh db. */
+  private reindex(runId: string, idx: VaultIndex): void {
+    const notes = join(runDir(this.vaultRoot, runId), 'notes')
+    if (!existsSync(notes)) return
+    for (const name of readdirSync(notes).sort()) {
+      if (!name.endsWith('.md')) continue
+      const p = join(notes, name)
+      try {
+        idx.indexFile(p, readFileSync(p, 'utf8'), 0)
+      } catch {
+        // unreadable — the rest of the run still renders
+      }
+    }
   }
 
   /** Write a run's notes to disk and index them into its own db. Replaces any
@@ -50,7 +76,7 @@ export class StagedRunStore {
     for (const f of ['run.db', 'run.db-wal', 'run.db-shm'])
       rmSync(join(runDir(this.vaultRoot, runId), f), { force: true })
     const { dir, notePaths } = writeRunArtifact(this.vaultRoot, runId, source, notes, stats)
-    const idx = this.indexOf(runId)
+    const idx = this.indexOf(runId, false) // the loop below indexes them; no rebuild
     for (const p of notePaths) idx.indexFile(p, readFileSync(p, 'utf8'), 0)
     return { runId, dir }
   }
