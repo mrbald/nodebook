@@ -31,6 +31,9 @@ describe('buildExtractionPrompt', () => {
     const { system } = buildExtractionPrompt([{ chunkId: 1, heading: '', text: 'Дао рождает одно.' }])
     expect(system).toMatch(/same\s+language/i)
     expect(system).toMatch(/never\s+translate/i)
+    // ...and names none: an example language became the output language once
+    // (Sonnet wrote an English book's notes in Russian), so the rule stays generic.
+    expect(system).not.toMatch(/Russian|English|French|German|Chinese/)
   })
 
   it('carries the concepts earlier windows named, after the schema', () => {
