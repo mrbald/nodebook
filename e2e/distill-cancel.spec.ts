@@ -4,10 +4,13 @@ import { cpSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, sep } from 'path'
 
-// Cancelling a distill run from the UI. The stub chat is slowed down
-// (NODEBOOK_E2E_CHAT_DELAY_MS) so the run is still extracting when the Cancel
-// button is clicked — otherwise it would be over before the click lands. Its
-// own app instance: the delay would make every other distill test slow.
+// Cancelling a distill run from the UI, and resuming it. The stub chat is slowed
+// down (NODEBOOK_E2E_CHAT_DELAY_MS) so the run is still extracting when the
+// Cancel button is clicked — otherwise it would be over before the click lands.
+// Its own app instance: the delay would make every other distill test slow.
+//
+// The three tests are one story in order: cancel → the run is paused, not lost →
+// Resume finishes it.
 
 const projectRoot = resolve(__dirname, '..')
 const fixtureVault = join(__dirname, 'fixtures', 'vault')
@@ -76,7 +79,7 @@ test.afterAll(async () => {
   await app?.close()
 })
 
-test('Cancel stops a run in flight: nothing is staged, and it is not an error', async () => {
+test('Cancel stops a run in flight: it is not an error, and the run is paused', async () => {
   // The stub chat deliberately stalls (probe + one extraction call), so this
   // test needs more than the suite's fail-fast ceiling.
   test.setTimeout(30_000)
@@ -100,9 +103,30 @@ test('Cancel stops a run in flight: nothing is staged, and it is not an error', 
   await expect(page.locator('.distill-coverage-banner')).toContainText('cancelled')
   await expect(page.locator('.error-banner')).toHaveCount(0)
 
-  // Nothing was staged — the cancelled run does not appear in the runs list.
-  expect(await page.evaluate(() => window.nodebook.distillListRuns())).toEqual([])
-  await expect(page.locator('.runs-section')).toHaveCount(0)
+  // The run is PAUSED, not lost: it keeps what it already read and offers to
+  // carry on. Nothing is staged as notes yet — that only happens on completion.
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(runs).toEqual([{ id: 'on-government', notes: 0, merged: false, unfinished: true }])
+  await expect(page.locator('.run-item-meta')).toContainText('paused')
+  await expect(page.locator('.run-item-resume')).toBeVisible()
+})
+
+test('Resume carries the paused run to the end, and stages its notes', async () => {
+  test.setTimeout(60_000)
+
+  await page.locator('.run-item-resume').click()
+  const toast = page.locator('.distill-toast')
+  await expect(toast).toBeVisible({ timeout: 15_000 })
+  await expect(toast).toBeHidden({ timeout: 45_000 })
+
+  // Finished: notes staged, and the run is no longer offered for resuming.
+  await expect(page.locator('.distill-coverage-banner')).toContainText('Staged')
+  await expect(page.locator('.error-banner')).toHaveCount(0)
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(runs).toHaveLength(1)
+  expect(runs[0]).toMatchObject({ id: 'on-government', unfinished: false })
+  expect(runs[0].notes).toBeGreaterThan(0)
+  await expect(page.locator('.run-item-resume')).toHaveCount(0)
 })
 
 test('after a cancelled run the next one can start (the single-run slot is free)', async () => {

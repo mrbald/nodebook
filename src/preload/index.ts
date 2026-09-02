@@ -3,6 +3,7 @@ import type {
   AskResult,
   Backlink,
   DistillDocument,
+  DistillEstimate,
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
@@ -146,6 +147,12 @@ const api = {
     ipcRenderer.invoke('distill:registerPath', absPath),
   distillRun: (docId: string): Promise<DistillRunResult> =>
     ipcRenderer.invoke('distill:run', docId),
+  /** What a run would cost, before starting it (no model calls). */
+  distillEstimate: (docId: string): Promise<DistillEstimate> =>
+    ipcRenderer.invoke('distill:estimate', docId),
+  /** Continue a run that was cancelled or interrupted, from its checkpoint. */
+  distillResume: (runId: string): Promise<DistillRunResult> =>
+    ipcRenderer.invoke('distill:resume', runId),
   distillCancel: (runId: string): Promise<void> => ipcRenderer.invoke('distill:cancel', runId),
   distillGraph: (
     runId: string,

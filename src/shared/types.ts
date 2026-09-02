@@ -263,6 +263,17 @@ export interface DistillStats {
   merged: number
   notes: number
   failedClusters: number
+  /** Links between the run's notes, `source::` excluded — the map's edges. */
+  edges: number
+  /** Of those, how many still name a note the run did not write (a dead end
+   *  in the map). Counted rather than hidden: a link is only redirected when
+   *  the name clearly matches an emitted note, never guessed at. */
+  ghostLinks: number
+  /** Of those, how many were added because one note's text names another. */
+  mentions: number
+  /** Separate islands of notes in the run's map (a lower number means the run
+   *  came out as one connected body of knowledge rather than loose piles). */
+  components: number
   /** Fraction (0..1) of `chunks` actually shown to the LLM as a cluster
    *  representative. A big source is clustered + sampled, not read in full —
    *  this is the honesty number: 1.0 means every chunk was shown, well below
@@ -286,10 +297,24 @@ export interface DistillRunResult {
 /** A staged run as shown in the "Distilled runs" list. */
 export interface DistillRunInfo {
   id: string
-  /** Emitted (concept) notes in the run — 0 means nothing survived grounding. */
+  /** Emitted (concept) notes in the run — 0 means nothing survived grounding
+   *  (or that the run never finished; see `unfinished`). */
   notes: number
   /** Whether the run has already been merged into the vault. */
   merged: boolean
+  /** The run started but never finished — cancelled, or interrupted. What it
+   *  had already extracted is kept, and Resume carries on from there. */
+  unfinished: boolean
+}
+
+/** What a run will cost, worked out from the document before it starts. */
+export interface DistillEstimate {
+  /** Passages the document splits into. */
+  chunks: number
+  /** Model calls the run will make. */
+  calls: number
+  /** Fraction (0..1) of the passages the model will actually be shown. */
+  coverage: number
 }
 
 export interface DistillProgress {

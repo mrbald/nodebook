@@ -1,5 +1,6 @@
 import type { ChatModel, ChatRequest, ProviderConfig } from './provider'
 import { claudeCliChat, codexCliChat, genericCliChat } from './cliChat'
+import { tagError } from '../distill/retry'
 
 /**
  * Chat adapters for "Ask" — each turns a grounded request into a token stream.
@@ -59,7 +60,13 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
           stream: true
         })
       })
-      if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      // The status travels with the error: a 429 or a 5xx is worth retrying, a
+      // 401 never is, and distill's retry policy must not guess from the prose.
+      if (!res.ok)
+        throw tagError(
+          new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 200)}`),
+          { status: res.status }
+        )
       // No `[DONE]` sentinel on this path — that's an OpenAI-ism (see
       // openaiCompatChat below). Anthropic's stream just ends.
       for await (const data of sseData(res)) {
@@ -99,7 +106,10 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
         },
         body: JSON.stringify({ model: cfg.model, messages, stream: true })
       })
-      if (!res.ok) throw new Error(`Chat API ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      if (!res.ok)
+        throw tagError(new Error(`Chat API ${res.status}: ${(await res.text()).slice(0, 200)}`), {
+          status: res.status
+        })
       for await (const data of sseData(res)) {
         if (data === '[DONE]') break
         try {

@@ -1037,6 +1037,24 @@ body {
   color: var(--muted);
   font-size: 11px;
 }
+.run-item-resume {
+  flex: none;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.run-item-resume:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.run-item-resume:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .run-item-del {
   flex: none;
   background: none;
@@ -1508,6 +1526,16 @@ body {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
   font-size: 13px;
   color: var(--text);
+}
+/* Two lines in the toast: what the run will cost, then where it has got to. */
+.distill-toast-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.distill-toast-plan {
+  color: var(--muted);
+  font-size: 12px;
 }
 .distill-spinner {
   width: 12px;

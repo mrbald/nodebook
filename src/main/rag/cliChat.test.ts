@@ -12,6 +12,7 @@ import {
   resolveCommand
 } from './cliChat'
 import type { ChatRequest } from './provider'
+import { isRetryable } from '../distill/retry'
 
 const collect = async (stream: AsyncIterable<string>): Promise<string> => {
   let out = ''
@@ -202,6 +203,26 @@ describe('genericCliChat (real spawn)', () => {
     await expect(collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).rejects.toThrow(
       /exit 3.*kaput/s
     )
+  })
+
+  it('tags a crash as retryable and a sign-in failure as not (distill\'s retry policy)', async () => {
+    const crashed = genericCliChat({
+      kind: 'cli',
+      command: process.execPath,
+      args: ['-e', 'console.error("segfault"); process.exit(3)']
+    })
+    await expect(
+      collect(crashed.chat({ messages: [{ role: 'user', content: 'x' }] }))
+    ).rejects.toSatisfy(isRetryable)
+
+    const notSignedIn = genericCliChat({
+      kind: 'cli',
+      command: process.execPath,
+      args: ['-e', 'console.error("Not logged in"); process.exit(1)']
+    })
+    await expect(
+      collect(notSignedIn.chat({ messages: [{ role: 'user', content: 'x' }] }))
+    ).rejects.not.toSatisfy(isRetryable)
   })
 
   it('rejects an empty answer', async () => {

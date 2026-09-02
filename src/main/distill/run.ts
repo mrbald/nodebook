@@ -8,6 +8,13 @@
  * Cost is bounded by clustering (one extraction call per cluster, capped). Bad
  * model JSON gets one repair retry, then that cluster is skipped (counted, never
  * silently). Every claim passes the citation gate before becoming a note.
+ *
+ * A run is also resilient: a call that fails for a transient reason is retried
+ * with backoff, a call that keeps failing costs its own window and not the run,
+ * and every window that lands is written to a checkpoint — so a cancelled or
+ * crashed run resumes from where it stopped instead of starting over. The one
+ * thing that DOES stop a run is three failing windows in a row: an expired key
+ * should cost three slow calls, not a hundred.
  */
 
 import type { ChatModel, ChatRequest } from '../rag/provider'
@@ -21,8 +28,9 @@ import {
   type ExtractedItem
 } from './extract'
 import { dedup } from './dedup'
-import { emitNotes, type EmittedNote } from './emit'
-import { sourceNoteName } from './artifact'
+import { emitRun, type EmittedNote } from './emit'
+import { sourceNoteName, type CheckpointStore } from './artifact'
+import { withRetry, type RetryOptions } from './retry'
 
 /** Thrown when a run is cancelled via its AbortSignal. */
 export class DistillAborted extends Error {
@@ -77,6 +85,45 @@ export interface DistillOptions {
   repsPerCluster?: number
   /** Embedding batch size (default 32). */
   embedBatch?: number
+  /** Per-call retry policy (see retry.ts). Defaults to 3 tries, 1 s × 2. */
+  retry?: RetryOptions
+  /** Consecutive failing windows that stop the run (default 3). One bad window
+   *  is the model's problem; three in a row is the provider's, and the rest of
+   *  the calls would only repeat it more slowly. */
+  maxConsecutiveFailures?: number
+  /** Where completed windows are recorded, and where a resume reads them back.
+   *  Absent = a run that cannot be resumed (the unit tests' default). */
+  checkpoint?: CheckpointStore
+}
+
+/** What a run will cost, from the converted text alone — no model calls, no
+ *  embedding. Shown before the run so "reading a book" is never a surprise. */
+export interface DistillEstimate {
+  /** Passages the document splits into. */
+  chunks: number
+  /** Model calls the plan needs — one per window (an upper bound: a window
+   *  that turns out to hold no passages is not called). */
+  calls: number
+  /** Fraction (0..1) of those passages the model will actually be shown. */
+  coverage: number
+}
+
+/**
+ * Plan a run without running it: chunk the text and ask the same pure planner
+ * the run uses. Cheap and deterministic, so the estimate the user sees is the
+ * plan the run then follows.
+ */
+export function estimateDistill(text: string, opts: DistillOptions = {}): DistillEstimate {
+  const chunks = chunkMarkdown(text).length
+  if (chunks === 0) return { chunks: 0, calls: 0, coverage: 1 }
+  const calls = chooseK(chunks, {
+    perCluster: opts.perCluster,
+    min: opts.minClusters,
+    max: opts.maxClusters
+  })
+  // Each call shows at most `repsPerCluster` chunks, and no chunk twice.
+  const shown = Math.min(chunks, calls * (opts.repsPerCluster ?? 4))
+  return { chunks, calls, coverage: shown / chunks }
 }
 
 export interface DistillResult {
@@ -95,6 +142,11 @@ export interface DistillResult {
     merged: number
     notes: number
     failedClusters: number
+    /** Shape of the run's link graph (see shared DistillStats and link.ts). */
+    edges: number
+    ghostLinks: number
+    mentions: number
+    components: number
     /** Fraction (0..1) of `chunks` actually shown to the LLM (see shared DistillStats). */
     coverage: number
   }
@@ -178,11 +230,22 @@ export async function distill(
   const prov = new Map<number, ChunkProvenance>()
   chunks.forEach((c, id) => prov.set(id, { file: source.file, start: c.start, text: c.text }))
 
+  // A resume starts from the plan the first attempt committed to: the windows
+  // are already decided, so embedding and clustering are skipped entirely (the
+  // expensive half of the run, and re-deciding could only shift the windows
+  // under the results already recorded). A plan that no longer fits the text is
+  // ignored rather than trusted.
+  const saved = opts.checkpoint?.load() ?? null
+  const savedPlan =
+    saved?.plan && saved.plan.every((w) => w.every((id) => id >= 0 && id < chunks.length))
+      ? saved.plan
+      : null
+
   // 2. Embed (injected), batched.
   const embedBatch = opts.embedBatch ?? 32
   const points: Point[] = []
-  report('embedding', 0, chunks.length)
-  for (let i = 0; i < chunks.length; i += embedBatch) {
+  report('embedding', savedPlan ? chunks.length : 0, chunks.length)
+  for (let i = 0; savedPlan === null && i < chunks.length; i += embedBatch) {
     throwIfAborted(opts.signal)
     const slice = chunks.slice(i, i + embedBatch)
     // The embedder gets the signal so a cancel interrupts the round trip; its
@@ -197,36 +260,75 @@ export async function distill(
     report('embedding', Math.min(i + embedBatch, chunks.length), chunks.length)
   }
 
-  // 3. Cluster (pure). The ceiling bounds the extraction-call budget.
+  // 3. Cluster (pure). The ceiling bounds the extraction-call budget. The plan
+  //    — the chunk ids each call will be shown — is recorded before the first
+  //    call, so a resume never has to reproduce it.
   throwIfAborted(opts.signal)
-  const k = chooseK(chunks.length, {
-    perCluster: opts.perCluster,
-    min: opts.minClusters,
-    max: opts.maxClusters
-  })
-  const clusters = kmeans(points, k, { repCount: opts.repsPerCluster })
-  report('clustering', clusters.length, clusters.length)
+  let plan: number[][]
+  if (savedPlan) {
+    plan = savedPlan
+  } else {
+    const k = chooseK(chunks.length, {
+      perCluster: opts.perCluster,
+      min: opts.minClusters,
+      max: opts.maxClusters
+    })
+    plan = kmeans(points, k, { repCount: opts.repsPerCluster }).map((c) => c.representativeIds)
+    opts.checkpoint?.save({ type: 'plan', windows: plan })
+  }
+  report('clustering', plan.length, plan.length)
 
-  // 4. Extract per cluster (injected chat), with repair retry. Each shown
-  //    chunk remembers the call it was shown in, so grounding can look for a
+  // 4. Extract per window (injected chat), with repair retry. Each shown chunk
+  //    remembers the call it was shown in, so grounding can look for a
   //    mislabelled quote in the other chunks of that same prompt.
+  //
+  //    A failed call costs its window, not the run: transient failures are
+  //    retried with backoff, and what is left is counted and skipped. Three
+  //    failures in a row do stop the run — that is a provider that is not
+  //    coming back, and the remaining windows would fail just as slowly.
   const extracted: ExtractedItem[] = []
   const window = new Map<number, number[]>()
+  const maxConsecutive = opts.maxConsecutiveFailures ?? 3
   let failedClusters = 0
-  report('extracting', 0, clusters.length)
-  for (let i = 0; i < clusters.length; i++) {
+  let consecutiveErrors = 0
+  report('extracting', 0, plan.length)
+  for (let i = 0; i < plan.length; i++) {
     throwIfAborted(opts.signal)
-    const shown = clusters[i].representativeIds
+    const shown = plan[i]
     for (const id of shown) window.set(id, shown)
+    const already = saved?.done.get(i)
+    if (already) {
+      // Recorded by an earlier attempt — replay it, don't pay for it twice.
+      if (already.failed) failedClusters++
+      extracted.push(...already.items)
+      report('extracting', i + 1, plan.length)
+      continue
+    }
     const cc = shown.map((id) => ({
       chunkId: id,
       heading: chunks[id].heading,
       text: chunks[id].text
     }))
-    const { items, failed } = await extractCluster(deps.chat, cc, opts.signal)
+    let items: ExtractedItem[] = []
+    let failed: boolean
+    try {
+      ;({ items, failed } = await withRetry(() => extractCluster(deps.chat, cc, opts.signal), {
+        ...opts.retry,
+        signal: opts.signal
+      }))
+      consecutiveErrors = 0
+    } catch (err) {
+      throwIfAborted(opts.signal)
+      if (err instanceof DistillAborted) throw err
+      failed = true
+      if (++consecutiveErrors >= maxConsecutive) throw err
+    }
     if (failed) failedClusters++
+    opts.checkpoint?.save(
+      failed ? { type: 'window', index: i, failed: true } : { type: 'window', index: i, items }
+    )
     extracted.push(...items)
-    report('extracting', i + 1, clusters.length)
+    report('extracting', i + 1, plan.length)
   }
 
   // 5–7. Ground → dedup → emit (all pure).
@@ -239,31 +341,38 @@ export async function distill(
     windowOf: (chunkId) => window.get(chunkId) ?? [],
     fullText: source.text
   })
-  const { notes: deduped, merged } = dedup(grounded)
+  // dedup renames notes and emit de-collides them, so a link written earlier
+  // can name a note that no longer exists; `aliases` lets link.ts (inside
+  // emitRun) point it at the surviving note instead of leaving a dead end.
+  const { notes: deduped, merged, aliases } = dedup(grounded)
   // The book itself is written as a note of the run (artifact.planRunFiles), so
-  // its name is off-limits to the emitted notes — see emitNotes.
-  const emitted = emitNotes(deduped, { reserved: [sourceNoteName(source.file)] })
+  // its name is off-limits to the emitted notes — see emitRun.
+  const emitted = emitRun(deduped, { reserved: [sourceNoteName(source.file)], aliases })
   report('done', 1, 1)
 
-  // Coverage honesty: clusters partition every chunk, and representativeIds is
-  // a subset of each cluster's members, so summing them counts each shown
+  // Coverage honesty: clusters partition every chunk, and each window shows a
+  // subset of one cluster's members, so summing the plan counts each shown
   // chunk exactly once — this is what the LLM actually saw, out of the whole.
-  const shown = clusters.reduce((sum, c) => sum + c.representativeIds.length, 0)
+  const shown = plan.reduce((sum, ids) => sum + ids.length, 0)
   const coverage = chunks.length > 0 ? shown / chunks.length : 1
 
   return {
-    notes: emitted,
+    notes: emitted.notes,
     stats: {
       chunks: chunks.length,
-      clusters: clusters.length,
+      clusters: plan.length,
       extracted: extracted.length,
       grounded: grounded.length,
       dropped: droppedByReason.noEvidence + droppedByReason.notFound + droppedByReason.ambiguous,
       droppedByReason,
       recovered,
       merged,
-      notes: emitted.length,
+      notes: emitted.notes.length,
       failedClusters,
+      edges: emitted.edges,
+      ghostLinks: emitted.ghostLinks,
+      mentions: emitted.mentions,
+      components: emitted.components,
       coverage
     }
   }
