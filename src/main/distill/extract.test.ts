@@ -34,6 +34,9 @@ describe('buildExtractionPrompt', () => {
     // ...and names none: an example language became the output language once
     // (Sonnet wrote an English book's notes in Russian), so the rule stays generic.
     expect(system).not.toMatch(/Russian|English|French|German|Chinese/)
+    // ...and makes the model state the language before it writes an item.
+    expect(system.indexOf('"language"')).toBeGreaterThan(0)
+    expect(system.indexOf('"language"')).toBeLessThan(system.indexOf('"items"'))
   })
 
   it('carries the concepts earlier windows named, after the schema', () => {
@@ -148,6 +151,15 @@ describe('locateQuote', () => {
       'the method swapaxes , which takes'
     )
     expect(src.slice(...spanOf(locateQuote(src, 'broadcasting too')))).toBe('broad casting too')
+  })
+
+  it('lets go of a final punctuation mark the model changed', () => {
+    const src = 'objects can be converted to periods with the to_period method:\n\n    In [1]: x'
+    expect(src.slice(...spanOf(locateQuote(src, 'converted to periods with the to_period method.')))).toBe(
+      'converted to periods with the to_period method'
+    )
+    // Only the last mark, and only when the whole quote does not match.
+    expect(locateQuote('a. b. c.', 'a; b; c.')).toBeNull()
   })
 
   it('treats every quotation mark as the same mark', () => {

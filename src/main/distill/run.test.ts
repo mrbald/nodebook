@@ -863,8 +863,9 @@ describe('estimateDistill', () => {
 
 describe('distill — link integrity', () => {
   /**
-   * Two windows. The first names one idea twice, so dedup merges them and the
-   * longer title stops existing; the second links to that lost title. Without
+   * Two windows. The first names one idea twice (near-identical titles), so
+   * dedup merges them and the longer title stops existing; the second links to
+   * that lost title. Without
    * the alias map that link would be a dead end in the run's map.
    */
   function renamingChat(): ChatModel {
@@ -881,8 +882,8 @@ describe('distill — link integrity', () => {
         const evidence = [{ chunkId: Number(m[1]), quote }]
         const items = /faction/i.test(m[2])
           ? [
-              { kind: 'concept', title: 'Faction and its causes', summary: 's', evidence, links: [] },
-              { kind: 'concept', title: 'Faction', summary: 's', evidence, links: [] }
+              { kind: 'concept', title: 'The extended republic remedy', summary: 's', evidence, links: [] },
+              { kind: 'concept', title: 'Extended republic remedy', summary: 's', evidence, links: [] }
             ]
           : [
               {
@@ -890,7 +891,7 @@ describe('distill — link integrity', () => {
                 title: 'Separation of powers',
                 summary: 's',
                 evidence,
-                links: [{ relation: 'about', target: 'Faction and its causes' }]
+                links: [{ relation: 'about', target: 'The extended republic remedy' }]
               }
             ]
         yield JSON.stringify({ items })
@@ -900,10 +901,10 @@ describe('distill — link integrity', () => {
 
   it('leaves no ghost links when dedup renamed the note a link points at', async () => {
     const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: renamingChat() }, opts)
-    expect(res.stats.merged).toBe(1) // the two faction titles became one note
-    expect(res.notes.map((n) => n.name)).toEqual(['Faction', 'Separation of powers'])
+    expect(res.stats.merged).toBe(1) // the two remedy titles became one note
+    expect(res.notes.map((n) => n.name)).toEqual(['Extended republic remedy', 'Separation of powers'])
     // The link written against the title dedup dropped now finds the survivor…
-    expect(res.notes[1].content).toContain('about:: [[Faction]]')
+    expect(res.notes[1].content).toContain('about:: [[Extended republic remedy]]')
     // …so the run's map is one connected piece with no dead ends.
     expect(res.stats.ghostLinks).toBe(0)
     expect(res.stats.edges).toBe(1)

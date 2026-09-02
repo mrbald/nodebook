@@ -82,6 +82,12 @@ describe('themeNamingPrompt', () => {
     expect(system).toContain('"themes"')
     expect(system).toContain('2 to 4 words')
     expect(system).toContain('SAME LANGUAGE')
+    // ...and names no language: "never translate into English" once had Sonnet
+    // name an English book's themes in Russian (see extract.ts's prompt note).
+    expect(system).not.toMatch(/Russian|English|French|German|Chinese/)
+    // ...and makes the model state the language before it names anything.
+    expect(system).toContain('"language"')
+    expect(system.indexOf('"language"')).toBeLessThan(system.indexOf('"themes"'))
     expect(user).toContain('[theme 0]')
     expect(user).toContain('[theme 1]')
     expect(user).toContain('- Faction')

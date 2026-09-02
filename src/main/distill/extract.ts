@@ -119,7 +119,12 @@ export function relationOf(raw: string): string {
   return RELATION_SET.has(n) ? n : FALLBACK_RELATION
 }
 
+/** `language` first, for the same reason as in themes.ts: a model made to state
+ *  the source's language before writing anything else keeps to it. Asked only
+ *  to "write in the same language", the earlier wording had Sonnet write an
+ *  English book's summaries in Russian. The value itself is not read. */
 const SCHEMA_HINT = `{
+  "language": "<the language the source chunks are written in>",
   "items": [
     {
       "kind": "concept" | "claim" | "entity",
@@ -145,12 +150,14 @@ export interface PromptOptions {
  * and explicit about the grounding rule, so the model's own output is checkable
  * against the source. Pure: returns strings, runs no model.
  *
- * The language rule names no language. It used to say "a Russian text yields
- * Russian notes" as its example, and Sonnet — with thinking off, reading the
- * front matter of an English book — wrote every summary in Russian: the one
- * example became the instruction, and the concept registry then carried the
- * Russian titles into every later window. A rule with an example is a rule
- * with a bias; this one has to hold for any language, so it names none.
+ * The language rule names no language, and makes the model state one. It used
+ * to say "a Russian text yields Russian notes" as its example, and Sonnet —
+ * with thinking off, reading the front matter of an English book — wrote every
+ * summary in Russian: the one example became the instruction, and the concept
+ * registry then carried the Russian titles into every later window. A rule
+ * with an example is a rule with a bias; this one has to hold for any
+ * language, so it names none — and the schema's first field asks the model to
+ * say which language it sees before it writes a word (see `SCHEMA_HINT`).
  */
 export function buildExtractionPrompt(
   chunks: ClusterChunk[],
@@ -162,8 +169,8 @@ export function buildExtractionPrompt(
     'EXTRACTIVELY: every claim must be backed by a verbatim quote copied from one ' +
     'of the provided chunks, tagged with that chunk id. Do not assert anything the ' +
     'chunks do not state. If you cannot quote support for a claim, omit it — no ' +
-    'evidence, no item. Write every title, summary, and link target in the SAME ' +
-    'LANGUAGE the source chunks are written in, whatever language that is — ' +
+    'evidence, no item. First say which language the source chunks are written ' +
+    'in, then write every title, summary, and link target in that SAME LANGUAGE — ' +
     'never translate. (JSON keys and "kind"/"relation" values stay exactly as ' +
     'the schema spells them; use ONLY the listed relation values.) Return ONLY ' +
     'JSON in this exact shape:\n' +
@@ -359,17 +366,26 @@ function locateAllIn(
   quote: string,
   limit = 2
 ): { start: number; end: number }[] {
-  const out: { start: number; end: number }[] = []
-  const qNorm = fold(quote.trim()).norm
-  if (!qNorm) return out
-  let from = 0
-  while (out.length < limit) {
-    const at = h.norm.indexOf(qNorm, from)
-    if (at < 0) break
-    out.push({ start: h.chars[at].origStart, end: h.chars[at + qNorm.length - 1].origEnd })
-    from = at + 1 // overlapping matches count too: err towards "ambiguous"
+  const search = (qNorm: string): { start: number; end: number }[] => {
+    const out: { start: number; end: number }[] = []
+    let from = 0
+    while (out.length < limit) {
+      const at = h.norm.indexOf(qNorm, from)
+      if (at < 0) break
+      out.push({ start: h.chars[at].origStart, end: h.chars[at + qNorm.length - 1].origEnd })
+      from = at + 1 // overlapping matches count too: err towards "ambiguous"
+    }
+    return out
   }
-  return out
+  const qNorm = fold(quote.trim()).norm
+  if (!qNorm) return []
+  const found = search(qNorm)
+  // A model closes a quote with the punctuation a sentence wants, not the
+  // one the source has ("…the to_period method." for "…the to_period
+  // method:"). The words are what is cited, so the final mark is let go.
+  if (found.length === 0 && qNorm.length > 1 && /[.:;,!?]$/.test(qNorm))
+    return search(qNorm.slice(0, -1))
+  return found
 }
 
 /**

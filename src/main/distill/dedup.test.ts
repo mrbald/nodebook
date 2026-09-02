@@ -39,12 +39,15 @@ describe('dedup', () => {
     expect(notes[0].links.map((l) => l.target).sort()).toEqual(['Monarchy', 'Republic'])
   })
 
-  it('merges different titles that cite the same span', () => {
-    const a = note({ title: 'Extended republic dilutes faction' })
-    const b = note({ title: 'Large states resist capture' }) // same citation span as `a`
+  it('does not merge different titles that cite the same span', () => {
+    // One passage supports several items — the person and the term they
+    // coined, `shape` and `dtype` from one sentence. A shared quote is
+    // relatedness, never identity (see the module header).
+    const a = note({ title: 'Hadley Wickham', kind: 'entity' })
+    const b = note({ title: 'split-apply-combine' }) // same citation span as `a`
     const { notes, merged } = dedup([a, b])
-    expect(merged).toBe(1)
-    expect(notes.length).toBe(1)
+    expect(merged).toBe(0)
+    expect(notes.length).toBe(2)
   })
 
   it('keeps genuinely distinct notes separate', () => {
@@ -54,16 +57,16 @@ describe('dedup', () => {
   })
 
   it('keeps the better-grounded title and does not mutate inputs', () => {
-    const sparse = note({ title: 'Faction is a force', citations: [{ file: 'Book.md', chunkId: 1, start: 0, end: 50, quote: 'q' }] })
+    const sparse = note({ title: 'hierarchical indexing', citations: [{ file: 'Book.md', chunkId: 1, start: 0, end: 50, quote: 'q' }] })
     const grounded = note({
-      title: 'Faction',
+      title: 'Hierarchical Indexing',
       citations: [
         { file: 'Book.md', chunkId: 1, start: 0, end: 50, quote: 'q' },
         { file: 'Book.md', chunkId: 2, start: 60, end: 90, quote: 'q' }
       ]
     })
     const { notes } = dedup([sparse, grounded])
-    expect(notes[0].title).toBe('Faction') // more citations wins
+    expect(notes[0].title).toBe('Hierarchical Indexing') // more citations wins
     expect(sparse.citations.length).toBe(1) // input untouched
   })
 
@@ -98,36 +101,41 @@ describe('dedup aliases', () => {
 
   it('maps an absorbed title to the surviving one', () => {
     const { notes, aliases } = dedup([
-      note({ title: 'Faction is a force', citations: [cite(0, 50)] }),
-      note({ title: 'Faction', citations: [cite(0, 50)] })
+      note({ title: 'The hierarchical indexing', citations: [cite(0, 50)] }),
+      note({ title: 'Hierarchical indexing', citations: [cite(100, 150)] })
     ])
-    expect(notes[0].title).toBe('Faction') // the sharper title survives
-    expect(aliases.get('Faction is a force')).toBe('Faction')
-    expect(aliases.has('Faction')).toBe(false) // a surviving title is never an alias
+    expect(notes[0].title).toBe('Hierarchical indexing') // the sharper title survives
+    expect(aliases.get('The hierarchical indexing')).toBe('Hierarchical indexing')
+    expect(aliases.has('Hierarchical indexing')).toBe(false) // a surviving title is never an alias
   })
 
   it('follows a chain: an earlier title lands on the FINAL surviving title', () => {
-    // The accumulator is renamed twice: 'Faction is a force' → 'Faction' →
-    // 'Factional strife' (better grounded). Both lost titles must point at the last.
+    // The accumulator is renamed twice: 'The hierarchical indexing' →
+    // 'Hierarchical indexing' (sharper) → 'hierarchical indexing' (better
+    // grounded). Both lost titles must point at the last.
     const { notes, aliases } = dedup([
-      note({ title: 'Faction is a force', citations: [cite(0, 50)] }),
-      note({ title: 'Faction', citations: [cite(0, 50)] }),
-      note({ title: 'Factional strife', citations: [cite(0, 50, 'q2'), cite(60, 90)] })
+      note({ title: 'The hierarchical indexing', citations: [cite(0, 50)] }),
+      note({ title: 'Hierarchical indexing', citations: [cite(100, 150)] }),
+      note({ title: 'hierarchical indexing', citations: [cite(200, 250, 'q2'), cite(300, 340), cite(400, 440)] })
     ])
     expect(notes).toHaveLength(1)
-    expect(notes[0].title).toBe('Factional strife')
-    expect(aliases.get('Faction is a force')).toBe('Factional strife')
-    expect(aliases.get('Faction')).toBe('Factional strife')
+    expect(notes[0].title).toBe('hierarchical indexing')
+    expect(aliases.get('The hierarchical indexing')).toBe('hierarchical indexing')
+    expect(aliases.get('Hierarchical indexing')).toBe('hierarchical indexing')
   })
 
   it('never aliases away a title another surviving note still carries', () => {
-    // 'Alpha' is absorbed here, but a later note keeps that exact title — a link
-    // to 'Alpha' must find THAT note, not be redirected to this group.
-    const { notes, aliases } = dedup([
-      note({ title: 'Alpha', citations: [cite(0, 50)] }),
-      note({ title: 'Beta', citations: [cite(0, 50)] }),
-      note({ title: 'Alpha', citations: [cite(500, 560)] })
-    ])
+    // 'Alpha' is absorbed here (an embedding hook says so), but a later note
+    // keeps that exact title and the hook does not fire for it — a link to
+    // 'Alpha' must find THAT note, not be redirected to this group.
+    const { notes, aliases } = dedup(
+      [
+        note({ title: 'Alpha', citations: [cite(0, 50)] }),
+        note({ title: 'Beta', citations: [cite(0, 50)] }),
+        note({ title: 'Alpha', citations: [cite(500, 560)] })
+      ],
+      { similarity: (_a, b) => (b.title === 'Beta' ? 0.95 : 0) }
+    )
     expect(notes.map((n) => n.title)).toEqual(['Beta', 'Alpha'])
     expect(aliases.size).toBe(0)
   })

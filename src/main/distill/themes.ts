@@ -90,7 +90,14 @@ export interface ThemeMember {
   summary: string
 }
 
+/** The `language` field comes first on purpose. Asked only to "write in the
+ *  same language as the notes", a model without extended thinking named the
+ *  groups of an English book in Russian, Polish and Turkish on identical
+ *  prompts (2 of 3 tries wrong); made to state the language before naming, it
+ *  answered in English 3 of 3 times (Sonnet, claude-code 2.1.258, thinking
+ *  off). Stating it is the anchor; the value itself is not read. */
 const SCHEMA_HINT = `{
+  "language": "<the language the notes are written in>",
   "themes": [ { "index": <the group's number>, "name": "2-4 words" } ]
 }`
 
@@ -107,8 +114,9 @@ export function themeNamingPrompt(clusters: { members: ThemeMember[] }[]): {
   const system =
     'You name groups of related notes. Each group is a set of notes that belong ' +
     'together; give it a SHORT name — 2 to 4 words — saying what the group is ' +
-    'about. Write every name in the SAME LANGUAGE as the notes; never translate ' +
-    'into English. Do not copy a single note\'s title as the group name, and do ' +
+    'about. First say which language the notes are written in, then write ' +
+    'every name in that SAME LANGUAGE; never translate. Do not copy a single ' +
+    'note\'s title as the group name, and do ' +
     'not give two groups the same name. Return ONLY JSON in this exact shape:\n' +
     SCHEMA_HINT
   const body = clusters
