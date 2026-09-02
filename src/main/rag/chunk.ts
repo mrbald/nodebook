@@ -15,8 +15,9 @@
  * back to a hard split if even one sentence doesn't fit. Consecutive chunks
  * within the same section share a small tail overlap so a search hit near a
  * chunk boundary still carries the preceding sentence's context — spans may
- * therefore overlap; each chunk's [start, end) always exactly brackets the
- * source range its (trimmed) text was cut from.
+ * therefore overlap; `content.slice(chunk.start, chunk.end) === chunk.text`
+ * holds for every chunk, so an offset measured inside a chunk's text is an
+ * offset into the source (distilled citations depend on this).
  *
  * Budgets are measured in token-cost units, not characters (`weightOf`): a CJK
  * code point counts 3× a Latin one, because CJK runs ≈1 token per character
@@ -30,7 +31,8 @@
 export interface Chunk {
   /** Heading path the chunk lives under, e.g. "Title > Section" (context). */
   heading: string
-  /** Character offsets [start, end) into the source note. */
+  /** Character offsets [start, end) into the source note; the span holds
+   *  exactly `text` — `source.slice(start, end) === text`. */
   start: number
   end: number
   /** The chunk's body text (no heading line). */
@@ -186,11 +188,20 @@ export function chunkMarkdown(content: string, maxChars = DEFAULT_MAX_CHARS): Ch
   // Close the chunk in progress. `seedOverlap` carries a ~10%-of-maxChars tail
   // of it (by weight) into the next chunk's start (same section only — a
   // heading boundary always passes `false`), so spans may overlap but each
-  // still exactly brackets its own (trimmed) text.
+  // still slices back to exactly its own text.
   const flush = (seedOverlap: boolean): void => {
     if (bufStart === -1) return
-    const text = content.slice(bufStart, bufEnd).trim()
-    if (text) chunks.push({ heading, start: bufStart, end: bufEnd, text })
+    const raw = content.slice(bufStart, bufEnd)
+    const text = raw.trim()
+    if (text) {
+      // Report the TRIMMED span, so `content.slice(start, end) === text`
+      // exactly: a citation offset measured inside `text` is then a correct
+      // offset into the source. The buffer keeps its untrimmed bounds — the
+      // overlap tail is cut from those, unchanged.
+      const lead = raw.length - raw.trimStart().length
+      const trail = raw.length - raw.trimEnd().length
+      chunks.push({ heading, start: bufStart + lead, end: bufEnd - trail, text })
+    }
     const tail = seedOverlap && text ? overlapStart(content, bufStart, bufEnd, overlapChars) : bufStart
     if (tail > bufStart) {
       bufStart = tail

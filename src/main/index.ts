@@ -694,7 +694,12 @@ function registerIpc(): void {
   ipcMain.handle(
     'index:graph',
     (_e, focusPath: string | null, opts?: { depth?: number; cap?: number; showSources?: boolean }) =>
-      index?.graph(focusPath, opts) ?? { nodes: [], edges: [], hiddenSources: 0 }
+      index?.graph(focusPath, opts) ?? {
+        nodes: [],
+        edges: [],
+        hiddenSources: 0,
+        ambiguousTargets: 0
+      }
   )
 
   // --- Talk to docs -------------------------------------------------------
@@ -880,7 +885,15 @@ function registerIpc(): void {
           onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p)
         }
       )
-      distillRuns.create(runId, source, result.notes, { ...result.stats })
+      // meta.json stores a flat map of numbers, so the drop reasons are
+      // spread out of their nested shape here.
+      const { droppedByReason: why, ...flatStats } = result.stats
+      distillRuns.create(runId, source, result.notes, {
+        ...flatStats,
+        droppedNoEvidence: why.noEvidence,
+        droppedNotFound: why.notFound,
+        droppedAmbiguous: why.ambiguous
+      })
       return { runId, stats: result.stats }
     } finally {
       distillAbort.delete(runId)
@@ -914,7 +927,8 @@ function registerIpc(): void {
       distillRuns?.graph(runId, focus ?? null, distillOpts(opts)) ?? {
         nodes: [],
         edges: [],
-        hiddenSources: 0
+        hiddenSources: 0,
+        ambiguousTargets: 0
       }
   )
 
@@ -928,7 +942,8 @@ function registerIpc(): void {
       focus: string | null,
       opts?: { depth?: number; cap?: number; showSources?: boolean }
     ) => {
-      if (!index || !distillRuns) return { nodes: [], edges: [], hiddenSources: 0 }
+      if (!index || !distillRuns)
+        return { nodes: [], edges: [], hiddenSources: 0, ambiguousTargets: 0 }
       return overlayGraph(index.graphRows(), distillRuns.rows(runId), focus ?? null, distillOpts(opts))
     }
   )

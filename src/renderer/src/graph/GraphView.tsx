@@ -11,6 +11,8 @@ import { pageRank, community } from './structure'
 const W = 800
 const H = 600
 const RELATED = '~related'
+/** Synthetic overlay relation joining two notes that share a name (main/graph.ts). */
+const SAME_NAME = 'same_name'
 const PALETTE = ['#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66']
 const COMMUNITY = ['#7aa2f7', '#bb9af7', '#7ec699', '#e0a050', '#e06c75', '#56b6c2', '#d19a66', '#9ece6a']
 const FOLDER = ['#7aa2f7', '#e0a050', '#7ec699', '#bb9af7', '#e06c75', '#56b6c2', '#d19a66', '#9ece6a']
@@ -39,25 +41,30 @@ function relationColors(edges: GraphEdge[]): Map<string, string> {
   return m
 }
 
-function mergeRelated(base: GraphData, related: TalkNeighbor[], focusName: string): GraphData {
-  if (related.length === 0) return base
+/** Add the ✨ related overlay. Neighbours arrive as paths, which ARE node ids. */
+function mergeRelated(
+  base: GraphData,
+  related: TalkNeighbor[],
+  focusId: string | null
+): GraphData {
+  if (related.length === 0 || !focusId) return base
   const ids = new Set(base.nodes.map((n) => n.id))
   const nodes = [...base.nodes]
   const edges = [...base.edges]
   const linked = new Set(
     base.edges
-      .filter((e) => e.source === focusName || e.target === focusName)
-      .map((e) => (e.source === focusName ? e.target : e.source))
+      .filter((e) => e.source === focusId || e.target === focusId)
+      .map((e) => (e.source === focusId ? e.target : e.source))
   )
   for (const nb of related) {
-    if (nb.name === focusName) continue
-    if (!ids.has(nb.name)) {
-      ids.add(nb.name)
-      nodes.push({ id: nb.name, label: nb.name, path: nb.path, ghost: false, degree: 0, focus: false })
+    if (nb.path === focusId) continue
+    if (!ids.has(nb.path)) {
+      ids.add(nb.path)
+      nodes.push({ id: nb.path, label: nb.name, path: nb.path, ghost: false, degree: 0, focus: false })
     }
-    if (!linked.has(nb.name)) edges.push({ source: focusName, target: nb.name, relation: RELATED })
+    if (!linked.has(nb.path)) edges.push({ source: focusId, target: nb.path, relation: RELATED })
   }
-  return { nodes, edges, hiddenSources: base.hiddenSources }
+  return { ...base, nodes, edges }
 }
 
 /** Union a main slice with expanded nodes' neighbourhoods (per-node "expand").
@@ -79,11 +86,12 @@ function mergeGraphs(main: GraphData, extras: GraphData[]): GraphData {
       }
     }
   }
-  return { nodes: [...nodes.values()], edges, total: main.total, hiddenSources: main.hiddenSources }
+  return { ...main, nodes: [...nodes.values()], edges }
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
-const relLabel = (rel: string): string => (rel === RELATED ? '✨ related' : rel)
+const relLabel = (rel: string): string =>
+  rel === RELATED ? '✨ related' : rel === SAME_NAME ? 'same name' : rel
 
 type Gesture =
   | { kind: 'pan'; ox: number; oy: number; sx: number; sy: number }
@@ -219,8 +227,8 @@ export function GraphView({
   }, [selectedId])
 
   const data = useMemo(
-    () => (base ? mergeRelated(base, related, focusName) : null),
-    [base, related, focusName]
+    () => (base ? mergeRelated(base, related, focusPath) : null),
+    [base, related, focusPath]
   )
 
   // Colour-by-meaning: fetch a semantic kNN graph for the current notes.
@@ -305,11 +313,11 @@ export function GraphView({
     pinned.get(id) ?? dragged.get(id) ?? layout?.get(id)
   const nodeFill = (node: GraphNode): string | undefined => {
     if (node.ghost) return undefined
-    // Overlay view: every node carries a `source`, so colour by provenance — your
-    // notes (muted) vs the run (blue) vs the overlap (pink) — making it obvious
-    // what's new and where the two meet.
+    // Overlay view: every note carries a `source`, so colour by provenance — your
+    // notes (muted) vs the run (blue) — with a name shared across the two sides
+    // (pink) calling out the clash a merge would have to settle.
     if (node.source)
-      return node.source === 'run' ? '#7aa2f7' : node.source === 'both' ? '#e06c75' : 'var(--muted)'
+      return node.sameName ? '#e06c75' : node.source === 'run' ? '#7aa2f7' : 'var(--muted)'
     if (colorMode === 'folder') return folderColors.get(folderOf(node.path, vaultRoot))
     if (colorMode === 'meaning') return communityColor(meaningCluster.get(node.id) ?? 0)
     return communityColor(comm.get(node.id) ?? 0)
@@ -429,6 +437,11 @@ export function GraphView({
     ? folderColors.size
     : new Set([...(colorMode === 'meaning' ? meaningCluster : comm).values()]).size
 
+  // Node ids are paths, but everything the user reads or writes is the note
+  // *name* — so edge endpoints are shown, and links are written, through this.
+  const labelOf = useMemo(() => new Map((data?.nodes ?? []).map((n) => [n.id, n.label])), [data])
+  const nameOf = (id: string): string => labelOf.get(id) ?? id
+
   // The selected node's details (its edges in the current slice) for the inspector.
   const selectedNode = selectedId ? (data?.nodes.find((n) => n.id === selectedId) ?? null) : null
   const selOut = selectedNode && data ? data.edges.filter((e) => e.source === selectedNode.id) : []
@@ -437,7 +450,11 @@ export function GraphView({
   // Relation-typing: existing relation names for autocomplete; a valid field key.
   const knownRelations = useMemo(
     () => [
-      ...new Set((data?.edges ?? []).map((e) => e.relation).filter((r) => r !== 'links_to' && r !== RELATED))
+      ...new Set(
+        (data?.edges ?? [])
+          .map((e) => e.relation)
+          .filter((r) => r !== 'links_to' && r !== RELATED && r !== SAME_NAME)
+      )
     ],
     [data]
   )
@@ -445,7 +462,7 @@ export function GraphView({
   const submitRelation = (target: string): void => {
     const rel = relInput.trim()
     if (!validRel(rel) || !selectedNode?.path) return
-    void window.nodebook.typeRelation(selectedNode.path, rel, target).catch(() => {})
+    void window.nodebook.typeRelation(selectedNode.path, rel, nameOf(target)).catch(() => {})
     setTypingTarget(null)
     setRelInput('')
   }
@@ -473,7 +490,7 @@ export function GraphView({
                 return (
                   <line
                     key={i}
-                    className={`graph-edge${e.relation === RELATED ? ' graph-edge-related' : ''}`}
+                    className={`graph-edge${e.relation === RELATED ? ' graph-edge-related' : ''}${e.relation === SAME_NAME ? ' graph-edge-samename' : ''}`}
                     x1={a.x}
                     y1={a.y}
                     x2={b.x}
@@ -675,7 +692,7 @@ export function GraphView({
                   return (
                     <div key={`o${i}`} className="graph-insp-edge">
                       <span className="graph-insp-rel">{relLabel(e.relation)}</span>
-                      <span className="graph-insp-target">{e.target}</span>
+                      <span className="graph-insp-target">{nameOf(e.target)}</span>
                       {typeable && typingTarget !== e.target && (
                         <button
                           className="graph-insp-name"
@@ -734,7 +751,7 @@ export function GraphView({
                 {selIn.map((e, i) => (
                   <div key={`i${i}`} className="graph-insp-edge">
                     <span className="graph-insp-rel">{relLabel(e.relation)}</span>
-                    {e.source}
+                    {nameOf(e.source)}
                   </div>
                 ))}
               </div>
@@ -754,6 +771,12 @@ export function GraphView({
                 <button className="graph-ctl" onClick={() => setCap((c) => c + 200)}>
                   show more
                 </button>
+              </div>
+            )}
+            {(base?.ambiguousTargets ?? 0) > 0 && (
+              <div className="graph-insp-note" title="Two notes share a name, so the map had to pick one — it prefers a note in the same folder as the link.">
+                {base!.ambiguousTargets} {base!.ambiguousTargets === 1 ? 'link' : 'links'} could
+                point to more than one note
               </div>
             )}
             {legend.length > 1 && (

@@ -773,11 +773,26 @@ export default function App() {
       // Always say what happened: the run is STAGED, not in the vault — and a
       // zero-note run must explain itself instead of showing a blank map.
       const s = res.stats
+      // What the quote check did, in plain words — the same list explains a
+      // zero-note run and annotates a good one, so a drop is never silent.
+      const why: string[] = []
+      const d = s.droppedByReason
+      if (d.noEvidence > 0) why.push(`${d.noEvidence} point${d.noEvidence === 1 ? '' : 's'} had no quote`)
+      if (d.notFound > 0)
+        why.push(
+          `${d.notFound} quote${d.notFound === 1 ? " wasn't" : "s weren't"} found in the document`
+        )
+      if (d.ambiguous > 0)
+        why.push(
+          `${d.ambiguous} quote${d.ambiguous === 1 ? '' : 's'} matched in more than one place`
+        )
+      if (s.recovered > 0)
+        why.push(
+          `${s.recovered} quote${s.recovered === 1 ? ' was' : 's were'} found under a different passage and kept`
+        )
+      if (s.failedClusters > 0)
+        why.push(`${s.failedClusters} of ${s.clusters} sections got an unusable model response`)
       if (s.notes === 0) {
-        const why: string[] = []
-        if (s.dropped > 0) why.push(`${s.dropped} claim${s.dropped === 1 ? '' : 's'} had no verifiable quote`)
-        if (s.failedClusters > 0)
-          why.push(`${s.failedClusters} of ${s.clusters} sections got an unusable model response`)
         setDistillDoneNote(
           `Distilled, but no notes survived verification${why.length ? ` (${why.join('; ')})` : ''} — a stronger chat model in Settings usually fixes this.`
         )
@@ -787,7 +802,7 @@ export default function App() {
         const cov =
           s.coverage < 0.95 ? ` It read ${Math.round(s.coverage * 100)}% of the text, representatively.` : ''
         setDistillDoneNote(
-          `Staged ${s.notes} note${s.notes === 1 ? '' : 's'} — nothing is in your vault until you press ⤓ Merge on this map.${cov}`
+          `Staged ${s.notes} note${s.notes === 1 ? '' : 's'} — nothing is in your vault until you press ⤓ Merge on this map.${cov}${why.length ? ` ${why.join('; ')}.` : ''}`
         )
       }
     } catch (e) {

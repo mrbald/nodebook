@@ -16,10 +16,44 @@ describe('chunkMarkdown', () => {
     expect(chunks).toEqual([])
   })
 
-  it('offsets slice back to (a superset of) the chunk text', () => {
+  it('offsets slice back to EXACTLY the chunk text', () => {
     const doc = '# H\n\nhello world\n'
     const [c] = chunkMarkdown(doc)
-    expect(doc.slice(c.start, c.end)).toContain('hello world')
+    expect(doc.slice(c.start, c.end)).toBe(c.text)
+    expect(c.text).toBe('hello world')
+  })
+
+  // The trimmed span is what makes a distilled citation land on the quote: an
+  // offset measured inside `text` is an offset into the source. A blank line
+  // after the heading and a trailing newline are the two whitespace runs the
+  // buffer routinely carries.
+  it('excludes the blank line after a heading and the trailing newline from the span', () => {
+    const doc = '# Title\n\n\nIntro para.\n\n'
+    const [c] = chunkMarkdown(doc)
+    expect(c.text).toBe('Intro para.')
+    expect(doc.slice(c.start, c.end)).toBe('Intro para.')
+    expect(doc[c.start]).toBe('I')
+    expect(doc[c.end - 1]).toBe('.')
+  })
+
+  it('keeps spans exact across a whole multi-section document', () => {
+    const doc = [
+      '# Title',
+      '',
+      'Intro para.',
+      '',
+      '## Section A',
+      '',
+      '   indented body of A.   ',
+      '',
+      '```',
+      '# fenced',
+      '```',
+      '',
+      'Tail after the fence.',
+      ''
+    ].join('\n')
+    for (const c of chunkMarkdown(doc, 60)) expect(doc.slice(c.start, c.end)).toBe(c.text)
   })
 
   it('packs multiple paragraphs and splits when over maxChars', () => {
@@ -72,8 +106,8 @@ describe('chunkMarkdown', () => {
     // (rule (d) trades a hard cap for boundary context) — bounded by the ~10%
     // overlap budget, never unboundedly.
     for (const c of chunks) expect(c.text.length).toBeLessThanOrEqual(maxChars * 1.1)
-    // Every chunk's span still exactly brackets its own trimmed text.
-    for (const c of chunks) expect(doc.slice(c.start, c.end)).toContain(c.text)
+    // Every chunk's span holds exactly its own text.
+    for (const c of chunks) expect(doc.slice(c.start, c.end)).toBe(c.text)
   })
 
   it('hard-splits a single sentence that alone exceeds maxChars', () => {
@@ -86,7 +120,7 @@ describe('chunkMarkdown', () => {
 
   // Rule (d): consecutive chunks split out of the same section share a tail
   // overlap, and chunk spans may overlap as a result — but each span still
-  // exactly brackets (contains) the location its own text was cut from.
+  // slices back to exactly the text of its own chunk.
   it('overlaps the tail of consecutive chunks within the same section', () => {
     const sentence = 'Alpha beta gamma delta epsilon zeta eta theta iota kappa. '
     const doc = `# H\n\n${sentence.repeat(10).trim()}`
@@ -97,10 +131,9 @@ describe('chunkMarkdown', () => {
       // i.e. the spans genuinely overlap, not just abut.
       expect(chunks[i].start).toBeLessThan(chunks[i - 1].end)
     }
-    // Provenance stays exact: every chunk's span exactly brackets its own text
-    // (a superset — it may carry surrounding whitespace, same invariant as the
-    // no-overlap case above).
-    for (const c of chunks) expect(doc.slice(c.start, c.end)).toContain(c.text)
+    // Provenance stays exact: every chunk's span holds exactly its own text,
+    // overlap or not.
+    for (const c of chunks) expect(doc.slice(c.start, c.end)).toBe(c.text)
   })
 
   it('does not carry overlap across a heading boundary', () => {
@@ -222,7 +255,7 @@ describe('chunkMarkdown with CJK text', () => {
       // Budget + the seeded-overlap slack (10%), same soft cap as English.
       expect(weightOf(c.text)).toBeLessThanOrEqual(300 + 30 + 3)
       expect(c.heading).toBe('标题')
-      expect(doc.slice(c.start, c.end)).toContain(c.text)
+      expect(doc.slice(c.start, c.end)).toBe(c.text)
     }
   })
 

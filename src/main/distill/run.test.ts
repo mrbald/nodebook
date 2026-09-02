@@ -136,6 +136,8 @@ describe('distill', () => {
     expect(res.stats.clusters).toBe(2)
     expect(res.stats.notes).toBe(2)
     expect(res.stats.dropped).toBe(0)
+    expect(res.stats.droppedByReason).toEqual({ noEvidence: 0, notFound: 0, ambiguous: 0 })
+    expect(res.stats.recovered).toBe(0)
     expect(res.notes.every((n) => n.content.includes('source:: [[Book]]'))).toBe(true)
     expect([...new Set(phases.map((p) => p.phase))]).toEqual([
       'chunking',
@@ -158,6 +160,53 @@ describe('distill', () => {
     expect(res.stats.extracted).toBeGreaterThan(0)
     expect(res.stats.dropped).toBeGreaterThan(0)
     expect(res.stats.notes).toBe(0)
+    // A fabricated quote is nowhere in the document — reported as such, not as
+    // "no evidence": the model DID give a quote, it just isn't real.
+    expect(res.stats.droppedByReason.notFound).toBe(res.stats.dropped)
+    expect(res.stats.droppedByReason.noEvidence).toBe(0)
+  })
+
+  it('recovers a real quote the model filed under the wrong chunk, and says so', async () => {
+    // Every item quotes chunk 5's sentence but tags it chunk 0 — the quote is
+    // real, only the id is wrong, so grounding re-attributes instead of dropping.
+    const misfiler: ChatModel = {
+      id: 'misfiler',
+      async *chat() {
+        yield JSON.stringify({
+          items: [
+            {
+              kind: 'claim',
+              title: 'Separation of powers',
+              summary: 's',
+              evidence: [{ chunkId: 0, quote: 'The separation of powers guards public liberty.' }],
+              links: []
+            }
+          ]
+        })
+      }
+    }
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: misfiler }, opts)
+    expect(res.stats.dropped).toBe(0)
+    expect(res.stats.recovered).toBeGreaterThan(0)
+    expect(res.stats.notes).toBeGreaterThan(0)
+    // The citation points at the passage that really holds the quote.
+    const cite = /span:\s*(\d+)\s*-\s*(\d+)/.exec(res.notes[0].content)!
+    expect(SRC.slice(Number(cite[1]), Number(cite[2]))).toBe(
+      'The separation of powers guards public liberty.'
+    )
+  })
+
+  it('counts a point the model backed with no quote at all as its own reason', async () => {
+    const unsupported: ChatModel = {
+      id: 'unsupported',
+      async *chat() {
+        yield '{"items":[{"kind":"claim","title":"Bare assertion","summary":"x","evidence":[],"links":[]}]}'
+      }
+    }
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: unsupported }, opts)
+    expect(res.stats.notes).toBe(0)
+    expect(res.stats.droppedByReason).toEqual({ noEvidence: 2, notFound: 0, ambiguous: 0 })
+    expect(res.stats.dropped).toBe(2)
   })
 
   it('recovers from malformed JSON via one repair retry', async () => {

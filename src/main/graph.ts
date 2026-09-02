@@ -2,10 +2,16 @@ import type { GraphData, GraphEdge, GraphNode } from '../shared/types'
 
 /**
  * Build a slice of the knowledge graph from the index's raw rows — pure and
- * DOM/DB-free so it is golden-tested in isolation. Nodes are notes (keyed by
- * name, matching the triple store); a linked target with no file is a "ghost".
+ * DOM/DB-free so it is golden-tested in isolation.
  *
- * `focus` (a note name) gives a local depth-`d` neighbourhood; `null` gives the
+ * **Identity is the file path.** A real note's node id is its stored path, so two
+ * notes that happen to share a name are two dots, not one; the *label* stays the
+ * note name. A link target with no file is a "ghost", id `ghost:<target>`.
+ * Because a link names a note but a node is a file, resolving a target can be
+ * ambiguous — `ambiguousTargets` counts the targets that could have meant more
+ * than one note, so the UI can say so instead of quietly guessing.
+ *
+ * `focus` (a note *path*) gives a local depth-`d` neighbourhood; `null` gives the
  * whole graph capped to the highest-degree nodes. Edges in the result always
  * have both endpoints present (no dangling references).
  */
@@ -16,14 +22,30 @@ export interface FileRow {
 }
 
 export interface TripleRow {
+  /** The subject's note name, as harvested. Kept for the triple store's own
+   *  sake; the graph keys the subject node by `source_file` (identity is path). */
   subject: string
   relation: string
   object: string
+  /** The file the triple was harvested from — the subject node's identity. */
+  source_file: string
 }
+
+/** Prefix marking a node that is linked to but has no file behind it. */
+const GHOST = 'ghost:'
+/** Synthetic overlay relation: the same note name on both sides (see `overlayGraph`). */
+export const SAME_NAME = 'same_name'
 
 /** Base note name from a path: strip directories and the `.md` extension. */
 export function noteName(path: string): string {
   return (path.split(/[/\\]/).pop() ?? path).replace(/\.md$/i, '')
+}
+
+/** The folder a path sits in ('' at the root), separator-normalised. */
+function folderOf(path: string): string {
+  const norm = path.replace(/\\/g, '/')
+  const i = norm.lastIndexOf('/')
+  return i < 0 ? '' : norm.slice(0, i)
 }
 
 /** The raw rows one index contributes to a graph (files + triples). */
@@ -35,10 +57,12 @@ export interface GraphRows {
 /**
  * Overlay two graph sources into one view — a `primary` (the vault) and a
  * `secondary` (a distilled run; in future, another vault). Pure: it unions the
- * rows and builds the graph, writing nothing. Each node is tagged with where its
- * name came from (`vault` / `run` / `both`), so the UI can show what's new and
- * where the two overlap — same-name notes collapse to one `both` node, the
- * "how they'd connect" preview. This is the generic compose-two-sources block.
+ * rows and builds the graph, writing nothing. Nodes are files, so nothing is
+ * collapsed: each node is tagged with the side its *path* came from
+ * (`vault` / `run`), and a note whose *name* also exists on the other side is
+ * flagged `sameName` and joined to its twin by a `same_name` edge. That is the
+ * honest preview of a collision — two notes, one name, drawn as two dots — and
+ * it is what a merge would have to decide about.
  */
 export function overlayGraph(
   primary: GraphRows,
@@ -52,12 +76,33 @@ export function overlayGraph(
     focus,
     opts
   )
+  const sPaths = new Set(secondary.files.map((f) => f.path))
   const pNames = new Set(primary.files.map((f) => noteName(f.path)))
   const sNames = new Set(secondary.files.map((f) => noteName(f.path)))
-  const sourceOf = (name: string): 'vault' | 'run' | 'both' =>
-    pNames.has(name) && sNames.has(name) ? 'both' : sNames.has(name) ? 'run' : 'vault'
-  const nodes: GraphNode[] = g.nodes.map((n) => ({ ...n, source: sourceOf(n.id) }))
-  return { ...g, nodes }
+
+  // Ghosts belong to neither side's files, so they carry no provenance.
+  const nodes: GraphNode[] = g.nodes.map((n) => {
+    if (!n.path) return n
+    const source: 'vault' | 'run' = sPaths.has(n.path) ? 'run' : 'vault'
+    const twinned = source === 'run' ? pNames.has(n.label) : sNames.has(n.label)
+    return twinned ? { ...n, source, sameName: true } : { ...n, source }
+  })
+
+  // One `same_name` edge per cross-side pair actually drawn in this slice.
+  const byName = new Map<string, { vault: string[]; run: string[] }>()
+  for (const n of nodes) {
+    if (!n.sameName || !n.source) continue
+    let sides = byName.get(n.label)
+    if (!sides) byName.set(n.label, (sides = { vault: [], run: [] }))
+    sides[n.source].push(n.id)
+  }
+  const edges: GraphEdge[] = [...g.edges]
+  for (const name of [...byName.keys()].sort()) {
+    const { vault, run } = byName.get(name)!
+    for (const v of [...vault].sort())
+      for (const r of [...run].sort()) edges.push({ source: v, target: r, relation: SAME_NAME })
+  }
+  return { ...g, nodes, edges }
 }
 
 export function buildGraph(
@@ -70,41 +115,66 @@ export function buildGraph(
   const cap = opts.cap ?? 200
   const showSources = opts.showSources ?? false
 
-  const nameToPath = new Map<string, string>()
+  const pathSet = new Set(files.map((f) => f.path))
   // Resolve a link target to a real note by name OR by path suffix (so
   // `[[projects/Roadmap]]` finds `projects/Roadmap.md`), matching the editor's
-  // link resolver. Shorter suffixes (the bare name) win ties.
-  const suffixToName = new Map<string, string>()
+  // link resolver. Every suffix keeps *all* of its files, because a name is not
+  // an identity: several files can answer to it.
+  const suffixToPaths = new Map<string, string[]>()
   for (const f of files) {
-    const name = noteName(f.path)
-    if (!nameToPath.has(name)) nameToPath.set(name, f.path)
     const segs = f.path
       .replace(/\.md$/i, '')
       .split(/[/\\]/)
       .filter(Boolean)
     for (let i = segs.length - 1; i >= 0; i--) {
       const key = segs.slice(i).join('/')
-      if (!suffixToName.has(key)) suffixToName.set(key, name)
+      const list = suffixToPaths.get(key)
+      if (list) list.push(f.path)
+      else suffixToPaths.set(key, [f.path])
     }
   }
-  const isReal = (name: string): boolean => nameToPath.has(name)
-  const canon = (obj: string): string => {
-    const key = obj
+  for (const list of suffixToPaths.values()) list.sort()
+
+  /**
+   * A link target → a node id, seen from the note that wrote the link:
+   * exactly one file with that name (or path suffix) wins outright; several
+   * prefer one in the linking note's own folder, else the lexicographically
+   * smallest path — and either way the target is reported as ambiguous, because
+   * the link really could have meant either note; none is a ghost.
+   */
+  const resolve = (object: string, from: string): { id: string; key: string; ambiguous: boolean } => {
+    const key = object
       .replace(/\\/g, '/')
       .replace(/^\.?\//, '')
       .replace(/\.md$/i, '')
-    return suffixToName.get(key) ?? obj // a real note's name, or the raw object (ghost)
+    const cands = suffixToPaths.get(key)
+    if (!cands || cands.length === 0) return { id: `${GHOST}${object}`, key, ambiguous: false }
+    if (cands.length === 1) return { id: cands[0], key, ambiguous: false }
+    const sameFolder = cands.filter((p) => folderOf(p) === folderOf(from))
+    return { id: sameFolder[0] ?? cands[0], key, ambiguous: true }
+  }
+
+  interface Edge {
+    subject: string
+    relation: string
+    object: string
+    /** The normalised target text, for counting ambiguous *targets* not edges. */
+    key: string
+    ambiguous: boolean
   }
 
   // De-dupe parallel triples (same subject/relation/object).
+  const ghostLabel = new Map<string, string>()
   const seen = new Set<string>()
-  let allEdges: TripleRow[] = []
+  let allEdges: Edge[] = []
   for (const t of triples) {
-    if (t.subject === canon(t.object)) continue // skip self-loops (self-references)
-    const key = `${t.subject} ${t.relation} ${t.object}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    allEdges.push({ subject: t.subject, relation: t.relation, object: canon(t.object) })
+    const { id, key, ambiguous } = resolve(t.object, t.source_file)
+    if (t.source_file === id) continue // skip self-loops (self-references)
+    const dedupe = `${t.source_file} ${t.relation} ${id}`
+    if (seen.has(dedupe)) continue
+    seen.add(dedupe)
+    if (id.startsWith(GHOST)) ghostLabel.set(id, t.object)
+    allEdges.push({ subject: t.source_file, relation: t.relation, object: id, key, ambiguous })
   }
 
   // A typed relation for a pair supersedes the bare `links_to`: drop the
@@ -118,7 +188,7 @@ export function buildGraph(
     (e) => e.relation !== 'links_to' || !typedPairs.has(`${e.subject} ${e.object}`)
   )
 
-  // A `source` triple's (canonicalized) object is a source document — every note
+  // A `source` triple's (resolved) object is a source document — every note
   // distilled from it points back, so it collects one edge per note and turns the
   // map into a star. Hidden by default; `showSources` re-admits it. The hub's
   // edges are dropped here, before BFS/degree-ranking, on purpose: it changes
@@ -135,9 +205,9 @@ export function buildGraph(
     allEdges = allEdges.filter((e) => !hubs.has(e.subject) && !hubs.has(e.object))
   }
 
-  let nodeNames: Set<string>
+  let nodeIds: Set<string>
   let total: number // candidate nodes available (≥ shown when the global cap bites)
-  if (focus && isReal(focus)) {
+  if (focus && pathSet.has(focus)) {
     // BFS out from the focus note to `depth` hops (edges are undirected for reach).
     const included = new Set<string>([focus])
     let frontier = new Set<string>([focus])
@@ -151,7 +221,7 @@ export function buildGraph(
       frontier = next
       if (frontier.size === 0) break
     }
-    nodeNames = included
+    nodeIds = included
     total = included.size // local slices are never capped
   } else {
     // Global: rank every referenced node by raw degree and keep the top `cap`.
@@ -161,32 +231,37 @@ export function buildGraph(
       deg.set(e.object, (deg.get(e.object) ?? 0) + 1)
     }
     total = deg.size
-    nodeNames = new Set(
+    nodeIds = new Set(
       [...deg.keys()].sort((a, b) => (deg.get(b) ?? 0) - (deg.get(a) ?? 0)).slice(0, cap)
     )
   }
 
-  const keptEdges = allEdges.filter((e) => nodeNames.has(e.subject) && nodeNames.has(e.object))
+  const keptEdges = allEdges.filter((e) => nodeIds.has(e.subject) && nodeIds.has(e.object))
 
   // Degree within the returned slice.
   const degree = new Map<string, number>()
+  const ambiguous = new Set<string>()
   for (const e of keptEdges) {
     degree.set(e.subject, (degree.get(e.subject) ?? 0) + 1)
     degree.set(e.object, (degree.get(e.object) ?? 0) + 1)
+    if (e.ambiguous) ambiguous.add(e.key)
   }
 
-  const nodes: GraphNode[] = [...nodeNames].map((name) => ({
-    id: name,
-    label: name,
-    path: nameToPath.get(name) ?? null,
-    ghost: !isReal(name),
-    degree: degree.get(name) ?? 0,
-    focus: focus === name
-  }))
+  const nodes: GraphNode[] = [...nodeIds].map((id) => {
+    const real = pathSet.has(id)
+    return {
+      id,
+      label: ghostLabel.get(id) ?? noteName(id),
+      path: real ? id : null,
+      ghost: !real,
+      degree: degree.get(id) ?? 0,
+      focus: focus === id
+    }
+  })
   const edges: GraphEdge[] = keptEdges.map((e) => ({
     source: e.subject,
     target: e.object,
     relation: e.relation
   }))
-  return { nodes, edges, total, hiddenSources }
+  return { nodes, edges, total, hiddenSources, ambiguousTargets: ambiguous.size }
 }
