@@ -1,13 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  mergePlan,
-  rewriteLinks,
-  rewriteSourceField,
-  rewriteThemeMembers,
-  withSameAs,
-  type RunNote,
-  type VaultNotes
-} from './mergePlan'
+import { mergePlan, rewriteLinks, rewriteSourceField, rewriteThemeMembers, withSameAs, type RunNote, type VaultNotes, confirmedSameAs, twinOf } from './mergePlan'
 
 const vault = (entries: Record<string, string>): VaultNotes => ({
   names: new Set(Object.keys(entries)),
@@ -204,5 +196,39 @@ describe('rewriteThemeMembers', () => {
   it('only rewrites a bullet that is exactly a renamed name', () => {
     const src = theme(['Faction and Union', 'Faction'])
     expect(rewriteThemeMembers(src, renames)).toBe(theme(['Faction and Union', 'Faction (Federalist)']))
+  })
+})
+
+describe('confirmedSameAs', () => {
+  const entry = (name: string, action: 'new' | 'identical' | 'collides', sameAsCandidate?: string) => ({
+    name,
+    action,
+    targetName: action === 'collides' ? `${name} (Book)` : name,
+    ...(sameAsCandidate ? { sameAsCandidate } : {})
+  })
+
+  it('names the twin a confirmation points at', () => {
+    expect(twinOf(entry('Union', 'collides'))).toBe('Union')
+    expect(twinOf(entry('Union', 'new', 'Federal union'))).toBe('Federal union')
+    expect(twinOf(entry('Union', 'new'))).toBeUndefined()
+    expect(twinOf(entry('Union', 'identical'))).toBeUndefined()
+  })
+
+  it('keeps a tick whose twin is still the entry\'s twin, bare or explicit', () => {
+    const entries = [entry('Union', 'collides'), entry('Faction', 'new', 'Party spirit')]
+    expect(confirmedSameAs(entries, ['union', { name: 'Faction', twin: 'Party spirit' }])).toEqual([
+      { name: 'Union', twin: 'Union' },
+      { name: 'Faction', twin: 'Party spirit' }
+    ])
+  })
+
+  it('drops a tick when the plan changed under the dialog', () => {
+    // Shown as new-with-twin; by merge time a vault note called "Faction"
+    // exists, so the entry is a clash with a stranger. The tick said
+    // "same as Party spirit" — it must not become "same as Faction".
+    const now = [entry('Faction', 'collides')]
+    expect(confirmedSameAs(now, [{ name: 'Faction', twin: 'Party spirit' }])).toEqual([])
+    // A bare name on a new entry with no twin, or an unknown name: nothing.
+    expect(confirmedSameAs([entry('Faction', 'new')], ['Faction', 'Ghost'])).toEqual([])
   })
 })

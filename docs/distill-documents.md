@@ -196,7 +196,10 @@ the plan also proposes a twin for a `new` note (`sameAs.ts`): the staged notes
 are embedded as the index embeds a note and a vault note is proposed only when
 the two are each other's closest match — mutual nearest neighbour, floored by
 the vault's own "related" threshold, no cutoff to tune. Shown unticked; a tick
-writes the same `same_as::` line. Merge writes its manifest first and copies via temp + rename, so a
+writes the same `same_as::` line. A tick means "same as the twin I was shown":
+the plan is recomputed at merge time, and a tick whose entry no longer has that
+twin — a note of the exact name appeared meanwhile, turning the proposal into a
+clash with a stranger — is dropped, never redirected (`confirmedSameAs`). Merge writes its manifest first and copies via temp + rename, so a
 crash never leaves un-undoable files; **Undo** hashes each file and sends anything
 you edited to the Trash instead of deleting it.
 

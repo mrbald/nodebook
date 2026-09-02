@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { noteVector, sameAsCandidates, type NoteVec } from './sameAs'
+import { noteVector, sameAsCandidates, sameAsCandidatesYielding, type NoteVec } from './sameAs'
 
 const unit = (...xs: number[]): Float32Array => {
   const v = Float32Array.from(xs)
@@ -46,6 +46,14 @@ describe('sameAsCandidates', () => {
     const run = [nv('a', 1, 0), nv('b', 1, 0)] // identical run notes
     const vault = [nv('x', 1, 0)]
     expect([...sameAsCandidates(run, vault, 0.5)]).toEqual([['a', 'x']]) // the earlier one wins
+  })
+
+  it('yielding gives the same answer as the synchronous form, batch boundaries included', async () => {
+    const run = Array.from({ length: 10 }, (_, i) => nv(`r${i}`, 1, i / 10))
+    const vault = Array.from({ length: 10 }, (_, i) => nv(`v${i}`, 1, i / 10))
+    const sync = sameAsCandidates(run, vault, 0.5)
+    expect(sync.size).toBe(10)
+    expect([...(await sameAsCandidatesYielding(run, vault, 0.5, 3))]).toEqual([...sync])
   })
 
   it('is empty when either side is empty', () => {
