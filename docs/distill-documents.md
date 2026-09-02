@@ -306,6 +306,24 @@ and finishes in under a second. To score a real provider instead of the stub, se
 needed), e.g.
 `DISTILL_EVAL_PROVIDER=anthropic DISTILL_EVAL_MODEL=claude-sonnet-4-6 npm run eval:distill`.
 
+### Live run — the real app, real vectors, a real model (2026-09-02)
+
+`npm run test:e2e:live` (`e2e/live/distill-live.spec.ts`) drives the built app
+over one essay (`federalist-84.md`, 25 KB) with the renderer's real embedding
+model and Claude Code's CLI (Sonnet) as the chat provider — the two things the
+stubbed suites cannot exercise. It is not part of `npm run test:e2e` (network, a
+signed-in `claude`, minutes). It asserts what themes and dedup owe the reader:
+every note under exactly one theme, theme names distinct from each other and
+from every note's name, and in the document's language. Measured:
+
+| windows | extracted | grounded | dropped | merged | notes | themes | edges | ghosts | wall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 5 | 49 | 49 | 0 | 5 | 44 | 7 | 136 | 0 | 6.4 min, first model download included |
+
+Themes named: Federalist 84 Bill of Rights · Press Liberty Debate · Government
+Expense Objection · Impeachment and Treason Provisions · Answering the Distance
+Objection · Expanding National Powers · Cited Legal Authorities.
+
 ### Baseline — Phase 1 (2026-09-02, cluster-sampling pipeline)
 
 The starting point, kept for comparison: chunks were embedded, clustered, and only

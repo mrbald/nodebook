@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import {
   ContextLengthError,
   DEFAULT_INPUT_BUDGET,
@@ -86,5 +86,23 @@ describe('makeChatModel', () => {
     expect(makeChatModel({ kind: 'anthropic' }).inputBudget).toBe(DEFAULT_INPUT_BUDGET)
     expect(makeChatModel({ kind: 'ollama', model: 'llama3.2' }).inputBudget).toBe(6_000)
     expect(makeChatModel({ kind: 'anthropic', contextTokens: 2_000 }).inputBudget).toBe(6_000)
+  })
+})
+
+describe('makeChatModel under the e2e door', () => {
+  const saved = { e2e: process.env.NODEBOOK_E2E, live: process.env.NODEBOOK_E2E_LIVE_CHAT }
+  afterEach(() => {
+    if (saved.e2e === undefined) delete process.env.NODEBOOK_E2E
+    else process.env.NODEBOOK_E2E = saved.e2e
+    if (saved.live === undefined) delete process.env.NODEBOOK_E2E_LIVE_CHAT
+    else process.env.NODEBOOK_E2E_LIVE_CHAT = saved.live
+  })
+
+  it('swaps in the stub under NODEBOOK_E2E, and keeps the real adapter when the live flag is set too', () => {
+    process.env.NODEBOOK_E2E = '1'
+    delete process.env.NODEBOOK_E2E_LIVE_CHAT
+    expect(makeChatModel({ kind: 'claude-cli' }).id).toBe('stub')
+    process.env.NODEBOOK_E2E_LIVE_CHAT = '1'
+    expect(makeChatModel({ kind: 'claude-cli' }).id).toBe('claude-cli:default')
   })
 })
