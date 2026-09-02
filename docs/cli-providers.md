@@ -139,7 +139,28 @@ id to a non-Anthropic server, which is what the old default did).
   difference was the developer's own MCP servers being loaded into a chat call
   that has no use for them. A distill run makes one call per cluster (capped at
   24), so this is the difference between a visible slice of a plan's window and
-  a rounding error. Anyone changing those flags should re-measure.
+  a rounding error. Anyone changing those flags should re-measure. (The
+  "capped at 24" above predates the whole-document pipeline: a run now makes
+  one call per window, up to `[distill] maxCalls`.)
+- **`claude -p` thinks by default, and that is most of a distill call.** Claude
+  Code lets the model reason at length before every answer — the right default
+  for a coding agent, and pure overhead for an extraction prompt that asks for
+  JSON. Measured against claude-code 2.1.258 on one real distill window (~8k
+  characters of a pandas book, Haiku): **11,410 thinking tokens** to produce a
+  1,339-token answer, 74 s, $0.066; the same prompt with thinking capped at
+  1,024 tokens: 243 thinking tokens, 10 s, $0.010. Over a 26-page slice of
+  that book (8 windows, Haiku, same converter and matcher): thinking on took
+  882 s and produced 70 items of which 64 grounded (59 notes, 1 ghost link);
+  thinking off took 117 s and produced 50 items of which 50 grounded (46 notes,
+  0 ghost links). Fewer items, every one of them cited, at a seventh of the
+  time and quota — single runs, so the yield gap is within a model's run-to-run
+  spread. The adapter therefore runs the child with `MAX_THINKING_TOKENS=0` —
+  thinking off, which is also what the HTTP adapters send — unless that
+  variable is already set in Nodebook's environment, in which case the user's
+  value wins. Over a 120-call run this is the difference between hours and
+  twenty minutes, and between a real dent in a plan's 5-hour window and a
+  small one. The `--effort` flag was tried and does not bound Haiku's thinking
+  (it went up).
 - Latency: a trivial `codex exec` round-trip measured ~6.5 s wall (process
   start is small; the model call dominates); the same through `claude -p`
   measured ~3 s. The distill pre-flight timeout is 30 s to accommodate cold
