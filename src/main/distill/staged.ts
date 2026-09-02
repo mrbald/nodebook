@@ -50,8 +50,14 @@ export class StagedRunStore {
     return { runId, dir }
   }
 
-  /** The run's knowledge graph (staged-only — never the canonical vault). */
-  graph(runId: string, focus: string | null = null, opts?: { depth?: number; cap?: number }): GraphData {
+  /** The run's knowledge graph (staged-only — never the canonical vault).
+   *  `focus` is a staged note's *path*, like the vault map's — node identity is
+   *  the path on both sides, so the same focus value works in either view. */
+  graph(
+    runId: string,
+    focus: string | null = null,
+    opts?: { depth?: number; cap?: number }
+  ): GraphData {
     return this.indexOf(runId).graph(focus, opts)
   }
 

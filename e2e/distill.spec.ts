@@ -115,7 +115,8 @@ test('the run map wires distilled notes to the source book', async () => {
   expect(runs.length).toBeGreaterThan(0)
   const g = await page.evaluate((id) => window.nodebook.distillGraph(id), runs[0].id)
   expect(g.nodes.length).toBeGreaterThan(1)
-  expect(g.nodes.some((n) => n.id === 'on-government')).toBe(true) // source is a node
+  // Nodes are keyed by path, labelled by name — the book is a node of its own.
+  expect(g.nodes.some((n) => n.label === 'on-government')).toBe(true)
   expect(g.edges.some((e) => e.relation === 'source')).toBe(true) // notes cite it
 })
 
@@ -123,8 +124,8 @@ test('FIREWALL: distilled notes never enter the canonical index', async () => {
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
   const g = await page.evaluate((id) => window.nodebook.distillGraph(id), runs[0].id)
   const canonNames = await page.evaluate(() => window.nodebook.noteNames())
-  // Not one of the run's nodes (source or distilled concepts) leaked into the vault index.
-  for (const node of g.nodes) expect(canonNames).not.toContain(node.id)
+  // Not one of the run's notes (source or distilled concepts) leaked into the vault index.
+  for (const node of g.nodes) expect(canonNames).not.toContain(node.label)
 })
 
 test('OVERLAY unions the vault + the run with provenance, writing nothing', async () => {
@@ -133,7 +134,21 @@ test('OVERLAY unions the vault + the run with provenance, writing nothing', asyn
   const sources = new Set(overlay.nodes.map((n) => n.source))
   expect(sources.has('run')).toBe(true) // the book's nodes
   expect(sources.has('vault')).toBe(true) // your existing notes, shown alongside
-  expect(overlay.nodes.some((n) => n.id === 'on-government' && n.source === 'run')).toBe(true)
+  const book = overlay.nodes.find((n) => n.label === 'on-government')!
+  expect(book.source).toBe('run')
+  expect(book.id).toBe(book.path) // identity is the path, so nothing is collapsed
+  // Same-name notes stay two dots; each is flagged and joined by a `same_name` edge.
+  for (const n of overlay.nodes.filter((x) => x.sameName)) {
+    const twin = overlay.nodes.find((x) => x.label === n.label && x.source !== n.source)
+    expect(twin).toBeTruthy()
+    expect(twin!.id).not.toBe(n.id)
+  }
+  for (const e of overlay.edges.filter((x) => x.relation === 'same_name')) {
+    const a = overlay.nodes.find((n) => n.id === e.source)!
+    const b = overlay.nodes.find((n) => n.id === e.target)!
+    expect(a.label).toBe(b.label)
+    expect(a.source).not.toBe(b.source)
+  }
   // Overlay is a pure view — the run stays out of the canonical index.
   const canon = await page.evaluate(() => window.nodebook.noteNames())
   expect(canon).not.toContain('on-government')

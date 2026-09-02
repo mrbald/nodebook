@@ -722,6 +722,12 @@ body {
   color: var(--muted);
   font-size: 11px;
 }
+.graph-insp-note {
+  margin: -6px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .graph-insp-actions {
   display: flex;
   flex-wrap: wrap;
@@ -914,6 +920,11 @@ body {
 .graph-edge-related {
   stroke-dasharray: 5 4;
   opacity: 0.85;
+}
+/* Overlay only: the two notes joined by this line share a name. */
+.graph-edge-samename {
+  stroke-dasharray: 2 5;
+  opacity: 0.9;
 }
 .graph-ctl.is-on {
   color: var(--accent);

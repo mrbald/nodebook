@@ -116,6 +116,10 @@ it by hand, and nothing here changes your notes.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);
   **line colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a
   **dashed outline** is a note you've linked to but haven't created yet.
+- **Two notes, one name** — if two notes share a name (in different folders) the map
+  draws them as **two separate dots**, and the panel says how many links *could point
+  to more than one note* — a link like that is matched to a note in the same folder
+  when there is one, so the map never quietly merges two notes into one.
 - **Colour** — the **colour** button recolours the dots: by **links** (notes that
   clump together get the same colour), by **folder** (which folder each note is in),
   or by **meaning** (groups by topic — needs Talk to docs on).
@@ -201,9 +205,16 @@ first.
   the model to write one short note per concept. Every claim in a note carries a
   **citation**: a real quote from the document. If the model can't back a point with a
   verbatim quote, that point is dropped — not guessed.
+- **Quotes are checked against the whole document** — a point is kept only when its
+  quote is found **exactly once** in the document (if the model pointed at the wrong
+  passage, Nodebook finds the right one and corrects it); a quote that isn't there, or
+  that could be in two different places, is dropped rather than guessed at. The banner
+  after a run says how many were dropped and why.
 - **Nothing touches your vault yet** — the result opens as its **own map**, kept in a
   staging area. Explore it like the knowledge map. The **⧉ Overlay** button shows your
-  vault and the run *together* (a preview — still nothing written).
+  vault and the run *together* (a preview — still nothing written). Where the run and
+  your vault both have a note of the same name, you see **both dots joined by a dotted
+  line** — the clash a merge would have to settle, shown rather than silently merged.
 - **Runs are kept** — every distilled run appears under **Distilled runs** in the
   sidebar until you discard it, so closing the map loses nothing. Click a run to
   reopen its map; **✕** discards it. A run that hasn't been merged yet lives only in

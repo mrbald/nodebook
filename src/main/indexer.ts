@@ -137,7 +137,9 @@ export class VaultIndex {
       .prepare("SELECT path, title FROM files WHERE path NOT LIKE '%.map.md'")
       .all() as FileRow[]
     const triples = this.db
-      .prepare("SELECT subject, relation, object FROM triples WHERE source_file NOT LIKE '%.map.md'")
+      .prepare(
+        "SELECT subject, relation, object, source_file FROM triples WHERE source_file NOT LIKE '%.map.md'"
+      )
       .all() as TripleRow[]
     return { files, triples }
   }
@@ -149,7 +151,7 @@ export class VaultIndex {
     opts?: { depth?: number; cap?: number; showSources?: boolean }
   ): GraphData {
     const { files, triples } = this.graphRows()
-    return buildGraph(files, triples, focusPath ? noteName(focusPath) : null, opts)
+    return buildGraph(files, triples, focusPath, opts)
   }
 
   /** path → stored mtime for every indexed file. The vault-open scan uses it
@@ -232,12 +234,13 @@ export class VaultIndex {
     }))
   }
 
-  /** Semantic kNN edges (by note name) among `paths`, for "colour by meaning".
-   *  `minScore` drops weak pairs (see `talkNeighbors`). */
+  /** Semantic kNN edges (by note *path*, matching the map's node ids) among
+   *  `paths`, for "colour by meaning". `minScore` drops weak pairs (see
+   *  `talkNeighbors`). */
   talkSemanticEdges(paths: string[], k = 4, minScore = 0): { source: string; target: string }[] {
     return (this.vec?.semanticEdges(paths, k, minScore) ?? []).map((e) => ({
-      source: noteName(e.source),
-      target: noteName(e.target)
+      source: e.source,
+      target: e.target
     }))
   }
 

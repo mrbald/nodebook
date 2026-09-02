@@ -1,16 +1,30 @@
 import { describe, it, expect } from 'vitest'
 import { buildGraph, overlayGraph, noteName, type FileRow, type TripleRow } from './graph'
 
+/** A harvested triple: the subject IS the file it came from (identity is path). */
+const t = (from: string, relation: string, object: string): TripleRow => ({
+  subject: noteName(from),
+  relation,
+  object,
+  source_file: from
+})
+
+const A = '/v/A.md'
+const B = '/v/B.md'
+const C = '/v/sub/C.md'
+
 const files: FileRow[] = [
-  { path: '/v/A.md', title: 'A' },
-  { path: '/v/B.md', title: 'B' },
-  { path: '/v/sub/C.md', title: 'C' }
+  { path: A, title: 'A' },
+  { path: B, title: 'B' },
+  { path: C, title: 'C' }
 ]
 const triples: TripleRow[] = [
-  { subject: 'A', relation: 'links_to', object: 'B' },
-  { subject: 'A', relation: 'links_to', object: 'Ghost' }, // no file → ghost
-  { subject: 'B', relation: 'links_to', object: 'C' }
+  t(A, 'links_to', 'B'),
+  t(A, 'links_to', 'Ghost'), // no file → ghost
+  t(B, 'links_to', 'C')
 ]
+const ids = (g: { nodes: { id: string }[] }): Set<string> => new Set(g.nodes.map((n) => n.id))
+const labels = (g: { nodes: { label: string }[] }): string[] => g.nodes.map((n) => n.label).sort()
 
 describe('noteName', () => {
   it('strips directories and the .md extension', () => {
@@ -22,49 +36,56 @@ describe('noteName', () => {
 describe('buildGraph', () => {
   it('global: all referenced nodes + edges, with ghosts flagged', () => {
     const g = buildGraph(files, triples, null)
-    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'C', 'Ghost']))
-    const ghost = g.nodes.find((n) => n.id === 'Ghost')!
+    expect(ids(g)).toEqual(new Set([A, B, C, 'ghost:Ghost']))
+    const ghost = g.nodes.find((n) => n.id === 'ghost:Ghost')!
     expect(ghost.ghost).toBe(true)
     expect(ghost.path).toBeNull()
-    expect(g.nodes.find((n) => n.id === 'C')!.path).toBe('/v/sub/C.md')
+    expect(ghost.label).toBe('Ghost') // the link text, not the id
+    const c = g.nodes.find((n) => n.id === C)!
+    expect(c.path).toBe(C)
+    expect(c.label).toBe('C') // a real note is keyed by path but labelled by name
     expect(g.edges).toHaveLength(3)
+    expect(g.ambiguousTargets).toBe(0)
   })
 
   it('local depth-1: focus + immediate neighbours only', () => {
-    const g = buildGraph(files, triples, 'A', { depth: 1 })
+    const g = buildGraph(files, triples, A, { depth: 1 })
     // A links to B and Ghost; C is two hops away and excluded.
-    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'Ghost']))
-    expect(g.nodes.find((n) => n.id === 'A')!.focus).toBe(true)
-    expect(g.edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual(['A->B', 'A->Ghost'])
+    expect(ids(g)).toEqual(new Set([A, B, 'ghost:Ghost']))
+    expect(g.nodes.find((n) => n.id === A)!.focus).toBe(true)
+    expect(g.edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual([
+      `${A}->${B}`,
+      `${A}->ghost:Ghost`
+    ])
   })
 
   it('local: follows inbound edges too (B is linked from A and links to C)', () => {
-    const g = buildGraph(files, triples, 'B', { depth: 1 })
-    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'C']))
+    const g = buildGraph(files, triples, B, { depth: 1 })
+    expect(ids(g)).toEqual(new Set([A, B, C]))
   })
 
   it('depth-2 from A reaches C', () => {
-    const g = buildGraph(files, triples, 'A', { depth: 2 })
-    expect(g.nodes.map((n) => n.id)).toContain('C')
+    const g = buildGraph(files, triples, A, { depth: 2 })
+    expect(g.nodes.map((n) => n.id)).toContain(C)
   })
 
   it('degree counts edges within the slice and de-dupes parallel triples', () => {
-    const dup = [...triples, { subject: 'A', relation: 'links_to', object: 'B' }]
+    const dup = [...triples, t(A, 'links_to', 'B')]
     const g = buildGraph(files, dup, null)
     expect(g.edges).toHaveLength(3) // duplicate A->B dropped
-    expect(g.nodes.find((n) => n.id === 'A')!.degree).toBe(2) // A-B, A-Ghost
+    expect(g.nodes.find((n) => n.id === A)!.degree).toBe(2) // A-B, A-Ghost
   })
 
   it('resolves a path-suffix link target to the real note (not a ghost)', () => {
     // `[[sub/C]]` from A should resolve to the real note C at /v/sub/C.md.
-    const g = buildGraph(files, [{ subject: 'A', relation: 'links_to', object: 'sub/C' }], null)
-    const c = g.nodes.find((n) => n.id === 'C')!
+    const g = buildGraph(files, [t(A, 'links_to', 'sub/C')], null)
+    const c = g.nodes.find((n) => n.id === C)!
     expect(c.ghost).toBe(false)
-    expect(g.edges).toEqual([{ source: 'A', target: 'C', relation: 'links_to' }])
+    expect(g.edges).toEqual([{ source: A, target: C, relation: 'links_to' }])
   })
 
   it('isolated focus note yields a single node, no edges', () => {
-    const g = buildGraph([{ path: '/v/Lonely.md', title: 'Lonely' }], [], 'Lonely')
+    const g = buildGraph([{ path: '/v/Lonely.md', title: 'Lonely' }], [], '/v/Lonely.md')
     expect(g.nodes).toHaveLength(1)
     expect(g.edges).toHaveLength(0)
   })
@@ -76,85 +97,120 @@ describe('buildGraph', () => {
     expect(capped.nodes).toHaveLength(2)
     expect(capped.total).toBe(4)
     // Local slices are never capped → total equals the shown count.
-    const local = buildGraph(files, triples, 'A', { depth: 1 })
+    const local = buildGraph(files, triples, A, { depth: 1 })
     expect(local.total).toBe(local.nodes.length)
   })
 
   it('drops self-loops (a note that references itself)', () => {
-    const g = buildGraph(files, [{ subject: 'A', relation: 'links_to', object: 'A' }], null)
+    const g = buildGraph(files, [t(A, 'links_to', 'A')], null)
     expect(g.edges).toHaveLength(0)
     // `[[sub/C]]` from C resolves to C itself → also a self-loop, dropped.
-    const g2 = buildGraph(files, [{ subject: 'C', relation: 'links_to', object: 'sub/C' }], null)
+    const g2 = buildGraph(files, [t(C, 'links_to', 'sub/C')], null)
     expect(g2.edges).toHaveLength(0)
   })
 
   it('a typed relation supersedes the bare links_to for the same pair', () => {
     // A both `[[B]]`s in prose and declares `cites:: [[B]]` → one typed edge, no dup.
-    const g = buildGraph(
-      files,
-      [
-        { subject: 'A', relation: 'links_to', object: 'B' },
-        { subject: 'A', relation: 'cites', object: 'B' }
-      ],
-      null
-    )
-    expect(g.edges).toEqual([{ source: 'A', target: 'B', relation: 'cites' }])
+    const g = buildGraph(files, [t(A, 'links_to', 'B'), t(A, 'cites', 'B')], null)
+    expect(g.edges).toEqual([{ source: A, target: B, relation: 'cites' }])
   })
 
   it('keeps links_to to a *different* target than the typed one', () => {
+    const g = buildGraph(files, [t(A, 'links_to', 'B'), t(A, 'cites', 'C')], null)
+    expect(g.edges.map((e) => `${e.source}-${e.relation}->${e.target}`).sort()).toEqual([
+      `${A}-cites->${C}`,
+      `${A}-links_to->${B}`
+    ])
+  })
+})
+
+describe('same-name notes (identity is the path)', () => {
+  // Two different notes both called "Faction", one per folder, each linked to
+  // from its own folder — the collision a name-keyed graph used to swallow.
+  const twins: FileRow[] = [
+    { path: '/v/x/A.md', title: 'A' },
+    { path: '/v/x/Faction.md', title: 'Faction' },
+    { path: '/v/y/B.md', title: 'B' },
+    { path: '/v/y/Faction.md', title: 'Faction' },
+    { path: '/v/z/D.md', title: 'D' }
+  ]
+
+  it('are two nodes with the same label, and each link prefers its own folder', () => {
     const g = buildGraph(
-      files,
-      [
-        { subject: 'A', relation: 'links_to', object: 'B' },
-        { subject: 'A', relation: 'cites', object: 'C' }
-      ],
+      twins,
+      [t('/v/x/A.md', 'links_to', 'Faction'), t('/v/y/B.md', 'links_to', 'Faction')],
       null
     )
-    expect(g.edges.map((e) => `${e.source}-${e.relation}->${e.target}`).sort()).toEqual([
-      'A-cites->C',
-      'A-links_to->B'
+    expect(ids(g)).toEqual(new Set(['/v/x/A.md', '/v/x/Faction.md', '/v/y/B.md', '/v/y/Faction.md']))
+    expect(labels(g)).toEqual(['A', 'B', 'Faction', 'Faction'])
+    expect(g.edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual([
+      '/v/x/A.md->/v/x/Faction.md',
+      '/v/y/B.md->/v/y/Faction.md'
     ])
+  })
+
+  it('counts the target as ambiguous — once per target, not per link', () => {
+    const g = buildGraph(
+      twins,
+      [t('/v/x/A.md', 'links_to', 'Faction'), t('/v/y/B.md', 'links_to', 'Faction')],
+      null
+    )
+    expect(g.ambiguousTargets).toBe(1) // one target text ("Faction"), two links
+  })
+
+  it('falls back to the smallest path when no candidate shares the folder', () => {
+    const g = buildGraph(twins, [t('/v/z/D.md', 'links_to', 'Faction')], null)
+    expect(g.edges).toEqual([
+      { source: '/v/z/D.md', target: '/v/x/Faction.md', relation: 'links_to' }
+    ])
+    expect(g.ambiguousTargets).toBe(1)
+  })
+
+  it('an unambiguous name is not counted, however many notes link to it', () => {
+    const g = buildGraph(files, triples, null)
+    expect(g.ambiguousTargets).toBe(0)
   })
 })
 
 describe('source hubs (showSources)', () => {
   // Two notes distilled from the same book both carry `source:: [[Book]]`; A also
   // links to B directly, so the map stays connected once the hub is hidden.
+  const BOOK = '/v/Book.md'
   const withSource: FileRow[] = [
-    { path: '/v/A.md', title: 'A' },
-    { path: '/v/B.md', title: 'B' },
-    { path: '/v/Book.md', title: 'Book' }
+    { path: A, title: 'A' },
+    { path: B, title: 'B' },
+    { path: BOOK, title: 'Book' }
   ]
   const sourceTriples: TripleRow[] = [
-    { subject: 'A', relation: 'source', object: 'Book' },
-    { subject: 'B', relation: 'source', object: 'Book' },
-    { subject: 'A', relation: 'links_to', object: 'B' }
+    t(A, 'source', 'Book'),
+    t(B, 'source', 'Book'),
+    t(A, 'links_to', 'B')
   ]
 
   it('hides the hub by default, dropping its edges, and reports it as hidden', () => {
     const g = buildGraph(withSource, sourceTriples, null)
-    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B']))
-    expect(g.edges).toEqual([{ source: 'A', target: 'B', relation: 'links_to' }])
+    expect(ids(g)).toEqual(new Set([A, B]))
+    expect(g.edges).toEqual([{ source: A, target: B, relation: 'links_to' }])
     expect(g.hiddenSources).toBe(1)
   })
 
   it('showSources keeps the hub and its edges; hiddenSources is 0', () => {
     const g = buildGraph(withSource, sourceTriples, null, { showSources: true })
-    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'Book']))
+    expect(ids(g)).toEqual(new Set([A, B, BOOK]))
     expect(g.edges.filter((e) => e.relation === 'source')).toHaveLength(2)
     expect(g.hiddenSources).toBe(0)
   })
 
   it('a vault with no source triples is untouched, hiddenSources=0', () => {
     const g = buildGraph(files, triples, null)
-    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'C', 'Ghost']))
+    expect(ids(g)).toEqual(new Set([A, B, C, 'ghost:Ghost']))
     expect(g.hiddenSources).toBe(0)
   })
 
   it('never hides the hub when it is the focus itself — exempted, not just re-shown', () => {
     // Focusing the book is the one case where the user explicitly asked for it.
-    const g = buildGraph(withSource, sourceTriples, 'Book', { depth: 1 })
-    expect(new Set(g.nodes.map((n) => n.id))).toEqual(new Set(['A', 'B', 'Book']))
+    const g = buildGraph(withSource, sourceTriples, BOOK, { depth: 1 })
+    expect(ids(g)).toEqual(new Set([A, B, BOOK]))
     expect(g.edges.filter((e) => e.relation === 'source')).toHaveLength(2)
     // Nothing was actually dropped (the only hub is the focus), so the count is 0.
     expect(g.hiddenSources).toBe(0)
@@ -168,32 +224,46 @@ describe('overlayGraph', () => {
       { path: '/v/A.md', title: 'A' },
       { path: '/v/Faction.md', title: 'Faction' }
     ],
-    triples: [{ subject: 'A', relation: 'about', object: 'Faction' }]
+    triples: [t('/v/A.md', 'about', 'Faction')]
   }
   const run = {
     files: [
       { path: '/run/Faction.md', title: 'Faction' },
       { path: '/run/Republic.md', title: 'Republic' }
     ],
-    triples: [{ subject: 'Republic', relation: 'contrasts_with', object: 'Faction' }]
+    triples: [t('/run/Republic.md', 'contrasts_with', 'Faction')]
   }
 
-  it('tags each node by source: vault, run, or both (the overlap)', () => {
+  it('tags each node by the side its file came from: vault or run', () => {
     const g = overlayGraph(vault, run, null)
     const src = (id: string): string | undefined => g.nodes.find((n) => n.id === id)?.source
-    expect(src('A')).toBe('vault') // only in the vault
-    expect(src('Republic')).toBe('run') // only in the run
-    expect(src('Faction')).toBe('both') // same name on both sides → the join
+    expect(src('/v/A.md')).toBe('vault')
+    expect(src('/run/Republic.md')).toBe('run')
+    expect(src('/v/Faction.md')).toBe('vault')
+    expect(src('/run/Faction.md')).toBe('run')
   })
 
-  it('joins same-name notes into one node both sides connect to', () => {
+  it('keeps same-name notes apart — two dots, flagged, joined by a same_name edge', () => {
     const g = overlayGraph(vault, run, null)
-    expect(g.nodes.filter((n) => n.id === 'Faction')).toHaveLength(1)
-    const into = g.edges
-      .filter((e) => e.target === 'Faction')
-      .map((e) => e.source)
-      .sort()
-    expect(into).toEqual(['A', 'Republic']) // reached from a vault note and a run note
+    const factions = g.nodes.filter((n) => n.label === 'Faction')
+    expect(factions.map((n) => n.id).sort()).toEqual(['/run/Faction.md', '/v/Faction.md'])
+    expect(factions.every((n) => n.sameName === true)).toBe(true)
+    expect(g.edges.filter((e) => e.relation === 'same_name')).toEqual([
+      { source: '/v/Faction.md', target: '/run/Faction.md', relation: 'same_name' }
+    ])
+    // Each side's link still points at its OWN note — nothing was collapsed.
+    expect(g.edges.filter((e) => e.relation === 'about')[0].target).toBe('/v/Faction.md')
+    expect(g.edges.filter((e) => e.relation === 'contrasts_with')[0].target).toBe(
+      '/run/Faction.md'
+    )
+    // The map admits the name could have meant either note.
+    expect(g.ambiguousTargets).toBe(1)
+  })
+
+  it('leaves notes with no twin unflagged', () => {
+    const g = overlayGraph(vault, run, null)
+    expect(g.nodes.find((n) => n.id === '/v/A.md')!.sameName).toBeUndefined()
+    expect(g.nodes.find((n) => n.id === '/run/Republic.md')!.sameName).toBeUndefined()
   })
 
   it('is deterministic and writes nothing (a pure view)', () => {
@@ -207,14 +277,21 @@ describe('overlayGraph', () => {
         { path: '/run/A.md', title: 'A' },
         { path: '/run/Book.md', title: 'Book' }
       ],
-      triples: [{ subject: 'A', relation: 'source', object: 'Book' }]
+      triples: [t('/run/A.md', 'source', 'Book')]
     }
     const hidden = overlayGraph(vault, bookRun, null)
-    expect(hidden.nodes.map((n) => n.id)).not.toContain('Book')
+    expect(labels(hidden)).not.toContain('Book')
     expect(hidden.hiddenSources).toBe(1)
+    // The vault's A is flagged (the run has an "A" too) but its twin isn't drawn
+    // in this slice, so there is no pair and no edge.
+    expect(hidden.nodes.find((n) => n.id === '/v/A.md')!.sameName).toBe(true)
+    expect(hidden.edges.filter((e) => e.relation === 'same_name')).toHaveLength(0)
 
     const shown = overlayGraph(vault, bookRun, null, { showSources: true })
-    expect(shown.nodes.map((n) => n.id)).toContain('Book')
+    expect(labels(shown)).toContain('Book')
     expect(shown.hiddenSources).toBe(0)
+    expect(shown.edges.filter((e) => e.relation === 'same_name')).toEqual([
+      { source: '/v/A.md', target: '/run/A.md', relation: 'same_name' }
+    ])
   })
 })

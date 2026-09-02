@@ -30,10 +30,12 @@ export interface Outbound {
 }
 
 /** A node in the derived knowledge graph (a note, or a "ghost" — a linked target
- *  with no file yet). Keyed by note name, matching the triple store. */
+ *  with no file yet). Keyed by the note's *path*, so two notes with one name are
+ *  two nodes; a ghost's id is `ghost:<target>`. */
 export interface GraphNode {
-  /** Note name (the wikilink target); the node's stable id. */
+  /** The note's path — the node's stable id (`ghost:<target>` for a ghost). */
   id: string
+  /** The note name, as shown on the map and written inside a `[[link]]`. */
   label: string
   /** Absolute path if it resolves to a real note; null for a ghost. */
   path: string | null
@@ -42,9 +44,13 @@ export interface GraphNode {
   degree: number
   /** The note the slice is centred on (local map). */
   focus: boolean
-  /** In an overlay view, where this node's name came from: the vault, the
-   *  distilled run, or both (a same-name overlap). Absent in single-source views. */
-  source?: 'vault' | 'run' | 'both'
+  /** In an overlay view, which side this note's *file* came from. Absent in
+   *  single-source views, and on ghosts (which have no file on either side). */
+  source?: 'vault' | 'run'
+  /** Overlay only: a note with this same name also exists on the other side —
+   *  a collision a merge would have to decide about, drawn as two dots joined by
+   *  a `same_name` edge. */
+  sameName?: boolean
 }
 
 /** A directed edge: `source --relation--> target` (a harvested triple). */
@@ -66,6 +72,10 @@ export interface GraphData {
    *  the map into a star). 0 when shown, or when the slice has none — so the UI
    *  can show its toggle only when it would actually do something. */
   hiddenSources: number
+  /** Distinct link targets in this slice that matched more than one note (same
+   *  name in different folders). The map picked one — the count is how it admits
+   *  it guessed. */
+  ambiguousTargets: number
 }
 
 /** A full-text search result. */
@@ -241,7 +251,15 @@ export interface DistillStats {
   clusters: number
   extracted: number
   grounded: number
+  /** Everything grounding dropped: the three `droppedByReason` counts summed. */
   dropped: number
+  /** Why: `noEvidence` counts points the model backed with no quote at all;
+   *  `notFound` and `ambiguous` count quotes that couldn't be found in the
+   *  document, or that matched in more than one place (never guessed at). */
+  droppedByReason: { noEvidence: number; notFound: number; ambiguous: number }
+  /** Quotes found under a different passage than the model claimed, corrected
+   *  to the passage that really holds them, and kept. */
+  recovered: number
   merged: number
   notes: number
   failedClusters: number

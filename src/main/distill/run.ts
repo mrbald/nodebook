@@ -86,7 +86,12 @@ export interface DistillResult {
     clusters: number
     extracted: number
     grounded: number
+    /** Total drops: `droppedByReason`'s three counts summed. */
     dropped: number
+    /** Why grounding dropped things (see extract.ts's GroundingResult). */
+    droppedByReason: { noEvidence: number; notFound: number; ambiguous: number }
+    /** Quotes the fallback found under a different passage and kept. */
+    recovered: number
     merged: number
     notes: number
     failedClusters: number
@@ -202,13 +207,18 @@ export async function distill(
   const clusters = kmeans(points, k, { repCount: opts.repsPerCluster })
   report('clustering', clusters.length, clusters.length)
 
-  // 4. Extract per cluster (injected chat), with repair retry.
+  // 4. Extract per cluster (injected chat), with repair retry. Each shown
+  //    chunk remembers the call it was shown in, so grounding can look for a
+  //    mislabelled quote in the other chunks of that same prompt.
   const extracted: ExtractedItem[] = []
+  const window = new Map<number, number[]>()
   let failedClusters = 0
   report('extracting', 0, clusters.length)
   for (let i = 0; i < clusters.length; i++) {
     throwIfAborted(opts.signal)
-    const cc = clusters[i].representativeIds.map((id) => ({
+    const shown = clusters[i].representativeIds
+    for (const id of shown) window.set(id, shown)
+    const cc = shown.map((id) => ({
       chunkId: id,
       heading: chunks[id].heading,
       text: chunks[id].text
@@ -221,7 +231,14 @@ export async function distill(
 
   // 5–7. Ground → dedup → emit (all pure).
   report('finalizing', 0, 1)
-  const { notes: grounded, droppedTitles } = groundItems(extracted, prov)
+  const {
+    notes: grounded,
+    dropped: droppedByReason,
+    recovered
+  } = groundItems(extracted, prov, {
+    windowOf: (chunkId) => window.get(chunkId) ?? [],
+    fullText: source.text
+  })
   const { notes: deduped, merged } = dedup(grounded)
   // The book itself is written as a note of the run (artifact.planRunFiles), so
   // its name is off-limits to the emitted notes — see emitNotes.
@@ -241,7 +258,9 @@ export async function distill(
       clusters: clusters.length,
       extracted: extracted.length,
       grounded: grounded.length,
-      dropped: droppedTitles.length,
+      dropped: droppedByReason.noEvidence + droppedByReason.notFound + droppedByReason.ambiguous,
+      droppedByReason,
+      recovered,
       merged,
       notes: emitted.length,
       failedClusters,

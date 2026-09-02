@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { cpSync, mkdtempSync, writeFileSync } from 'fs'
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, sep } from 'path'
 
@@ -21,6 +21,14 @@ test.beforeAll(async () => {
   // A note with two link *types* (a wikilink + a typed field) so the legend
   // filter has something to filter.
   writeFileSync(join(vaultDir, 'Hub.md'), '# Hub\n\nSee [[Graph Model]].\n\ntopic:: science\n')
+  // Two different notes called "Twin", one per folder, each linked from its own
+  // folder — identity is the path, so the map must draw two dots, not one.
+  mkdirSync(join(vaultDir, 'left'))
+  mkdirSync(join(vaultDir, 'right'))
+  writeFileSync(join(vaultDir, 'left', 'Twin.md'), '# Twin\n\nThe left one.\n')
+  writeFileSync(join(vaultDir, 'right', 'Twin.md'), '# Twin\n\nThe right one.\n')
+  writeFileSync(join(vaultDir, 'left', 'Leftward.md'), '# Leftward\n\nSee [[Twin]].\n')
+  writeFileSync(join(vaultDir, 'right', 'Rightward.md'), '# Rightward\n\nSee [[Twin]].\n')
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-graph-userdata-'))
   app = await electron.launch({
     args: [projectRoot],
@@ -179,4 +187,25 @@ test('the inspector "Open ↗" leaves the map and opens the note in the editor',
   await page.locator('.graph-ctl', { hasText: 'Open ↗' }).click()
   await expect(page.locator('.graph-view')).toHaveCount(0) // map closed
   await expect(page.locator('.cm-content')).toBeVisible()
+})
+
+test('two notes with one name are two dots, and the panel admits the ambiguity', async () => {
+  await page.locator('.tree-file', { hasText: 'Leftward' }).click()
+  await page.locator('.graph-open-btn').click()
+  await expect(page.locator('.graph-view')).toBeVisible()
+
+  // Local: the link resolves to the Twin in the *linking note's own folder*.
+  await expect(page.locator('.graph-node')).toHaveCount(2)
+  await page.locator('.graph-node', { hasText: 'Twin' }).click()
+  await expect(page.locator('.graph-insp-title')).toContainText('Twin')
+  await page.locator('.graph-ctl', { hasText: 'Open ↗' }).click()
+  await expect(page.locator('.cm-content')).toContainText('The left one.') // not the right one
+
+  // Global: both Twins are drawn, and the panel says a link could mean either.
+  await page.locator('.graph-open-btn').click()
+  await page.locator('.graph-ctl', { hasText: 'Global' }).click()
+  await expect(page.locator('.graph-node', { hasText: 'Twin' })).toHaveCount(2)
+  await expect(page.locator('.graph-insp-note')).toContainText(
+    'could point to more than one note'
+  )
 })

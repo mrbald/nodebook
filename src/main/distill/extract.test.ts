@@ -74,6 +74,44 @@ describe('locateQuote', () => {
     const loc = locateQuote(mixed, 'YOU TAKE IN A greater variety')!
     expect(mixed.slice(loc.start, loc.end)).toBe('you take in a greater variety')
   })
+
+  // The fold table, one case per source of noise a converted document carries.
+  it('ignores a soft hyphen inside a word', () => {
+    const soft = 'The consti\u00adtution protects liberty.'
+    const loc = locateQuote(soft, 'constitution protects liberty')!
+    expect(soft.slice(loc.start, loc.end)).toBe('consti\u00adtution protects liberty')
+  })
+
+  it('joins a word hyphenated across a line break', () => {
+    const wrapped = 'The consti-\n  tution protects liberty.'
+    const loc = locateQuote(wrapped, 'constitution protects liberty')!
+    expect(wrapped.slice(loc.start, loc.end)).toBe('consti-\n  tution protects liberty')
+  })
+
+  it('joins a word broken with a soft hyphen at a line end', () => {
+    const wrapped = 'The consti\u00ad\ntution protects liberty.'
+    expect(locateQuote(wrapped, 'constitution protects liberty')).not.toBeNull()
+  })
+
+  it('keeps a hyphen that is not a line-end break', () => {
+    // Only a hyphen AT a line end, continued in lower case, is a typesetter's
+    // break. A mid-line compound keeps its hyphen, and "Anti-\nFederalist" —
+    // continued with a capital — is a real compound too, not a broken word.
+    expect(locateQuote('a well-known fact', 'wellknown fact')).toBeNull()
+    expect(locateQuote('The Anti-\nFederalist papers.', 'AntiFederalist papers')).toBeNull()
+  })
+
+  it('folds typographic ligatures to their letters', () => {
+    const lig = 'The \ufb01rst di\ufb03cult e\ufb00ort a\ufb04uent \ufb02ows.'
+    const loc = locateQuote(lig, 'first difficult effort affluent flows')!
+    expect(lig.slice(loc.start, loc.end)).toBe('\ufb01rst di\ufb03cult e\ufb00ort a\ufb04uent \ufb02ows')
+  })
+
+  it('treats NBSP and other Unicode spaces as ordinary whitespace', () => {
+    const spaced = 'Extend\u00a0the\u2009sphere\u202fand\u2003take.'
+    const loc = locateQuote(spaced, 'Extend the sphere and take.')!
+    expect(spaced.slice(loc.start, loc.end)).toBe(spaced)
+  })
 })
 
 describe('parseExtraction', () => {
@@ -121,37 +159,155 @@ describe('groundItems', () => {
   })
 
   it('keeps an item and resolves its quote to an absolute source span', () => {
-    const { notes, droppedTitles } = groundItems(
+    const { notes, droppedTitles, dropped, recovered } = groundItems(
       [item({ title: 'Extend the sphere', evidence: [{ chunkId: 1, quote: 'Extend the sphere' }] })],
       chunks
     )
     expect(droppedTitles).toEqual([])
     expect(notes[0].citations[0]).toMatchObject({ file: 'Federalist.md', start: 1000, end: 1017 })
+    expect(dropped).toEqual({ noEvidence: 0, notFound: 0, ambiguous: 0 })
+    expect(recovered).toBe(0)
   })
 
   it('drops an item whose quote is not in the cited chunk (the gate)', () => {
-    const { notes, droppedTitles } = groundItems(
+    const { notes, droppedTitles, dropped } = groundItems(
       [item({ title: 'Hallucinated', evidence: [{ chunkId: 1, quote: 'never written here' }] })],
       chunks
     )
     expect(notes).toEqual([])
     expect(droppedTitles).toEqual(['Hallucinated'])
+    expect(dropped.notFound).toBe(1)
   })
 
   it('keeps only the locatable evidence when an item mixes good and bad quotes', () => {
-    const { notes } = groundItems(
+    const { notes, dropped } = groundItems(
       [item({ evidence: [{ chunkId: 1, quote: 'more parties' }, { chunkId: 1, quote: 'fabricated' }] })],
       chunks
     )
     expect(notes[0].citations.length).toBe(1)
     expect(notes[0].citations[0].quote).toBe('more parties')
+    expect(dropped.notFound).toBe(1)
   })
 
   it('drops evidence pointing at an unknown chunk id', () => {
-    const { droppedTitles } = groundItems(
+    const { droppedTitles, dropped } = groundItems(
       [item({ title: 'NoChunk', evidence: [{ chunkId: 999, quote: 'whatever' }] })],
       chunks
     )
     expect(droppedTitles).toEqual(['NoChunk'])
+    expect(dropped.notFound).toBe(1)
+  })
+
+  it('counts an item the model backed with no quote at all as noEvidence', () => {
+    const { droppedTitles, dropped } = groundItems([item({ title: 'Unsupported' })], chunks)
+    expect(droppedTitles).toEqual(['Unsupported'])
+    expect(dropped).toEqual({ noEvidence: 1, notFound: 0, ambiguous: 0 })
+  })
+})
+
+/**
+ * The fallback chain: a quote the model tagged with the wrong chunk id is
+ * recovered — but only when the match is unique. Never a guess.
+ */
+describe('groundItems fallbacks', () => {
+  const A = 'Extend the sphere and take in more parties.'
+  const B = 'Ambition must be made to counteract ambition.'
+  const C = 'The accumulation of all powers is tyranny.'
+  const REPEATED = 'Liberty is to faction what air is to fire.'
+  // One document holding all four passages, at known offsets.
+  const doc = [A, B, C, REPEATED, 'A later page repeats: ' + REPEATED].join('\n\n')
+  const at = (t: string): number => doc.indexOf(t)
+  const chunks = new Map<number, ChunkProvenance>([
+    [0, { file: 'Book.md', start: at(A), text: A }],
+    [1, { file: 'Book.md', start: at(B), text: B }],
+    [2, { file: 'Book.md', start: at(C), text: C }],
+    [3, { file: 'Book.md', start: at(REPEATED), text: REPEATED }]
+  ])
+  const window = (): number[] => [0, 1, 2]
+  const item = (evidence: ExtractedItem['evidence'], title = 'T'): ExtractedItem => ({
+    kind: 'claim',
+    title,
+    summary: 's',
+    evidence,
+    links: []
+  })
+
+  it('recovers a quote cited under the wrong chunk of the same call, with the corrected id', () => {
+    const { notes, dropped, recovered } = groundItems(
+      [item([{ chunkId: 0, quote: 'counteract ambition' }])],
+      chunks,
+      { windowOf: window, fullText: doc }
+    )
+    expect(recovered).toBe(1)
+    expect(dropped).toEqual({ noEvidence: 0, notFound: 0, ambiguous: 0 })
+    const c = notes[0].citations[0]
+    expect(c.chunkId).toBe(1) // corrected from the model's 0
+    expect(doc.slice(c.start, c.end)).toBe('counteract ambition')
+  })
+
+  it('recovers from the whole document when the window does not hold the quote', () => {
+    const { notes, recovered } = groundItems(
+      [item([{ chunkId: 0, quote: 'accumulation of all powers' }])],
+      chunks,
+      { windowOf: () => [0, 1], fullText: doc } // chunk 2 was not in the call
+    )
+    expect(recovered).toBe(1)
+    const c = notes[0].citations[0]
+    expect(c.chunkId).toBe(2)
+    expect(doc.slice(c.start, c.end)).toBe('accumulation of all powers')
+  })
+
+  it('drops a quote that occurs twice in the document as ambiguous, never guessing', () => {
+    const { notes, droppedTitles, dropped, recovered } = groundItems(
+      [item([{ chunkId: 0, quote: 'air is to fire' }], 'Twice')],
+      chunks,
+      { windowOf: window, fullText: doc }
+    )
+    expect(notes).toEqual([])
+    expect(droppedTitles).toEqual(['Twice'])
+    expect(dropped).toEqual({ noEvidence: 0, notFound: 0, ambiguous: 1 })
+    expect(recovered).toBe(0)
+  })
+
+  it('drops a quote that is nowhere in the document as notFound', () => {
+    const { dropped } = groundItems(
+      [item([{ chunkId: 0, quote: 'a sentence no author wrote' }], 'Absent')],
+      chunks,
+      { windowOf: window, fullText: doc }
+    )
+    expect(dropped).toEqual({ noEvidence: 0, notFound: 1, ambiguous: 0 })
+  })
+
+  it('is ambiguous, not recovered, when two window chunks each hold the quote once', () => {
+    const twins = new Map<number, ChunkProvenance>([
+      [0, { file: 'B.md', start: 0, text: 'nothing to see' }],
+      [1, { file: 'B.md', start: 100, text: 'a shared sentence' }],
+      [2, { file: 'B.md', start: 200, text: 'a shared sentence' }]
+    ])
+    const { dropped, recovered } = groundItems(
+      [item([{ chunkId: 0, quote: 'a shared sentence' }])],
+      twins,
+      { windowOf: () => [0, 1, 2] } // no fullText: the window's verdict stands
+    )
+    expect(recovered).toBe(0)
+    expect(dropped.ambiguous).toBe(1)
+  })
+
+  it('counts a point with no quote at all separately from a missing quote', () => {
+    const { dropped } = groundItems(
+      [
+        item([], 'No quote'),
+        item([{ chunkId: 0, quote: 'not in the book' }], 'Bad quote')
+      ],
+      chunks,
+      { windowOf: window, fullText: doc }
+    )
+    expect(dropped).toEqual({ noEvidence: 1, notFound: 1, ambiguous: 0 })
+  })
+
+  it('still grounds against the cited chunk alone when no fallbacks are given', () => {
+    const { notes, recovered } = groundItems([item([{ chunkId: 1, quote: 'Ambition must be made' }])], chunks)
+    expect(notes[0].citations[0].chunkId).toBe(1)
+    expect(recovered).toBe(0)
   })
 })
