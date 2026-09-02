@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { GraphData, GraphEdge, GraphNode, TalkNeighbor } from '@shared/types'
 import { forceLayout, type Point } from './layout'
+import { elkLayout } from './elkLayout'
 import { dagreLayout } from './dagreLayout'
 import { radialLayout } from './radialLayout'
 import { groupsLayout } from './groupsLayout'
@@ -105,6 +106,10 @@ type Gesture =
  * With talk-to-docs on, an opt-in **✨ Related** overlay adds dashed edges to
  * similar-but-unlinked notes.
  */
+/** The map's layouts. `tree` and `elk` are both layered; ELK untangles a dense
+ *  map more often and is the only asynchronous one. */
+type LayoutMode = 'force' | 'tree' | 'elk' | 'radial' | 'groups' | 'blocks'
+
 export function GraphView({
   focusPath,
   focusName,
@@ -157,7 +162,12 @@ export function GraphView({
   // Session-only; the default depends on the view (see defaultShowSources).
   const [showSources, setShowSources] = useState(defaultShowSources)
   const [colorMode, setColorMode] = useState<ColorMode>('links')
-  const [layoutMode, setLayoutMode] = useState<'force' | 'tree' | 'radial' | 'groups' | 'blocks'>('force')
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('force')
+  // ELK lays out asynchronously (see elkLayout.ts): the result lands here, and
+  // until it does the tree layout stands in — the nearest shape, so the switch
+  // is a small settle rather than a blank map. A stale answer (the graph or
+  // the mode changed meanwhile) is dropped.
+  const [elkPos, setElkPos] = useState<Map<string, Point> | null>(null)
   const [hiddenRels, setHiddenRels] = useState<Set<string>>(new Set())
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
@@ -263,6 +273,7 @@ export function GraphView({
     if (!visible) return null
     const o = { width: W, height: H }
     if (layoutMode === 'tree') return dagreLayout(visible.nodes, visible.edges, o)
+    if (layoutMode === 'elk') return elkPos ?? dagreLayout(visible.nodes, visible.edges, o)
     if (layoutMode === 'radial') return radialLayout(visible.nodes, visible.edges, o)
     if (layoutMode === 'groups') return groupsLayout(visible.nodes, visible.edges, o)
     if (layoutMode === 'blocks') return blocksLayout(visible.nodes, visible.edges, o)
@@ -275,7 +286,21 @@ export function GraphView({
       seed,
       fixed: new Set(pinned.keys())
     })
-  }, [visible, layoutMode, pinned])
+  }, [visible, layoutMode, pinned, elkPos])
+
+  useEffect(() => {
+    if (layoutMode !== 'elk' || !visible) {
+      setElkPos(null)
+      return
+    }
+    let live = true
+    void elkLayout(visible.nodes, visible.edges, { width: W, height: H }).then((p) => {
+      if (live) setElkPos(p)
+    })
+    return () => {
+      live = false
+    }
+  }, [visible, layoutMode])
 
   // Remember the force layout to seed the next relayout; a new graph or a new
   // layout algorithm starts fresh (depth changes keep the seed for stability).
@@ -583,16 +608,17 @@ export function GraphView({
             <StatusSelect
               kind="layout"
               prefix="layout: "
-              title="Layout: organic web (force), hierarchical tree (dagre), focus-centric radial, community groups, or min-cut blocks"
+              title="Layout: organic web (force), hierarchical tree (dagre), layered elk (Eclipse Layout Kernel), focus-centric radial, community groups, or min-cut blocks"
               value={layoutMode}
               options={[
                 { value: 'force', label: 'force' },
                 { value: 'tree', label: 'tree' },
+                { value: 'elk', label: 'elk' },
                 { value: 'radial', label: 'radial' },
                 { value: 'groups', label: 'groups' },
                 { value: 'blocks', label: 'blocks' }
               ]}
-              onChange={(v) => setLayoutMode(v as 'force' | 'tree' | 'radial' | 'groups' | 'blocks')}
+              onChange={(v) => setLayoutMode(v as LayoutMode)}
             />
             {talkReady && !global && (
               <button
