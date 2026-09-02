@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { mergePlan, rewriteLinks, withSameAs, type RunNote, type VaultNotes } from './mergePlan'
+import {
+  mergePlan,
+  rewriteLinks,
+  rewriteSourceField,
+  rewriteThemeMembers,
+  withSameAs,
+  type RunNote,
+  type VaultNotes
+} from './mergePlan'
 
 const vault = (entries: Record<string, string>): VaultNotes => ({
   names: new Set(Object.keys(entries)),
@@ -134,5 +142,67 @@ describe('withSameAs', () => {
 
   it('plain text with no frontmatter gets it as the first line', () => {
     expect(withSameAs('# Book\n\ntext\n', 'Book')).toBe('same_as:: [[Book]]\n# Book\n\ntext\n')
+  })
+})
+
+describe('rewriteSourceField', () => {
+  const renames = new Map([['Federalist', 'Federalist 2']])
+  const note = (fm: string): string => `---\nkind: concept\n${fm}cite:\n  - chunk: 1\n---\n\n# Faction\n\nsource:: [[Federalist]]\n`
+
+  it('follows the document to the name it actually landed under', () => {
+    expect(rewriteSourceField(note('source: Federalist\n'), renames)).toContain(
+      '\nsource: Federalist 2\n'
+    )
+  })
+
+  it('leaves a line naming something else exactly as it was', () => {
+    const other = note('source: Another Book\n')
+    expect(rewriteSourceField(other, renames)).toBe(other)
+    expect(rewriteSourceField(note('source: Federalist\n'), new Map())).toBe(
+      note('source: Federalist\n')
+    )
+  })
+
+  it('takes the whole line as one name — a title may contain commas', () => {
+    const src = '---\nsource: Options, Futures\n---\n\n# X\n'
+    expect(rewriteSourceField(src, new Map([['Options, Futures', 'Options, Futures 2']]))).toBe(
+      '---\nsource: Options, Futures 2\n---\n\n# X\n'
+    )
+  })
+
+  it('touches only the frontmatter — a `source:` line in the prose is the author\'s', () => {
+    const src = '---\nkind: concept\n---\n\n# X\n\nsource: Federalist\n'
+    expect(rewriteSourceField(src, renames)).toBe(src)
+  })
+
+  it('leaves a note with no frontmatter alone', () => {
+    expect(rewriteSourceField('# X\n\nsource: Federalist\n', renames)).toBe(
+      '# X\n\nsource: Federalist\n'
+    )
+  })
+})
+
+describe('rewriteThemeMembers', () => {
+  const renames = new Map([['Faction', 'Faction (Federalist)']])
+  const theme = (members: string[]): string =>
+    `---\nkind: theme\nsource: Federalist\n---\n\n# Checks on power\n\nsource:: [[Federalist]]\n\n${members
+      .map((m) => `- ${m}`)
+      .join('\n')}\n`
+
+  it('follows a member that the merge renamed', () => {
+    expect(rewriteThemeMembers(theme(['Faction', 'Union']), renames)).toBe(
+      theme(['Faction (Federalist)', 'Union'])
+    )
+  })
+
+  it('leaves every other note alone — only a theme note lists members', () => {
+    const concept = '---\nkind: concept\n---\n\n# X\n\n- Faction\n'
+    expect(rewriteThemeMembers(concept, renames)).toBe(concept)
+    expect(rewriteThemeMembers('- Faction\n', renames)).toBe('- Faction\n')
+  })
+
+  it('only rewrites a bullet that is exactly a renamed name', () => {
+    const src = theme(['Faction and Union', 'Faction'])
+    expect(rewriteThemeMembers(src, renames)).toBe(theme(['Faction and Union', 'Faction (Federalist)']))
   })
 })

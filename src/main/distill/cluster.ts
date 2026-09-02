@@ -1,8 +1,9 @@
 /**
- * Pure, deterministic k-means over chunk embedding vectors — the first step of
- * "distill a document". Grouping a book's chunks into K semantic clusters is
- * what bounds the LLM extraction cost: each cluster's *representative* chunks go
- * to the model once, instead of the whole book on repeat.
+ * Pure, deterministic k-means over embedding vectors. The distill run uses it
+ * for its LAST pass: grouping the emitted notes into themes (`themes.ts`), so
+ * the map reads book → themes → notes. (It once sized the extraction itself —
+ * clusters of chunks, representatives to the model; reading is by document
+ * order now, see `windows.ts`.)
  *
  * Deterministic by construction (golden-testable, and re-running the same book
  * yields the same map): no RNG. Initialization is furthest-first (Gonzalez) with
@@ -23,23 +24,6 @@ export interface Cluster {
   memberIds: number[]
   /** The members nearest the centroid (ascending) — what the LLM is shown. */
   representativeIds: number[]
-}
-
-/**
- * How many clusters for `n` chunks: roughly one per `perCluster` chunks, clamped
- * to [min, max] and never more than `n`. The cap is the LLM budget — one
- * extraction call per cluster — so a 300-page book stays bounded.
- */
-export function chooseK(
-  n: number,
-  opts: { perCluster?: number; min?: number; max?: number } = {}
-): number {
-  const perCluster = opts.perCluster ?? 8
-  const min = opts.min ?? 4
-  const max = opts.max ?? 24
-  if (n <= 0) return 0
-  const target = Math.ceil(n / perCluster)
-  return Math.min(n, Math.max(min, Math.min(max, target)))
 }
 
 /** Squared Euclidean distance (no sqrt — only comparisons matter). */

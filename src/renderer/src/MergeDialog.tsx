@@ -70,7 +70,8 @@ export function MergeDialog({
               <li>
                 {clashes.length} {plural(clashes.length, 'note')}{' '}
                 {plural(clashes.length, 'shares', 'share')} a name with a note you already have —{' '}
-                {plural(clashes.length, 'it', 'they')}&apos;ll be saved as “{clashes[0].targetName}”
+                {plural(clashes.length, 'it', 'they')}&apos;ll be saved under{' '}
+                {plural(clashes.length, 'a new name', 'new names')}, as shown below
               </li>
             )}
             {identical.length > 0 && (
@@ -90,7 +91,9 @@ export function MergeDialog({
                   checked={sameAs.has(e.name)}
                   onChange={() => toggle(e.name)}
                 />
-                <span className="merge-clash-name">{e.targetName}</span>
+                <span className="merge-clash-name">
+                  {e.name} → {e.targetName}
+                </span>
                 <span className="merge-clash-hint">same as the existing “{e.name}”</span>
               </label>
             ))}

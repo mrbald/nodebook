@@ -30,6 +30,7 @@ import {
   checkpointStore,
   readRunNotes,
   readStagedNote,
+  planSourceNote,
   legacyDistillRoot,
   migrateDistillRuns
 } from './artifact'
@@ -180,6 +181,19 @@ describe('listRuns / removeRun', () => {
     removeRun(v, 'a')
     expect(listRuns(v)).toEqual(['b'])
   })
+
+  it('lists only directories that are runs — never the store, never a stray', () => {
+    const v = tmpVault()
+    writeRunArtifact(v, 'a', { file: 'B.md', text: 'x' }, [])
+    // The source store lives under `.distill/` too, and a user (or a crash)
+    // can leave anything else there. A name `runDir` would refuse must not be
+    // handed out as a run id: everything that asks about it throws.
+    for (const stray of ['sources', '_tmp', '.hidden', 'a backup..old'])
+      mkdirSync(join(v, '.distill', stray), { recursive: true })
+    writeFileSync(join(v, '.distill', 'sources.json'), '{}')
+    expect(listRuns(v)).toEqual(['a'])
+    for (const id of listRuns(v)) expect(() => assertRunId(id)).not.toThrow()
+  })
 })
 
 describe('mergeRun / unmergeRun (reversible promote)', () => {
@@ -280,10 +294,21 @@ describe('mergeRun / unmergeRun (reversible promote)', () => {
     )
     // Nothing of the first merge was overwritten…
     expect(readFileSync(join(v, 'Sources', 'Federalist.md'), 'utf8')).toContain('The first book.')
-    // …and the second run's notes point at the copy that is actually theirs.
-    expect(readFileSync(join(v, 'Distilled', 'two', 'Faction.md'), 'utf8')).toContain(
-      'source:: [[Federalist 2]]'
-    )
+    // …and the second run's notes point at the copy that is actually theirs —
+    // in the body link AND in the frontmatter line the citation panel reads.
+    // Miss the second one and every "go to the quote" opens the other book.
+    const note = readFileSync(join(v, 'Distilled', 'two', 'Faction.md'), 'utf8')
+    expect(note).toContain('source:: [[Federalist 2]]')
+    expect(note).toMatch(/^---\n(?:.*\n)*?source: Federalist 2\n/)
+    expect(note).not.toMatch(/^source: Federalist$/m)
+  })
+
+  it('refuses to plan over a name it cannot read (only "not there" means free)', () => {
+    const v = tmpVault()
+    // A directory where the note would be: reading it fails with EISDIR, which
+    // is not "the name is free" — writing there would destroy whatever it is.
+    mkdirSync(join(v, 'Sources', 'Sapiens.md'), { recursive: true })
+    expect(() => planSourceNote(v, 'Sapiens', 'x'.repeat(40))).toThrow()
   })
 
   it('MANIFEST FIRST: a merge that dies before copying still leaves an undoable record', () => {
@@ -311,6 +336,31 @@ describe('mergeRun / unmergeRun (reversible promote)', () => {
     expect(canonicalMarkdown(v)).toEqual([]) // fully reversed
     expect(existsSync(join(v, 'Distilled', 'sapiens'))).toBe(false)
     expect(readMergeManifest(v, 'sapiens')).toBeNull()
+  })
+
+  it('undo removes the Sources folder it created, and only that one', async () => {
+    const v = tmpVault()
+    run(v)
+    mergeRun(v, 'sapiens')
+    expect(readMergeManifest(v, 'sapiens')!.createdSourcesDir).toBe(true)
+    await unmergeRun(v, 'sapiens', async () => {})
+    expect(existsSync(join(v, 'Sources'))).toBe(false)
+  })
+
+  it('undo leaves a Sources folder you made yourself, even when it empties it', async () => {
+    const v = tmpVault()
+    // The user has their own `Sources/` — with their own things in it.
+    mkdirSync(join(v, 'Sources'), { recursive: true })
+    writeFileSync(join(v, 'Sources', 'Reading list.md'), '# Reading list\n')
+    run(v)
+    mergeRun(v, 'sapiens')
+    expect(readMergeManifest(v, 'sapiens')!.createdSourcesDir).toBeUndefined()
+
+    rmSync(join(v, 'Sources', 'Reading list.md')) // they tidy it out again
+    await unmergeRun(v, 'sapiens', async () => {})
+    // The book the merge wrote is taken back; the FOLDER is theirs and stays.
+    expect(existsSync(join(v, 'Sources', 'Sapiens.md'))).toBe(false)
+    expect(existsSync(join(v, 'Sources'))).toBe(true)
   })
 
   it('undo TRASHES a note you edited after merging, and skips one already gone', async () => {
@@ -561,9 +611,54 @@ describe('a run in flight (start marker, checkpoint, resume)', () => {
     store.save({ type: 'window', index: 1, failed: true })
     const cp = store.load()!
     expect(cp.plan).toEqual([[0, 1], [2]])
-    expect(cp.done.get(0)).toEqual({ items: [], failed: false })
-    expect(cp.done.get(1)).toEqual({ items: [], failed: true })
+    // A record that says nothing about how it was read replays as one call
+    // over its planned chunks — the shape a log written before splits were
+    // recorded has, and the shape an unsplit window has anyway.
+    expect(cp.done.get(0)).toEqual({ items: [], failed: false, groups: null, calls: 1, splits: 0 })
+    expect(cp.done.get(1)).toEqual({ items: [], failed: true, groups: null, calls: 1, splits: 0 })
     expect(cp.done.size).toBe(2)
+  })
+
+  it('replays what a window really cost: the calls it took and how they split', () => {
+    const v = tmpVault()
+    beginRun(v, 'r1', src)
+    const store = checkpointStore(v, 'r1')
+    store.save({ type: 'plan', windows: [[0, 1, 2, 3]] })
+    store.save({
+      type: 'window',
+      index: 0,
+      items: [],
+      groups: [
+        { ids: [0, 1], count: 0, ok: true },
+        { ids: [2, 3], count: 0, ok: false }
+      ],
+      calls: 3,
+      splits: 1
+    })
+    expect(store.load()!.done.get(0)).toEqual({
+      items: [],
+      failed: false,
+      groups: [
+        { ids: [0, 1], count: 0, ok: true },
+        { ids: [2, 3], count: 0, ok: false }
+      ],
+      calls: 3,
+      splits: 1
+    })
+  })
+
+  it('ignores a mangled per-call breakdown rather than replaying nonsense', () => {
+    const v = tmpVault()
+    beginRun(v, 'r1', src)
+    const store = checkpointStore(v, 'r1')
+    store.save({ type: 'plan', windows: [[0]] })
+    appendFileSync(
+      join(runDir(v, 'r1'), 'progress.jsonl'),
+      `${JSON.stringify({ type: 'window', index: 0, items: [], groups: [{ ids: ['x'] }] })}\n`
+    )
+    const done = store.load()!.done.get(0)!
+    expect(done.groups).toBeNull() // → replayed as one call over the planned ids
+    expect(done.failed).toBe(false)
   })
 
   it('survives a torn last line (a crash mid-write loses that window, not the run)', () => {

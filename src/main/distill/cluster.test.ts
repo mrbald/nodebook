@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { chooseK, kmeans, type Point } from './cluster'
+import { kmeans, type Point } from './cluster'
 
 const P = (id: number, x: number, y: number): Point => ({ id, vec: Float32Array.from([x, y]) })
 
@@ -7,19 +7,6 @@ const P = (id: number, x: number, y: number): Point => ({ id, vec: Float32Array.
 function memberUnion(clusters: { memberIds: number[] }[]): number[] {
   return clusters.flatMap((c) => c.memberIds).sort((a, b) => a - b)
 }
-
-describe('chooseK', () => {
-  it('scales ~one cluster per `perCluster` chunks, clamped', () => {
-    expect(chooseK(60)).toBe(8) // ceil(60/8)=8, inside [4,24]
-    expect(chooseK(400)).toBe(24) // capped at max
-    expect(chooseK(10)).toBe(4) // ceil(10/8)=2 → lifted to min 4
-  })
-
-  it('never asks for more clusters than points, and 0 for empty', () => {
-    expect(chooseK(3)).toBe(3) // min would be 4 but only 3 points
-    expect(chooseK(0)).toBe(0)
-  })
-})
 
 describe('kmeans', () => {
   // Two well-separated blobs: ids 1-3 near origin, 10-12 near (10,10).

@@ -134,6 +134,58 @@ export function rewriteLinks(content: string, renames: Map<string, string>): str
   })
 }
 
+/**
+ * The other half of a rename: the frontmatter `source:` line.
+ *
+ * A distilled note names its book twice — `source:: [[Book]]` in the body (an
+ * edge, moved by `rewriteLinks`) and `source: Book` in the frontmatter, which
+ * is what the citation panel resolves to decide WHICH note a "go to the quote"
+ * click opens. When the document lands in the vault as `Book 2` — because a
+ * different book of the same title is already there — a note left pointing at
+ * `Book` sends every citation into somebody else's book. So the same rename map
+ * moves this line too.
+ *
+ * The whole value is one name (a title may contain commas, and a run has one
+ * document), matching how `citations.ts` reads it. Only the first frontmatter
+ * block is touched, and only a `source:` line inside it: a `source:` line in
+ * the prose below is the author's, not ours.
+ */
+export function rewriteSourceField(content: string, renames: Map<string, string>): string {
+  if (renames.size === 0) return content
+  const fm = /^---\n([\s\S]*?)\n---(\n|$)/.exec(content)
+  if (!fm) return content
+  const by = new Map([...renames].map(([from, to]) => [key(from), to]))
+  const block = fm[1].replace(/^source:([ \t]*)(.+)$/m, (whole, pad: string, value: string) => {
+    const to = by.get(key(value.trim()))
+    return to === undefined ? whole : `source:${pad}${to}`
+  })
+  if (block === fm[1]) return content
+  // The match starts at 0 (`^` with no `m` flag), and `fm[2]` is the newline
+  // after the closing `---`, which stays with the rest of the note.
+  return `---\n${block}\n---` + content.slice(fm[0].length - fm[2].length)
+}
+
+/**
+ * The third place a run writes a note's name: a theme note's member list.
+ *
+ * A theme note lists its members as plain text (`- Faction`), not wikilinks —
+ * the membership edge is the member's own `part_of::`, and a link here would
+ * make it two (see `emit.renderThemeNote`). Plain text is invisible to
+ * `rewriteLinks`, so without this a merge that renames `Faction` to `Faction
+ * (Federalist)` leaves the theme note advertising a name that is no longer in
+ * the vault. Only `kind: theme` notes are touched, and only a bullet whose
+ * whole text is a renamed note's name — in that one file those bullets ARE the
+ * member list, by construction.
+ */
+export function rewriteThemeMembers(content: string, renames: Map<string, string>): string {
+  if (renames.size === 0 || !/^---\n(?:.*\n)*?kind: theme\n/.test(content)) return content
+  const by = new Map([...renames].map(([from, to]) => [key(from), to]))
+  return content.replace(/^-[ \t]+(.+?)[ \t]*$/gm, (whole, name: string) => {
+    const to = by.get(key(name))
+    return to === undefined ? whole : `- ${to}`
+  })
+}
+
 /** The body field a confirmed "same as" writes (consumed by `buildGraph`). */
 export const SAME_AS = 'same_as'
 

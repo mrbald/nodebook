@@ -28,7 +28,14 @@ import { createHash } from 'crypto'
 import { basename, dirname, join, sep } from 'path'
 import { withinRoot } from '../paths'
 import { noteName, renderDocumentNote, sourceTitle, type EmittedNote } from './emit'
-import { rewriteLinks, withSameAs, type MergeAction, type MergePlanEntry } from './mergePlan'
+import {
+  rewriteLinks,
+  rewriteSourceField,
+  rewriteThemeMembers,
+  withSameAs,
+  type MergeAction,
+  type MergePlanEntry
+} from './mergePlan'
 import type { ExtractedItem } from './extract'
 
 /** A safe run id is one path segment: alphanumeric start, then word/space/.-, no `..`. */
@@ -40,8 +47,7 @@ const RUN_ID_RE = /^[A-Za-z0-9][\w .-]*$/
 export const RESERVED_RUN_IDS: ReadonlySet<string> = new Set(['sources'])
 
 export function assertRunId(runId: string): void {
-  if (!RUN_ID_RE.test(runId) || runId.includes('..') || RESERVED_RUN_IDS.has(runId.toLowerCase()))
-    throw new Error(`invalid distill run id: ${JSON.stringify(runId)}`)
+  if (!isRunId(runId)) throw new Error(`invalid distill run id: ${JSON.stringify(runId)}`)
 }
 
 /**
@@ -228,13 +234,65 @@ export function isUnfinishedRun(vaultRoot: string, runId: string): boolean {
   return existsSync(join(dir, RUN_FILE)) && !existsSync(join(dir, META_FILE))
 }
 
+/**
+ * One model call a window actually took.
+ *
+ * A planned window is not always one call: a provider that rejects it for
+ * length has it halved and both halves read (`run.ts`). Grounding then looks
+ * for a mislabelled quote among *the chunks shown in the same call*, so a
+ * resume that replayed the window as its planned whole would search a wider set
+ * than the original attempt did — and a quote that was unique could come back
+ * ambiguous. Recording the calls as they happened is what keeps a resumed run
+ * byte-identical to an uninterrupted one.
+ */
+export interface WindowGroup {
+  /** Chunk ids shown in this one call. */
+  ids: number[]
+  /** How many of the record's `items` this call produced. They are stored in
+   *  call order, so a replay slices them back out. */
+  count: number
+  /** False when the call came back unusable (bad JSON, or too long even at the
+   *  split bound) — those chunks were never really read. */
+  ok: boolean
+}
+
 /** One line of the checkpoint log. Append-only: the plan once, then each
- *  window as it completes or fails, then the theme names once they are known. */
+ *  window as it completes or fails, then the theme names once they are known.
+ *  A window record also carries what it COST (`calls`, `splits`) and how it
+ *  fell into calls (`groups`), so a resumed run's stats and grounding match an
+ *  uninterrupted one's. Both are absent in logs written before that. */
 export type CheckpointRecord =
   | { type: 'plan'; windows: number[][] }
-  | { type: 'window'; index: number; items: ExtractedItem[] }
-  | { type: 'window'; index: number; failed: true }
+  | {
+      type: 'window'
+      index: number
+      items: ExtractedItem[]
+      groups?: WindowGroup[]
+      calls?: number
+      splits?: number
+    }
+  | {
+      type: 'window'
+      index: number
+      failed: true
+      groups?: WindowGroup[]
+      calls?: number
+      splits?: number
+    }
   | { type: 'themes'; names: string[] }
+
+/** A window a previous attempt already read (see `Checkpoint.done`). */
+export interface DoneWindow {
+  items: ExtractedItem[]
+  failed: boolean
+  /** The calls it took, in order. Null in a log from before they were
+   *  recorded — such a window replays as one call over its planned chunks. */
+  groups: WindowGroup[] | null
+  /** Model calls it cost, and how many splits they included — summed back into
+   *  the run's stats on replay, so `calls` stays "calls actually attempted". */
+  calls: number
+  splits: number
+}
 
 /** The log replayed into the state a resume needs. */
 export interface Checkpoint {
@@ -243,7 +301,7 @@ export interface Checkpoint {
   plan: number[][] | null
   /** Windows already attempted: index → what came back (`failed` windows are
    *  not retried by a resume; they are counted, exactly as in a single run). */
-  done: Map<number, { items: ExtractedItem[]; failed: boolean }>
+  done: Map<number, DoneWindow>
   /** One name per theme, as the naming call answered — so a resume that got
    *  past it re-groups the notes (cheap, local) without paying for the call
    *  again. Null when the run never reached naming. */
@@ -255,6 +313,22 @@ export interface Checkpoint {
 export interface CheckpointStore {
   load(): Checkpoint | null
   save(record: CheckpointRecord): void
+}
+
+/** The per-call breakdown of a window record, or null when the log predates it
+ *  (or holds anything but the expected shape — a hand-edited or torn line must
+ *  degrade to "replay it as one call", never throw). */
+function readGroups(raw: unknown): WindowGroup[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  const out: WindowGroup[] = []
+  for (const g of raw) {
+    if (typeof g !== 'object' || g === null) return null
+    const { ids, count, ok } = g as { ids?: unknown; count?: unknown; ok?: unknown }
+    if (!Array.isArray(ids) || !ids.every((i) => Number.isInteger(i))) return null
+    if (!Number.isInteger(count) || (count as number) < 0 || typeof ok !== 'boolean') return null
+    out.push({ ids: ids as number[], count: count as number, ok })
+  }
+  return out
 }
 
 /** Replay checkpoint lines into a Checkpoint. A crash can tear the last line,
@@ -273,7 +347,15 @@ export function replayCheckpoint(text: string): Checkpoint {
     else if (rec.type === 'window' && Number.isInteger(rec.index)) {
       const failed = 'failed' in rec && rec.failed === true
       const items = 'items' in rec && Array.isArray(rec.items) ? rec.items : []
-      cp.done.set(rec.index, { items, failed })
+      cp.done.set(rec.index, {
+        items,
+        failed,
+        groups: readGroups(rec.groups),
+        // A record from before the cost was written down still cost at least
+        // the one call that produced it.
+        calls: typeof rec.calls === 'number' && rec.calls >= 0 ? rec.calls : 1,
+        splits: typeof rec.splits === 'number' && rec.splits >= 0 ? rec.splits : 0
+      })
     } else if (rec.type === 'themes' && Array.isArray(rec.names)) {
       cp.themes = rec.names.filter((n): n is string => typeof n === 'string')
     }
@@ -467,14 +549,27 @@ export function readStagedNote(vaultRoot: string, runId: string, name: string): 
   }
 }
 
-/** Existing run ids under the vault, sorted. */
+/**
+ * Existing run ids under the vault, sorted.
+ *
+ * Only directories that ARE runs: `.distill/` also holds the source store, and
+ * anything else a user or a crash left there (`_tmp`, a backup copy) is not a
+ * run either. The filter is the same one `assertRunId` enforces, so every id
+ * this returns can be turned into a path — a caller must never be handed a name
+ * that throws the moment it asks anything about it.
+ */
 export function listRuns(vaultRoot: string): string[] {
   const base = distillRoot(vaultRoot)
   if (!existsSync(base)) return []
   return readdirSync(base, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && !RESERVED_RUN_IDS.has(e.name.toLowerCase()))
+    .filter((e) => e.isDirectory() && isRunId(e.name))
     .map((e) => e.name)
     .sort()
+}
+
+/** Whether `id` is a usable run id — what `assertRunId` accepts, as a test. */
+export function isRunId(id: string): boolean {
+  return RUN_ID_RE.test(id) && !id.includes('..') && !RESERVED_RUN_IDS.has(id.toLowerCase())
 }
 
 /** Delete a run's whole artifact. */
@@ -525,6 +620,10 @@ export interface MergeManifest {
    *  byte-for-byte. Names only, never paths: an `identical` note is the USER'S
    *  file, outside the merge folder, and undo must never be able to delete it. */
   skipped?: string[]
+  /** True when THIS merge created the vault's `Sources/` folder. Undo removes
+   *  that folder only then: a `Sources/` the user made and filled themselves is
+   *  theirs, and an undo that happens to empty it must leave it standing. */
+  createdSourcesDir?: boolean
 }
 
 /** The namespaced vault folder a run merges into (vault-relative). */
@@ -555,7 +654,11 @@ export function planSourceNote(
     let bytes: Buffer
     try {
       bytes = readFileSync(abs)
-    } catch {
+    } catch (err) {
+      // Only "there is no such file" means the name is free. A permission
+      // error or an I/O failure must not be read as "nothing there", or the
+      // merge would happily write over a file it simply could not open.
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
       return { path: rel, exists: false } // free — write it here
     }
     if (sha1(bytes) === hash) return { path: rel, exists: true } // already ours
@@ -627,14 +730,15 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
         : {})
     })
   }
-  const skipped = (m as { skipped?: unknown }).skipped
+  const { skipped, createdSourcesDir } = m as { skipped?: unknown; createdSourcesDir?: unknown }
   return {
     folder: expectedFolder,
     files,
     complete: typeof m.complete === 'boolean' ? m.complete : legacy,
     ...(Array.isArray(skipped) && skipped.every((x) => typeof x === 'string')
       ? { skipped: skipped as string[] }
-      : {})
+      : {}),
+    ...(createdSourcesDir === true ? { createdSourcesDir: true } : {})
   }
 }
 
@@ -720,7 +824,13 @@ export function mergeRun(
       skipped.push(note.name)
       continue
     }
-    let content = rewriteLinks(note.content, renames)
+    // Every place this run wrote a name that moved: the body's `[[links]]`, the
+    // frontmatter `source:` the citation panel resolves, and a theme note's
+    // plain-text member list.
+    let content = rewriteThemeMembers(
+      rewriteSourceField(rewriteLinks(note.content, renames), renames),
+      renames
+    )
     if (e.action === 'collides' && confirmed.has(note.name.toLowerCase()))
       content = withSameAs(content, note.name)
     planned.push({
@@ -740,8 +850,19 @@ export function mergeRun(
   if (book && sourceNote)
     files.push({ path: sourceNote.path, hash: book.hash, action: 'shared' })
 
+  // Whether `Sources/` is this merge's doing, decided BEFORE anything is
+  // written — that is the only moment the answer is knowable, and undo needs it.
+  const createdSourcesDir =
+    book !== null &&
+    sourceNote !== null &&
+    !sourceNote.exists &&
+    !existsSync(join(vaultRoot, SOURCES_FOLDER))
+
   const mPath = manifestPath(vaultRoot, runId)
-  atomicWrite(mPath, JSON.stringify({ folder, files, complete: false, skipped }, null, 2))
+  atomicWrite(
+    mPath,
+    JSON.stringify({ folder, files, complete: false, skipped, createdSourcesDir }, null, 2)
+  )
 
   mkdirSync(targetAbs, { recursive: true })
   const written: string[] = []
@@ -758,7 +879,7 @@ export function mergeRun(
   if (book && sourceNote && !sourceNote.exists)
     writeInto(sourceNote.path, Buffer.from(book.content, 'utf8'))
 
-  const manifest: MergeManifest = { folder, files, complete: true, skipped }
+  const manifest: MergeManifest = { folder, files, complete: true, skipped, createdSourcesDir }
   atomicWrite(mPath, JSON.stringify(manifest, null, 2))
   return { manifest, written }
 }
@@ -775,7 +896,9 @@ export function mergeRun(
  *
  * The document in `Sources/` is shared, so it survives one more test: another
  * merged run still pointing at the same file keeps it. Undoing one reading of a
- * book must not take the book away from the other.
+ * book must not take the book away from the other. The `Sources/` FOLDER is
+ * removed only when this merge created it (`createdSourcesDir`) — one the user
+ * made is theirs, and an undo that empties it leaves it standing.
  */
 export async function unmergeRun(
   vaultRoot: string,
@@ -805,7 +928,13 @@ export async function unmergeRun(
       trashed.push(abs)
     }
   }
-  for (const folder of [manifest.folder, SOURCES_FOLDER]) {
+  // The run's own folder is always the merge's doing, so an empty one goes.
+  // `Sources/` only goes if THIS merge made it: a folder the user created is
+  // theirs, empty or not.
+  const folders = manifest.createdSourcesDir
+    ? [manifest.folder, SOURCES_FOLDER]
+    : [manifest.folder]
+  for (const folder of folders) {
     const abs = join(vaultRoot, folder)
     try {
       if (readdirSync(abs).length === 0) rmSync(abs, { recursive: true, force: true })
