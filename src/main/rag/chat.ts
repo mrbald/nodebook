@@ -243,7 +243,10 @@ function stubChat(): ChatModel {
 const OLLAMA_DEFAULT_URL = 'http://localhost:11434/v1'
 
 function build(cfg: ProviderConfig): ChatModel {
-  if (process.env.NODEBOOK_E2E) return stubChat()
+  // The e2e door (NODEBOOK_E2E) also swaps in the stub, so the ordinary suite
+  // is offline. The live suite (`npm run test:e2e:live`) needs the door open
+  // and the model real, and says so with a second flag.
+  if (process.env.NODEBOOK_E2E && !process.env.NODEBOOK_E2E_LIVE_CHAT) return stubChat()
   if (cfg.kind === 'anthropic') return anthropicChat(cfg)
   if (cfg.kind === 'openai-compat') return openaiCompatChat(cfg)
   // Ollama is openai-compat pointed at the local server by default (no key).

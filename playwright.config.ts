@@ -5,6 +5,9 @@ import { defineConfig } from '@playwright/test'
 // (`npm run build`) first; `npm run test:e2e` chains that automatically.
 export default defineConfig({
   testDir: './e2e',
+  // `e2e/live/` needs network, a signed-in CLI and minutes — it has its own
+  // config (`playwright.live.config.ts`, `npm run test:e2e:live`).
+  testIgnore: ['**/live/**'],
   fullyParallel: false,
   workers: 1,
   // Hard 10s ceiling: the whole app is local and every interaction is sub-second,
