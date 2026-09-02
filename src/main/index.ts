@@ -19,7 +19,7 @@ import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
 import { overlayGraph, noteName } from './graph'
-import { noteVector, sameAsCandidates, type NoteVec } from './distill/sameAs'
+import { noteVector, sameAsCandidatesYielding, type NoteVec } from './distill/sameAs'
 import { chunkMarkdown, embedText } from './rag/chunk'
 import { distill, probeChat, estimateDistill, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
@@ -44,7 +44,7 @@ import {
   RESERVED_RUN_IDS,
   type RunSource
 } from './distill/artifact'
-import { mergePlan } from './distill/mergePlan'
+import { mergePlan, twinOf } from './distill/mergePlan'
 import { Telemetry } from './telemetry'
 import {
   ensureSettingsFile,
@@ -248,6 +248,14 @@ const telemetry = new Telemetry()
 // and the run awaiting them — hanging forever.
 const pendingEmbeds = new Map<string, (err: Error) => void>()
 
+// What the merge dialog last showed for a run, kept until Merge or vault close:
+// the twins proposed by meaning (staged name → vault note), so Merge does not
+// embed twice; and the twin beside every tick-box (a clash's namesake or the
+// proposal), so a tick can be checked against the plan recomputed at merge
+// time — a tick means "same as the twin I was shown", nothing else.
+const shownCandidates = new Map<string, Map<string, string>>()
+const shownTwins = new Map<string, Map<string, string>>()
+
 // Staleness baseline for file:save — the mtime of each file as of the last
 // time the app knowingly read or wrote it. A save whose on-disk mtime differs
 // from the baseline would clobber someone else's bytes (an external edit, or a
@@ -276,6 +284,8 @@ async function closeVault(): Promise<void> {
   // forever if the renderer never replies (e.g. it reloaded mid-run).
   for (const fail of [...pendingEmbeds.values()]) fail(new Error('Vault closed while waiting to embed.'))
   pendingEmbeds.clear()
+  shownCandidates.clear()
+  shownTwins.clear()
   pickedDocs.clear()
   distillRuns?.close()
   distillRuns = null
@@ -433,7 +443,7 @@ async function openVault(root: string): Promise<VaultListing> {
 // each other's vectors. A per-batch timeout (5 min — the first batch may need
 // to download the embedding model) and cleanup on vault close mean a run fails
 // fast instead of hanging if the renderer never replies (e.g. a reload mid-run).
-function rendererEmbedder(token: string): DistillEmbedder {
+function rendererEmbedder(token: string, timeoutMs = 5 * 60_000): DistillEmbedder {
   let seq = 0
   return {
     embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]> {
@@ -469,9 +479,13 @@ function rendererEmbedder(token: string): DistillEmbedder {
         const timer = setTimeout(
           () => {
             cleanup()
-            reject(new Error("Timed out waiting for the renderer to embed a batch (5 min) — it may have reloaded."))
+            reject(
+              new Error(
+                `Timed out waiting for the renderer to embed a batch (${Math.round(timeoutMs / 1000)} s) — it may have reloaded.`
+              )
+            )
           },
-          5 * 60_000
+          timeoutMs
         )
         pendingEmbeds.set(channel, (err) => {
           cleanup()
@@ -1096,13 +1110,9 @@ function registerIpc(): void {
   // notes are new, which the vault already holds verbatim, and which share a
   // name with a DIFFERENT note of yours (and so get saved beside it). Main
   // recomputes this at merge time too — the renderer only sends confirmations.
-  // The twins the dialog proposed for a run (staged name → vault note name), so
-  // Merge acts on the suggestion the user ticked without a second embedding
-  // pass. Only the candidates are kept: the plan itself is recomputed at merge
-  // time, because the vault may have changed since the dialog, and a candidate
-  // whose twin is gone by then is dropped.
-  const shownCandidates = new Map<string, Map<string, string>>()
-
+  // The plan is recomputed at merge time (the vault may have changed since the
+  // dialog); only what the dialog showed is carried over (see `shownCandidates`
+  // and `shownTwins` above).
   const planMergeFor = async (runId: string, mode: 'show' | 'merge'): Promise<DistillMergePlan> => {
     if (!vaultRoot || !index) throw new Error('Open a vault first.')
     const raw = readRunMeta(vaultRoot, runId)?.source ?? readRunJson(vaultRoot, runId)?.file ?? runId
@@ -1140,6 +1150,14 @@ function registerIpc(): void {
       const twin = pairs.get(e.name)
       if (twin && e.action === 'new' && names.has(twin)) e.sameAsCandidate = twin
     }
+    if (mode === 'show') {
+      const twins = new Map<string, string>()
+      for (const e of entries) {
+        const twin = twinOf(e)
+        if (twin) twins.set(e.name, twin)
+      }
+      shownTwins.set(runId, twins)
+    }
     return { sourceTitle: title, entries }
   }
 
@@ -1162,7 +1180,9 @@ function registerIpc(): void {
     const notes = staged.filter((n) => fresh.has(n.name))
     if (notes.length === 0) return out
     try {
-      const embedder = rendererEmbedder(`plan:${runId}`)
+      // A short deadline: the dialog is waiting on this, and a renderer that
+      // cannot embed within it gets a plan without proposals, not a stall.
+      const embedder = rendererEmbedder(`plan:${runId}`, 30_000)
       const texts: string[] = []
       const spans: { name: string; from: number; to: number }[] = []
       for (const n of notes) {
@@ -1178,7 +1198,14 @@ function registerIpc(): void {
         if (vec) run.push({ id: s.name, vec })
       }
       const vaultVecs: NoteVec[] = [...vault].map(([path, vec]) => ({ id: path, vec }))
-      const pairs = sameAsCandidates(run, vaultVecs, readSettings().talk.relatedMinScore)
+      const width = run[0]?.vec.length ?? 0
+      if (width > 0 && vaultVecs[0] && vaultVecs[0].vec.length !== width) {
+        console.warn(
+          `[distill] same-as candidates skipped: the run's vectors are ${width} wide, the vault's ${vaultVecs[0].vec.length} — different embedding models`
+        )
+        return out
+      }
+      const pairs = await sameAsCandidatesYielding(run, vaultVecs, readSettings().talk.relatedMinScore)
       for (const [name, path] of pairs) out.set(name, noteName(path))
     } catch (err) {
       console.warn('[distill] same-as candidates skipped:', err instanceof Error ? err.message : err)
@@ -1195,8 +1222,20 @@ function registerIpc(): void {
   ipcMain.handle('distill:merge', async (_e, runId: string, opts?: { sameAs?: string[] }): Promise<DistillMergeResult> => {
     if (!vaultRoot || !index) throw new Error('Open a vault first.')
     const plan = await planMergeFor(runId, 'merge')
+    // A tick is "same as the twin I was shown": pair each ticked name with the
+    // twin the dialog showed beside it, and let the merge keep only those that
+    // still hold against the fresh plan (`confirmedSameAs`).
+    // A tick with no remembered twin (the vault was closed and reopened in
+    // between, which clears what was shown) is dropped, never reinterpreted.
+    const twins = shownTwins.get(runId) ?? new Map<string, string>()
+    shownTwins.delete(runId)
+    const confirmations: { name: string; twin: string }[] = []
+    for (const name of opts?.sameAs ?? []) {
+      const twin = twins.get(name)
+      if (twin) confirmations.push({ name, twin })
+    }
     const { manifest, written } = mergeRun(vaultRoot, runId, plan.entries, {
-      sameAs: opts?.sameAs ?? []
+      sameAs: confirmations
     })
     for (const p of written) {
       try {

@@ -64,6 +64,46 @@ export interface MergePlanEntry {
 /** Lowercase key for the case-insensitive name comparison. */
 const key = (s: string): string => s.toLowerCase()
 
+/** The vault note a confirmation on this entry would name: for a clash, the
+ *  vault note of the same name; for a new note, the twin proposed by meaning;
+ *  otherwise none — nothing to confirm. */
+export function twinOf(e: MergePlanEntry): string | undefined {
+  if (e.action === 'collides') return e.name
+  if (e.action === 'new') return e.sameAsCandidate
+  return undefined
+}
+
+/** One confirmation: the staged note the user ticked, and the twin the dialog
+ *  showed beside the tick. A bare name means "whatever the entry's twin is",
+ *  the pre-proposal contract, still honoured for a clash. */
+export type SameAsConfirmation = string | { name: string; twin: string }
+
+/**
+ * The confirmations that still hold against a (re)computed plan. A tick means
+ * "same as the twin I was shown", so it is kept only while the entry's twin is
+ * that same note: a plan that changed under the dialog — a note of that exact
+ * name appearing in the vault, turning a `new` entry with a proposed twin into
+ * a clash with a stranger — drops the tick rather than redirecting it.
+ * Case-insensitive on the staged name, exact on the twin.
+ */
+export function confirmedSameAs(
+  entries: MergePlanEntry[],
+  confirmations: SameAsConfirmation[]
+): { name: string; twin: string }[] {
+  const byName = new Map(entries.map((e) => [key(e.name), e]))
+  const out: { name: string; twin: string }[] = []
+  for (const c of confirmations) {
+    const name = typeof c === 'string' ? c : c.name
+    const e = byName.get(key(name))
+    if (!e) continue
+    const twin = twinOf(e)
+    if (!twin) continue
+    if (typeof c !== 'string' && c.twin !== twin) continue
+    out.push({ name: e.name, twin })
+  }
+  return out
+}
+
 /**
  * Decide, for each staged note, what merging it would do. `sourceTitle` is the
  * document's short name — it becomes the disambiguator, so a collision reads as

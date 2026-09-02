@@ -527,6 +527,18 @@ describe('mergeRun with a plan (converging merge)', () => {
     expect(readFileSync(join(v2, 'Distilled', 'sapiens', 'Union.md'), 'utf8')).not.toContain('same_as::')
   })
 
+  it('a tick names the twin it was shown: a plan that changed under the dialog drops it', () => {
+    // Shown as new with a proposed twin; by merge time the vault has a note
+    // called "Union", so the fresh plan says clash. The confirmation still
+    // says "same as Federal union" — nothing is written, never [[Union]].
+    const v = tmpVault()
+    staged(v)
+    const plan = planFor(v, { Union: 'different-bytes' })
+    mergeRun(v, 'sapiens', plan, { sameAs: [{ name: 'Union', twin: 'Federal union' }] })
+    const merged = readFileSync(join(v, 'Distilled', 'sapiens', 'Union (Sapiens).md'), 'utf8')
+    expect(merged).not.toContain('same_as::')
+  })
+
   it('without a confirmation no same_as is written — a name clash is not identity', () => {
     const v = tmpVault()
     staged(v)

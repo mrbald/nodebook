@@ -34,7 +34,9 @@ import {
   rewriteThemeMembers,
   withSameAs,
   type MergeAction,
-  type MergePlanEntry
+  type MergePlanEntry,
+  confirmedSameAs,
+  type SameAsConfirmation
 } from './mergePlan'
 import type { ExtractedItem } from './extract'
 
@@ -760,10 +762,12 @@ function sourceNoteNameOf(vaultRoot: string, runId: string): string | null {
  * is saved beside it as `Faction (Federalist).md`, and every `[[Faction]]` the
  * run wrote is re-pointed at the new name so the merged notes still link to each
  * other (`rewriteLinks`). A note the vault already holds byte-for-byte is
- * skipped. `opts.sameAs` names the staged notes the USER confirmed are the same
- * thing as their vault twin; each gets one `same_as:: [[Faction]]` body line —
- * a durable, human-readable, deletable decision the map then collapses. Nothing
- * of the user's is edited either way.
+ * skipped. `opts.sameAs` holds the confirmations — the staged notes the USER
+ * ticked as the same thing as their vault twin, each with the twin the dialog
+ * showed (`confirmedSameAs` keeps a tick only while that is still the entry's
+ * twin); each gets one `same_as:: [[Faction]]` body line — a durable,
+ * human-readable, deletable decision the map then collapses. Nothing of the
+ * user's is edited either way.
  *
  * With no plan every note merges under its own name (the pre-plan behaviour).
  *
@@ -784,7 +788,7 @@ export function mergeRun(
   vaultRoot: string,
   runId: string,
   plan?: MergePlanEntry[],
-  opts: { sameAs?: string[] } = {}
+  opts: { sameAs?: SameAsConfirmation[] } = {}
 ): { manifest: MergeManifest; written: string[] } {
   const folder = mergeFolder(runId)
   const targetAbs = join(vaultRoot, folder)
@@ -805,7 +809,9 @@ export function mergeRun(
     const e = entryFor(note.name)
     if (e.action === 'collides' && e.targetName !== note.name) renames.set(note.name, e.targetName)
   }
-  const confirmed = new Set((opts.sameAs ?? []).map((n) => n.toLowerCase()))
+  const confirmed = new Map(
+    confirmedSameAs(plan ?? [], opts.sameAs ?? []).map((c) => [c.name.toLowerCase(), c.twin])
+  )
 
   // The document goes to `Sources/`, once — and every `source:: [[Title]]` in
   // this run follows it to the name it actually landed under.
@@ -831,10 +837,8 @@ export function mergeRun(
       rewriteSourceField(rewriteLinks(note.content, renames), renames),
       renames
     )
-    // The twin a confirmation points at: for a clash, the vault note of the
-    // same name; for a new note, the one the plan proposed by meaning.
-    const twin = e.action === 'collides' ? note.name : e.sameAsCandidate
-    if (twin && confirmed.has(note.name.toLowerCase())) content = withSameAs(content, twin)
+    const twin = confirmed.get(note.name.toLowerCase())
+    if (twin) content = withSameAs(content, twin)
     planned.push({
       path: join(folder, `${e.targetName}.md`),
       bytes: Buffer.from(content, 'utf8'),

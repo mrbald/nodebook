@@ -75,6 +75,13 @@ function nearest(v: Float32Array, others: NoteVec[], minScore: number): number {
   return best
 }
 
+/** The vault index that is run note `r`'s mutual nearest neighbour, or -1. */
+function mutualPair(r: number, run: NoteVec[], vault: NoteVec[], minScore: number): number {
+  const v = nearest(run[r].vec, vault, minScore)
+  if (v < 0) return -1
+  return nearest(vault[v].vec, run, minScore) === r ? v : -1
+}
+
 /**
  * Run note id → vault note id, for every mutual nearest pair at or above
  * `minScore`. Deterministic: ties resolve to the earlier entry on each side.
@@ -87,10 +94,31 @@ export function sameAsCandidates(
   const out = new Map<string, string>()
   if (run.length === 0 || vault.length === 0) return out
   for (let r = 0; r < run.length; r++) {
-    const v = nearest(run[r].vec, vault, minScore)
-    if (v < 0) continue
-    if (nearest(vault[v].vec, run, minScore) !== r) continue
-    out.set(run[r].id, vault[v].id)
+    const v = mutualPair(r, run, vault, minScore)
+    if (v >= 0) out.set(run[r].id, vault[v].id)
+  }
+  return out
+}
+
+/**
+ * The same answer as `sameAsCandidates`, yielding to the event loop every
+ * `batch` run notes. The work is O(run × vault) dot products — seconds for a
+ * 2,000-note run against a 5,000-note vault — and it runs on the main process,
+ * where a synchronous loop that long freezes every window. Yielding keeps the
+ * app responsive while the plan is built; the total cost is the same.
+ */
+export async function sameAsCandidatesYielding(
+  run: NoteVec[],
+  vault: NoteVec[],
+  minScore: number,
+  batch = 64
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (run.length === 0 || vault.length === 0) return out
+  for (let r = 0; r < run.length; r++) {
+    if (r > 0 && r % batch === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const v = mutualPair(r, run, vault, minScore)
+    if (v >= 0) out.set(run[r].id, vault[v].id)
   }
   return out
 }

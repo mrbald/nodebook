@@ -954,14 +954,17 @@ export default function App() {
   // Merge a run into the vault (an explicit, confirmed, reversible write). The
   // plan comes first: the dialog says what would happen — and, for a note whose
   // name you already use, asks whether the two are really the same thing.
+  const [mergePlanning, setMergePlanning] = useState(false)
   const mergeDistillRun = useCallback(() => {
-    if (!distillRun) return
+    if (!distillRun || mergePlanning) return
     const runId = distillRun.runId
+    setMergePlanning(true) // the plan may embed the run's notes: seconds, not instant
     void window.nodebook
       .distillMergePlan(runId)
       .then((plan) => setMergePlan({ runId, plan }))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-  }, [distillRun])
+      .finally(() => setMergePlanning(false))
+  }, [distillRun, mergePlanning])
 
   const confirmMerge = useCallback(
     (runId: string, sameAs: string[]) => {
@@ -1328,8 +1331,9 @@ export default function App() {
                     className="status-btn distill-merge-btn"
                     title="Merge this run's notes into your vault (reversible)"
                     onClick={mergeDistillRun}
+                    disabled={mergePlanning}
                   >
-                    ⤓ Merge
+                    {mergePlanning ? '⤓ Planning…' : '⤓ Merge'}
                   </button>
                 )}
                 <StatusSelect
