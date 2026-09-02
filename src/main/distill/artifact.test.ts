@@ -35,7 +35,7 @@ import {
 } from './artifact'
 import { ignoredInVault } from '../paths'
 import { mergePlan } from './mergePlan'
-import { emitNotes } from './emit'
+import { emitNotes, renderDocumentNote } from './emit'
 import type { GroundedNote } from './extract'
 
 let root = ''
@@ -183,8 +183,8 @@ describe('listRuns / removeRun', () => {
 })
 
 describe('mergeRun / unmergeRun (reversible promote)', () => {
-  const run = (v: string): void => {
-    writeRunArtifact(v, 'sapiens', { file: 'Sapiens.md', text: 'x' }, emitNotes(grounded()))
+  const run = (v: string, id = 'sapiens', text = 'Faction vs Union.'): void => {
+    void writeRunArtifact(v, id, { file: 'Sapiens.md', text }, emitNotes(grounded()))
   }
   /** Undo with a trash that just records what it was asked to move. */
   const recordingTrash = (): { calls: string[]; trash: (p: string) => Promise<void> } => {
@@ -215,8 +215,75 @@ describe('mergeRun / unmergeRun (reversible promote)', () => {
     // Every entry carries the hash of the bytes actually on disk.
     for (const f of manifest.files) {
       expect(f.hash).toMatch(/^[0-9a-f]{40}$/)
-      expect(f.path.startsWith(join('Distilled', 'sapiens'))).toBe(true)
+      const inRun = f.path.startsWith(join('Distilled', 'sapiens'))
+      // …and lands in the run's folder, except the book, which is shared.
+      expect(inRun || f.path.startsWith('Sources')).toBe(true)
+      expect(inRun).toBe(f.action !== 'shared')
     }
+  })
+
+  it('writes the document itself once, under Sources/', () => {
+    const v = tmpVault()
+    run(v)
+    const { manifest } = mergeRun(v, 'sapiens')
+    const book = manifest.files.find((f) => f.action === 'shared')
+    expect(book!.path).toBe(join('Sources', 'Sapiens.md'))
+    expect(existsSync(join(v, 'Sources', 'Sapiens.md'))).toBe(true)
+    expect(existsSync(join(v, 'Distilled', 'sapiens', 'Sapiens.md'))).toBe(false)
+    // The book note declares what it is, so the index can treat it as a document.
+    expect(readFileSync(join(v, 'Sources', 'Sapiens.md'), 'utf8')).toMatch(
+      /^---\nkind: document\n/
+    )
+  })
+
+  it('a second run of the same document shares the one copy', () => {
+    const v = tmpVault()
+    run(v)
+    run(v, 'sapiens-2')
+    mergeRun(v, 'sapiens')
+    const before = readFileSync(join(v, 'Sources', 'Sapiens.md'))
+    const { manifest, written } = mergeRun(v, 'sapiens-2')
+    // Same bytes already there: recorded as shared, not written again.
+    expect(manifest.files.find((f) => f.action === 'shared')!.path).toBe(
+      join('Sources', 'Sapiens.md')
+    )
+    expect(written.some((p) => p.includes('Sources'))).toBe(false)
+    expect(readFileSync(join(v, 'Sources', 'Sapiens.md'))).toEqual(before)
+    expect(readdirSync(join(v, 'Sources'))).toEqual(['Sapiens.md'])
+  })
+
+  it('undo leaves the shared document while another run still points at it', async () => {
+    const v = tmpVault()
+    run(v)
+    run(v, 'sapiens-2')
+    mergeRun(v, 'sapiens')
+    mergeRun(v, 'sapiens-2')
+    await unmergeRun(v, 'sapiens-2', async () => {})
+    expect(existsSync(join(v, 'Sources', 'Sapiens.md'))).toBe(true)
+    // …and takes it once the last run lets go.
+    await unmergeRun(v, 'sapiens', async () => {})
+    expect(existsSync(join(v, 'Sources', 'Sapiens.md'))).toBe(false)
+  })
+
+  it('a different document with the same title lands beside it, and links follow', () => {
+    const v = tmpVault()
+    // Both runs distil a file called Federalist.md — different books, one title.
+    const book = (id: string, text: string): void => {
+      writeRunArtifact(v, id, { file: 'Federalist.md', text }, emitNotes(grounded()))
+    }
+    book('one', 'The first book.')
+    book('two', 'A DIFFERENT book that shares a title.')
+    mergeRun(v, 'one')
+    const { manifest } = mergeRun(v, 'two')
+    expect(manifest.files.find((f) => f.action === 'shared')!.path).toBe(
+      join('Sources', 'Federalist 2.md')
+    )
+    // Nothing of the first merge was overwritten…
+    expect(readFileSync(join(v, 'Sources', 'Federalist.md'), 'utf8')).toContain('The first book.')
+    // …and the second run's notes point at the copy that is actually theirs.
+    expect(readFileSync(join(v, 'Distilled', 'two', 'Faction.md'), 'utf8')).toContain(
+      'source:: [[Federalist 2]]'
+    )
   })
 
   it('MANIFEST FIRST: a merge that dies before copying still leaves an undoable record', () => {
@@ -316,14 +383,17 @@ describe('readRunNotes / readStagedNote (readable staging)', () => {
     const notes = readRunNotes(v, 'r1')
     expect(notes.map((n) => n.name).sort()).toEqual(['Faction', 'Federalist', 'Union'])
     for (const n of notes) expect(n.hash).toMatch(/^[0-9a-f]{40}$/)
-    expect(notes.find((n) => n.name === 'Federalist')!.content).toBe('Faction vs Union.')
+    expect(notes.find((n) => n.name === 'Federalist')!.content).toBe(
+      renderDocumentNote({ text: 'Faction vs Union.' }).content
+    )
   })
 
   it('reads one note by name, and refuses to escape the run\'s notes dir', () => {
     const v = tmpVault()
     writeRunArtifact(v, 'r1', { file: 'Federalist.md', text: 'the book' }, emitNotes(grounded()))
-    expect(readStagedNote(v, 'r1', 'Federalist')).toBe('the book')
-    expect(readStagedNote(v, 'r1', 'Federalist.md')).toBe('the book')
+    const book = renderDocumentNote({ text: 'the book' }).content
+    expect(readStagedNote(v, 'r1', 'Federalist')).toBe(book)
+    expect(readStagedNote(v, 'r1', 'Federalist.md')).toBe(book)
     expect(readStagedNote(v, 'r1', 'nope')).toBeNull()
     for (const evil of [join('..', '..', 'secret'), '/etc/passwd', '../../../etc/passwd'])
       expect(readStagedNote(v, 'r1', evil)).toBeNull()

@@ -1,4 +1,4 @@
-import type { GraphData, GraphEdge, GraphNode } from '../shared/types'
+import type { GraphData, GraphEdge, GraphNode, NoteKind } from '../shared/types'
 
 /**
  * Build a slice of the knowledge graph from the index's raw rows — pure and
@@ -21,11 +21,19 @@ import type { GraphData, GraphEdge, GraphNode } from '../shared/types'
  * `focus` (a note *path*) gives a local depth-`d` neighbourhood; `null` gives the
  * whole graph capped to the highest-degree nodes. Edges in the result always
  * have both endpoints present (no dangling references).
+ *
+ * A note's `kind` (frontmatter, via the index) rides along on its node so the
+ * map can draw a book or a theme differently. One kind also changes the graph
+ * itself: a `kind: document` note is a whole book, so it is left out of the
+ * global degree ranking — see the ranking branch below.
  */
 
 export interface FileRow {
   path: string
   title: string | null
+  /** The note's declared `kind:` (see harvest's `frontmatterKind`). Absent in
+   *  rows from an index that predates the column — read as `note`. */
+  kind?: NoteKind | null
 }
 
 export interface TripleRow {
@@ -125,6 +133,10 @@ export function buildGraph(
   const showSources = opts.showSources ?? false
 
   const pathSet = new Set(files.map((f) => f.path))
+  // What each file IS (frontmatter `kind:`), for the document rule below and
+  // for the map's node styling. Files with no recorded kind read as `note`.
+  const kindOf = new Map<string, NoteKind>()
+  for (const f of files) if (f.kind && f.kind !== 'note') kindOf.set(f.path, f.kind)
   // Resolve a link target to a real note by name OR by path suffix (so
   // `[[projects/Roadmap]]` finds `projects/Roadmap.md`), matching the editor's
   // link resolver. Every suffix keeps *all* of its files, because a name is not
@@ -283,14 +295,25 @@ export function buildGraph(
     total = included.size // local slices are never capped
   } else {
     // Global: rank every referenced node by raw degree and keep the top `cap`.
+    //
+    // A `kind: document` note is a whole book. It has a huge degree by
+    // construction — every note distilled from it points back — so degree
+    // ranking would put it at the top of every map and squeeze real notes out.
+    // It is not a hub of your thinking, it is the thing your thinking is about,
+    // so it is left out of the global view unless you asked for source
+    // documents (`showSources`). Opening one directly still works: that goes
+    // through the focus branch above.
     const deg = new Map<string, number>()
     for (const e of allEdges) {
       deg.set(e.subject, (deg.get(e.subject) ?? 0) + 1)
       deg.set(e.object, (deg.get(e.object) ?? 0) + 1)
     }
-    total = deg.size
+    const ranked = showSources
+      ? [...deg.keys()]
+      : [...deg.keys()].filter((id) => kindOf.get(id) !== 'document')
+    total = ranked.length
     nodeIds = new Set(
-      [...deg.keys()].sort((a, b) => (deg.get(b) ?? 0) - (deg.get(a) ?? 0)).slice(0, cap)
+      ranked.sort((a, b) => (deg.get(b) ?? 0) - (deg.get(a) ?? 0)).slice(0, cap)
     )
   }
 
@@ -315,7 +338,8 @@ export function buildGraph(
       ghost: !real,
       degree: degree.get(id) ?? 0,
       focus: focusId === id,
-      ...(folded && folded.size > 0 ? { aliases: [...folded].sort() } : {})
+      ...(folded && folded.size > 0 ? { aliases: [...folded].sort() } : {}),
+      ...(kindOf.has(id) ? { kind: kindOf.get(id) as NoteKind } : {})
     }
   })
   const edges: GraphEdge[] = keptEdges.map((e) => ({

@@ -225,10 +225,24 @@ body {
 .outbound-item.is-link:hover {
   background: var(--accent-bg);
 }
-/* Distilled-note provenance: the cited character range, muted. */
+/* Distilled-note provenance: where the quote is ("Page 42"), muted. */
 .source-span {
   color: var(--muted);
   font-size: 11px;
+}
+/* The quote itself, under the citation it belongs to. */
+.source-quote {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  margin-top: 2px;
+}
+/* Where a distilled document came from, and the button that opens it. */
+.source-document-path {
+  word-break: break-all;
+}
+.source-open-original {
+  margin-top: 4px;
 }
 
 /* --- Editor pane --------------------------------------------------------- */
@@ -792,15 +806,29 @@ body {
   padding: 1px 5px;
 }
 /* The clicked node gets a ring — distinct from the focus node's fill emphasis. */
-.graph-node.is-selected circle {
+.graph-node.is-selected :is(circle, rect) {
   stroke: var(--accent);
   stroke-width: 2.5px;
 }
 /* A pinned node is anchored — a dashed ring marks it as held in place. */
-.graph-node.is-pinned circle {
+.graph-node.is-pinned :is(circle, rect) {
   stroke: var(--accent);
   stroke-width: 1.5px;
   stroke-dasharray: 3 2;
+}
+/* The map's shape key: a theme is a group of notes, drawn as a diamond. */
+.graph-shape-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.graph-shape-theme {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  background: var(--accent-bg);
+  border: 1.5px solid var(--accent);
+  transform: rotate(45deg);
 }
 .graph-inspector .graph-legend {
   display: flex;
@@ -939,7 +967,7 @@ body {
 .graph-node {
   cursor: grab;
 }
-.graph-node circle {
+.graph-node :is(circle, rect) {
   fill: var(--accent-bg);
   stroke: var(--accent);
   stroke-width: 1.5;
@@ -951,15 +979,15 @@ body {
   pointer-events: none;
   user-select: none;
 }
-.graph-node:hover circle {
+.graph-node:hover :is(circle, rect) {
   stroke: var(--text);
   stroke-width: 2.5;
 }
-.graph-node.is-focus circle {
+.graph-node.is-focus :is(circle, rect) {
   stroke: var(--text);
   stroke-width: 3;
 }
-.graph-node.is-ghost circle {
+.graph-node.is-ghost :is(circle, rect) {
   fill: transparent;
   stroke: var(--muted);
   stroke-dasharray: 3 2;
@@ -1016,6 +1044,7 @@ body {
 }
 .run-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 3px 6px;
@@ -1042,6 +1071,17 @@ body {
   flex: none;
   color: var(--muted);
   font-size: 11px;
+}
+/* The run's theme names, wrapped onto their own line under the run. */
+.run-item-themes {
+  flex-basis: 100%;
+  min-width: 0;
+  margin-top: -2px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .run-item-resume {
   flex: none;

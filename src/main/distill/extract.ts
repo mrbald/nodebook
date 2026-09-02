@@ -40,6 +40,9 @@ export interface ChunkProvenance {
   /** Character offset of the chunk's text within the source note. */
   start: number
   text: string
+  /** The chunk's heading path (`Title > Page 42`), from the chunker. Its last
+   *  segment is what a citation reports as `where`. */
+  heading?: string
 }
 
 /** A resolved citation: where in the source a quote actually lives. */
@@ -51,6 +54,17 @@ export interface Citation {
   end: number
   /** The exact source text at that span (not the model's possibly-reflowed quote). */
   quote: string
+  /** Where a person would say this is — "Page 42", or the chapter's name. The
+   *  last segment of the chunk's heading path; absent when the document has no
+   *  headings at all. */
+  where?: string
+}
+
+/** The last segment of a heading path — "Title > Chapter 2 > Page 42" reads as
+ *  "Page 42", which is what a reader needs to find the passage in the original. */
+export function whereOf(heading: string | undefined): string | undefined {
+  const last = (heading ?? '').split('>').pop()?.trim()
+  return last || undefined
 }
 
 /** An item that survived grounding, with its quotes resolved to source spans. */
@@ -514,9 +528,11 @@ export function groundItems(
       }
       if (loc.recovered) recovered++
       const chunk = chunks.get(loc.chunkId)
+      const where = whereOf(chunk?.heading)
       citations.push({
         file: chunk?.file ?? '',
         chunkId: loc.chunkId,
+        ...(where ? { where } : {}),
         start: loc.start,
         end: loc.end,
         quote: loc.quote

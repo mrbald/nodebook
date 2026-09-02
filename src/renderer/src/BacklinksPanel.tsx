@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { MarkdownFile, Backlink, Outbound } from '@shared/types'
-import type { NoteCitation } from './citations'
+import type { NoteCitation, NoteDocument } from './citations'
 
 interface Props {
   active: MarkdownFile
@@ -10,9 +10,27 @@ interface Props {
   citations?: NoteCitation[]
   /** Open a citation's source note at the cited span. */
   onOpenCitation?: (c: NoteCitation) => void
+  /** Set when this note IS a converted document — drives "Open original". */
+  document?: NoteDocument | null
+  /** Open the file the document was converted from (main resolves the path). */
+  onOpenOriginal?: () => void
 }
 
-export function BacklinksPanel({ active, files, onOpen, citations, onOpenCitation }: Props) {
+/** A quote, on one line, short enough to sit under a citation. */
+function quoteLine(quote: string): string {
+  const flat = quote.replace(/\s+/g, ' ').trim()
+  return flat.length > 90 ? `${flat.slice(0, 89)}…` : flat
+}
+
+export function BacklinksPanel({
+  active,
+  files,
+  onOpen,
+  citations,
+  onOpenCitation,
+  document,
+  onOpenOriginal
+}: Props) {
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [outbound, setOutbound] = useState<Outbound[]>([])
 
@@ -68,6 +86,19 @@ export function BacklinksPanel({ active, files, onOpen, citations, onOpenCitatio
 
   return (
     <div className="backlinks">
+      {document && (
+        <section className="sources">
+          <h2>Source document</h2>
+          <p className="backlinks-empty source-document-path">
+            {document.path ?? 'This note is a document brought in by Distill.'}
+          </p>
+          {document.hash && onOpenOriginal && (
+            <button className="graph-ctl source-open-original" onClick={onOpenOriginal}>
+              Open original
+            </button>
+          )}
+        </section>
+      )}
       {cites.length > 0 && (
         <section className="sources">
           <h2>Sources</h2>
@@ -86,12 +117,16 @@ export function BacklinksPanel({ active, files, onOpen, citations, onOpenCitatio
                 }
               }}
             >
-              📄 {c.source} <span className="source-span">{c.start}–{c.end}</span>
+              <div>
+                📄 {c.source}{' '}
+                <span className="source-span">{c.where ?? `${c.start}–${c.end}`}</span>
+              </div>
+              {c.quote && <div className="source-quote">“{quoteLine(c.quote)}”</div>}
             </div>
           ))}
         </section>
       )}
-      {outbound.length === 0 && backlinks.length === 0 && cites.length === 0 ? (
+      {outbound.length === 0 && backlinks.length === 0 && cites.length === 0 && !document ? (
         <>
           <h2>Connections</h2>
           <p className="backlinks-empty">

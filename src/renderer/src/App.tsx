@@ -11,7 +11,13 @@ import {
 } from '@shared/types'
 import { Editor, type ViewMode } from './editor/Editor'
 import { BacklinksPanel } from './BacklinksPanel'
-import { parseCitations, resolveCitationSpan, type NoteCitation } from './citations'
+import {
+  parseCitations,
+  parseDocumentNote,
+  resolveCitationSpan,
+  type NoteCitation,
+  type NoteDocument
+} from './citations'
 import { MapView } from './MapView'
 import { ConfigEditor } from './editor/ConfigEditor'
 import { getTheme } from './editor/themes'
@@ -500,6 +506,20 @@ export default function App() {
     () => (active ? parseCitations(doc ?? '') : []),
     [active, doc]
   )
+  // A `kind: document` note IS a converted book, and remembers the file it came
+  // from — that is what "Open original" opens. The renderer only ever hands
+  // main the HASH; main owns the path (see `distill:openOriginal`).
+  const sourceDocument = useMemo<NoteDocument | null>(
+    () => (active ? parseDocumentNote(doc ?? '') : null),
+    [active, doc]
+  )
+  const openOriginal = useCallback(() => {
+    const hash = sourceDocument?.hash
+    if (!hash) return
+    void window.nodebook.distillOpenOriginal(hash).then((err) => {
+      if (err) setError(err)
+    })
+  }, [sourceDocument])
   // Self-healing: the recorded [start,end) can drift once the source note is
   // edited after a distill run. Re-verify against the source's current
   // content before revealing — relocate via the quote if it moved, or open
@@ -1124,6 +1144,13 @@ export default function App() {
                 >
                   ✕
                 </button>
+                {/* What the run turned out to be about — its themes, on their
+                    own line under the run (see the wrapping rule in the CSS). */}
+                {(r.themes?.length ?? 0) > 0 && (
+                  <span className="run-item-themes" title={r.themes!.join(' · ')}>
+                    {r.themes!.join(' · ')}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -1410,6 +1437,8 @@ export default function App() {
           files={files}
           onOpen={openFile}
           citations={citations}
+          document={sourceDocument}
+          onOpenOriginal={openOriginal}
           onOpenCitation={openCitation}
         />
       )}
@@ -1459,6 +1488,7 @@ export default function App() {
               chunking: 'reading',
               extracting: 'extracting concepts',
               finalizing: 'writing notes',
+              themes: 'grouping into themes',
               done: 'done'
             } as Record<string, string>)[distilling.phase] ?? 'starting'}
             {distilling.total > 0 ? ` (${distilling.done}/${distilling.total})` : ''}

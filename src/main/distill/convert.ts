@@ -11,11 +11,18 @@
 
 import { readFileSync } from 'fs'
 import { extname } from 'path'
+import { cleanPdf } from './cleanPdf'
 
 /**
  * Extract a PDF's text as markdown — one `## Page N` section per page, so the
  * existing chunker carries the page in each chunk's heading path (that's the
  * provenance, for free). Throws when no text is extractable (a scanned PDF).
+ *
+ * What comes out of a PDF is lines painted at positions, not prose: a running
+ * header on every page, a page-number footer, words cut in half at the line
+ * break, one hard newline per printed line. `cleanPdf` puts the text back
+ * together before the pipeline ever sees it — see that module for why each of
+ * those defeats the model, the embedder and the quote matcher alike.
  */
 export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
   // Lazy + the *legacy* build (node-friendly, no DOM globals); loaded only when
@@ -24,7 +31,7 @@ export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
   // verbosity 0 = errors only: silences pdf.js's noisy per-font warnings (e.g.
   // "TT: undefined function") that are irrelevant to text extraction.
   const doc = await pdfjs.getDocument({ data, verbosity: 0 }).promise
-  const pages: string[] = []
+  const raw: string[] = []
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
     const tc = await page.getTextContent()
@@ -33,13 +40,19 @@ export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
       if (typeof item.str !== 'string') continue
       text += item.str + (item.hasEOL ? '\n' : ' ')
     }
-    text = text
-      .replace(/[ \t]+\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-    if (text) pages.push(`## Page ${p}\n\n${text}`)
+    raw.push(
+      text
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+    )
   }
   await doc.cleanup()
+  // One entry per page in and out, so the heading keeps the REAL page number
+  // even when a page cleans down to nothing.
+  const pages = cleanPdf(raw)
+    .map((text, i) => (text.trim() ? `## Page ${i + 1}\n\n${text}` : ''))
+    .filter(Boolean)
   const md = pages.join('\n\n')
   if (!md.trim()) {
     throw new Error('No extractable text — this PDF looks scanned. Re-digitize (OCR) it first.')
@@ -88,11 +101,61 @@ export async function docxToMarkdown(data: Uint8Array): Promise<string> {
   return md
 }
 
+/** Strip XML tags and decode the handful of entities a title can carry. */
+function xmlText(fragment: string): string {
+  return fragment
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /**
- * Extract an EPUB's text as markdown, one `## Section N` per spine chapter (=
- * provenance, like PDF's pages). EPUB is a zip of XHTML: unzip (fflate) → find
- * the OPF via `META-INF/container.xml` → walk the spine in reading order →
- * HTML→markdown (turndown). Both deps are pure-JS. Throws if nothing extractable.
+ * href → chapter title, from an EPUB's table of contents.
+ *
+ * Both TOC formats are read: EPUB 2's `toc.ncx` (`<navPoint>` = a `<text>`
+ * label plus a `<content src="…">`) and EPUB 3's `nav.xhtml` (`<nav
+ * epub:type="toc">` wrapping ordinary `<a href="…">` links). The fragment
+ * (`chapter1.xhtml#part2`) is dropped: the spine is per FILE, so the first
+ * title pointing into a file names it. Paths are kept exactly as written, so
+ * the caller resolves them against the same base as the manifest's.
+ *
+ * Exported for tests; pure (it takes the two documents' text, not a zip).
+ */
+export function epubNavTitles(ncx: string, nav: string): Map<string, string> {
+  const titles = new Map<string, string>()
+  const add = (href: string, title: string): void => {
+    const file = href.split('#')[0].trim()
+    if (file && title && !titles.has(file)) titles.set(file, title)
+  }
+  for (const point of ncx.matchAll(/<navPoint\b[\s\S]*?<\/navPoint>/g)) {
+    const label = /<text\b[^>]*>([\s\S]*?)<\/text>/.exec(point[0])
+    const content = /<content\b[^>]*>/.exec(point[0])
+    if (label && content) add(xmlAttr(content[0], 'src'), xmlText(label[1]))
+  }
+  const toc = /<nav\b[^>]*epub:type\s*=\s*["'][^"']*\btoc\b[^"']*["'][^>]*>([\s\S]*?)<\/nav>/i.exec(nav)
+  if (toc) {
+    for (const a of toc[1].matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g))
+      add(xmlAttr(`<a${a[1]}>`, 'href'), xmlText(a[2]))
+  }
+  return titles
+}
+
+/**
+ * Extract an EPUB's text as markdown, one `## <chapter title>` per spine
+ * chapter (= provenance, like PDF's pages). EPUB is a zip of XHTML: unzip
+ * (fflate) → find the OPF via `META-INF/container.xml` → walk the spine in
+ * reading order → HTML→markdown (turndown). Both deps are pure-JS. Throws if
+ * nothing extractable.
+ *
+ * The heading is the chapter's real name when the book's table of contents
+ * gives one (`epubNavTitles`), because that name is what a citation reports as
+ * its `where:` — "Chapter 4: The Flood" tells you where you are; "Section 7"
+ * does not. Books with no usable TOC fall back to `## Section N`.
  */
 export async function epubToMarkdown(data: Uint8Array): Promise<string> {
   const { unzipSync, strFromU8 } = await import('fflate')
@@ -106,11 +169,24 @@ export async function epubToMarkdown(data: Uint8Array): Promise<string> {
   const opfDir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : ''
 
   const manifest = new Map<string, string>()
+  /** Manifest items that declare themselves a TOC — EPUB 2 `media-type` for the
+   *  NCX, EPUB 3 `properties="nav"` for the navigation document. */
+  let ncxHref = ''
+  let navHref = ''
   for (const m of opf.matchAll(/<item\b[^>]*>/g)) {
     const id = xmlAttr(m[0], 'id')
     const href = xmlAttr(m[0], 'href')
-    if (id && href) manifest.set(id, href.split('#')[0])
+    if (!href) continue
+    if (id) manifest.set(id, href.split('#')[0])
+    if (/\bapplication\/x-dtbncx\+xml\b/.test(xmlAttr(m[0], 'media-type'))) ncxHref = href
+    if (/\bnav\b/.test(xmlAttr(m[0], 'properties'))) navHref = href
   }
+  // Fall back to the conventional file names, for books whose OPF doesn't
+  // declare its TOC — reading one costs a map lookup, so try both.
+  const titles = epubNavTitles(
+    read(opfDir + (ncxHref || 'toc.ncx')),
+    read(opfDir + (navHref || 'nav.xhtml'))
+  )
 
   const sections: string[] = []
   let n = 0
@@ -120,7 +196,9 @@ export async function epubToMarkdown(data: Uint8Array): Promise<string> {
     const html = read(opfDir + href)
     if (!html) continue
     const md = await htmlBodyToMarkdown(html)
-    if (md) sections.push(`## Section ${++n}\n\n${md}`)
+    if (!md) continue
+    n++
+    sections.push(`## ${titles.get(href) ?? `Section ${n}`}\n\n${md}`)
   }
 
   const out = sections.join('\n\n')

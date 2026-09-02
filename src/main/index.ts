@@ -22,6 +22,7 @@ import { overlayGraph } from './graph'
 import { distill, probeChat, estimateDistill, type DistillEmbedder } from './distill/run'
 import { StagedRunStore } from './distill/staged'
 import { convertDocument } from './distill/convert'
+import { convertSource, originalPathOf } from './distill/sources'
 import {
   mergeRun,
   unmergeRun,
@@ -36,7 +37,9 @@ import {
   beginRun,
   readRunSource,
   isUnfinishedRun,
-  checkpointStore
+  checkpointStore,
+  RESERVED_RUN_IDS,
+  type RunSource
 } from './distill/artifact'
 import { mergePlan } from './distill/mergePlan'
 import { Telemetry } from './telemetry'
@@ -271,7 +274,6 @@ async function closeVault(): Promise<void> {
   for (const fail of [...pendingEmbeds.values()]) fail(new Error('Vault closed while waiting to embed.'))
   pendingEmbeds.clear()
   pickedDocs.clear()
-  lastConverted = null
   distillRuns?.close()
   distillRuns = null
   index?.close()
@@ -501,17 +503,23 @@ function uniqueRunId(base: string, taken: ReadonlySet<string>): string {
   }
 }
 
-// The converted text of the document most recently estimated, so the estimate
-// the user is shown and the run that follows convert the file once, not twice.
-// One entry, replaced on the next estimate and dropped when a vault closes.
-let lastConverted: { docId: string; text: string } | null = null
-
-/** Convert a picked document to markdown once, reusing the estimate's copy. */
-async function convertPicked(docId: string, filePath: string): Promise<string> {
-  if (lastConverted?.docId === docId) return lastConverted.text
-  const text = await convertDocument(filePath)
-  lastConverted = { docId, text }
-  return text
+/**
+ * Convert a picked document to markdown once, through the vault's source store.
+ *
+ * The store is the cache AND the identity: an unchanged file converts once
+ * ever, not once per run, and the run records the hash it got — so two runs of
+ * the same book are recognisable as such, and the book itself is written into
+ * the vault only once (see `sources.ts` and `artifact.mergeRun`).
+ */
+async function convertPicked(filePath: string): Promise<RunSource> {
+  if (!vaultRoot) throw new Error('Open a vault first.')
+  const stored = await convertSource(vaultRoot, filePath, convertDocument)
+  return {
+    file: basename(filePath),
+    text: stored.text,
+    hash: stored.hash,
+    originalPath: stored.record.originalPath
+  }
 }
 
 /**
@@ -541,7 +549,7 @@ function distillBudget(): { inputBudget: number; windowSize: number; maxCalls: n
  */
 async function runDistillPipeline(
   runId: string,
-  source: { file: string; text: string },
+  source: RunSource,
   opts: { resume: boolean }
 ): Promise<DistillRunResult> {
   const root = vaultRoot
@@ -581,12 +589,18 @@ async function runDistillPipeline(
     // meta.json stores a flat map of numbers, so the drop reasons are
     // spread out of their nested shape here.
     const { droppedByReason: why, ...flatStats } = result.stats
-    runs.create(runId, source, result.notes, {
-      ...flatStats,
-      droppedNoEvidence: why.noEvidence,
-      droppedNotFound: why.notFound,
-      droppedAmbiguous: why.ambiguous
-    })
+    runs.create(
+      runId,
+      source,
+      result.notes,
+      {
+        ...flatStats,
+        droppedNoEvidence: why.noEvidence,
+        droppedNotFound: why.notFound,
+        droppedAmbiguous: why.ambiguous
+      },
+      result.themes
+    )
     return { runId, stats: result.stats }
   } finally {
     distillAbort.delete(runId)
@@ -962,7 +976,7 @@ function registerIpc(): void {
   ipcMain.handle('distill:estimate', async (_e, docId: string): Promise<DistillEstimate> => {
     const filePath = pickedDocs.get(docId)
     if (!filePath) throw new Error('Unknown document — pick it again.')
-    return estimateDistill(await convertPicked(docId, filePath), distillBudget())
+    return estimateDistill((await convertPicked(filePath)).text, distillBudget())
   })
 
   // Run the distill pipeline on a document → a staged, cited run-artifact. The
@@ -978,14 +992,15 @@ function registerIpc(): void {
     // clicks in the same tick can't both get past the guard. One document, one
     // run: the id is consumed here.
     pickedDocs.delete(docId)
-    const runId = uniqueRunId(distillRunId(filePath), new Set(distillRuns.list()))
+    const runId = uniqueRunId(
+      distillRunId(filePath),
+      new Set([...distillRuns.list(), ...RESERVED_RUN_IDS])
+    )
     activeRunId = runId
     try {
       // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
       // rest of the pipeline is format-agnostic.
-      const text = await convertPicked(docId, filePath)
-      lastConverted = null // the run has the text now; don't hold a book in memory
-      return await runDistillPipeline(runId, { file: basename(filePath), text }, { resume: false })
+      return await runDistillPipeline(runId, await convertPicked(filePath), { resume: false })
     } finally {
       activeRunId = null
     }
@@ -1056,17 +1071,21 @@ function registerIpc(): void {
     }
   )
 
-  // Staged runs with enough context to render a list: note count (from the
-  // run's meta.json) and whether the run is already merged into the vault.
+  // Staged runs with enough context to render a list: note count and theme
+  // names (from the run's meta.json), and whether the run is already merged.
   ipcMain.handle('distill:listRuns', (): DistillRunInfo[] => {
     if (!distillRuns || !vaultRoot) return []
     const root = vaultRoot
-    return distillRuns.list().map((id) => ({
-      id,
-      notes: readRunMeta(root, id)?.notes ?? 0,
-      merged: readMergeManifest(root, id)?.complete === true,
-      unfinished: isUnfinishedRun(root, id)
-    }))
+    return distillRuns.list().map((id) => {
+      const meta = readRunMeta(root, id)
+      return {
+        id,
+        notes: meta?.notes ?? 0,
+        themes: meta?.themes ?? [],
+        merged: readMergeManifest(root, id)?.complete === true,
+        unfinished: isUnfinishedRun(root, id)
+      }
+    })
   })
 
   ipcMain.handle('distill:remove', (_e, runId: string) => distillRuns?.remove(runId))
@@ -1089,9 +1108,13 @@ function registerIpc(): void {
   // recomputes this at merge time too — the renderer only sends confirmations.
   const planMergeFor = (runId: string): DistillMergePlan => {
     if (!vaultRoot || !index) throw new Error('Open a vault first.')
-    const staged = readRunNotes(vaultRoot, runId)
     const raw = readRunMeta(vaultRoot, runId)?.source ?? readRunJson(vaultRoot, runId)?.file ?? runId
     const title = sourceNoteName(raw)
+    // The document itself is not planned like a note: it goes to `Sources/`,
+    // once, whichever run brought it (see artifact.mergeRun).
+    const staged = readRunNotes(vaultRoot, runId).filter(
+      (n) => n.name.toLowerCase() !== title.toLowerCase()
+    )
     // Every note name anywhere in the vault; hashes only where a name actually
     // clashes, so planning a merge doesn't read the whole vault off disk.
     const wanted = new Set(staged.map((n) => n.name.toLowerCase()))
@@ -1151,6 +1174,18 @@ function registerIpc(): void {
     notifyVaultChanged()
     notifyIndexChanged()
     return { removed: removed.length, trashed: trashed.length }
+  })
+
+  // Open the file a distilled document was converted from, in the system's own
+  // reader. The renderer names the HASH, never a path: main looks the path up in
+  // the source store and refuses anything that is not there any more — so a
+  // note cannot talk the app into opening an arbitrary file.
+  ipcMain.handle('distill:openOriginal', async (_e, hash: string): Promise<string | null> => {
+    if (!vaultRoot) return 'Open a vault first.'
+    const path = originalPathOf(vaultRoot, hash)
+    if (!path) return "That document's original file isn't where it was — it may have moved."
+    const err = await shell.openPath(path)
+    return err || null
   })
 
   ipcMain.handle('distill:mergeStatus', (_e, runId: string): DistillMergeStatus => {

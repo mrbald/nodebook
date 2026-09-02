@@ -20,6 +20,8 @@ source: source-book.md
 cite:
   - chunk: 1
     span: 15-34
+    where: "Page 3"
+    quote: "The quick brown fox"
 ---
 # Extended republic
 
@@ -62,6 +64,10 @@ test('a cited note shows its Sources, and clicking one opens the source at the s
   const cite = page.locator('.source-cite')
   await expect(cite).toHaveCount(1)
   await expect(cite).toContainText('source-book')
+  // It says WHERE the passage is, in a reader's terms, and shows the quote —
+  // never a pair of character offsets.
+  await expect(cite.locator('.source-span')).toHaveText('Page 3')
+  await expect(cite.locator('.source-quote')).toContainText('The quick brown fox')
 
   // Clicking it opens the source note...
   await cite.click()

@@ -54,7 +54,16 @@ export interface GraphNode {
   /** Other note names folded into this one because they say `same_as:: [[this]]`
    *  — a decision the user confirmed when merging. Absent when there are none. */
   aliases?: string[]
+  /** What the note IS, from its frontmatter `kind:` — `document` for a whole
+   *  converted book, `theme` for a topic grouping, `concept`/`claim`/`entity`
+   *  for a distilled item. Absent on ghosts and on ordinary notes, so the map
+   *  can draw the special ones differently and leave the rest alone. */
+  kind?: NoteKind
 }
+
+/** The note kinds the index records (mirrors `main/harvest`'s `NoteKind`; the
+ *  renderer can't import from main, so the type is declared once here). */
+export type NoteKind = 'note' | 'document' | 'theme' | 'concept' | 'claim' | 'entity'
 
 /** A directed edge: `source --relation--> target` (a harvested triple). */
 export interface GraphEdge {
@@ -287,6 +296,9 @@ export interface DistillStats {
   recovered: number
   merged: number
   notes: number
+  /** Theme notes the run grouped its notes under — 0 when the run was too
+   *  small to be worth grouping. */
+  themes: number
   /** Steps the model never answered usably — counted, never hidden. */
   failedWindows: number
   /** Links between the run's notes, `source::` excluded — the map's edges. */
@@ -331,6 +343,10 @@ export interface DistillRunInfo {
   /** The run started but never finished — cancelled, or interrupted. What it
    *  had already extracted is kept, and Resume carries on from there. */
   unfinished: boolean
+  /** The themes the run grouped its notes under, in map order. Absent (or
+   *  empty) for a run too small to group, and for runs distilled before
+   *  themes existed. */
+  themes?: string[]
 }
 
 /** What a run will cost, worked out from the document before it starts. */
@@ -349,7 +365,7 @@ export interface DistillEstimate {
 }
 
 export interface DistillProgress {
-  phase: 'chunking' | 'extracting' | 'finalizing' | 'done'
+  phase: 'chunking' | 'extracting' | 'finalizing' | 'themes' | 'done'
   done: number
   total: number
 }

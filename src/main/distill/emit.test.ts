@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { noteName, sourceTitle, renderNote, emitNotes, emitRun } from './emit'
+import { noteName, sourceTitle, renderNote, renderDocumentNote, emitNotes, emitRun } from './emit'
 import { harvest } from '../harvest'
 import type { GroundedNote } from './extract'
 
@@ -188,5 +188,67 @@ describe('emitRun — links resolved against the final names', () => {
   it('counts the islands the run came out as', () => {
     const out = emitRun([plain('A', { links: [{ relation: 'about', target: 'B' }] }), plain('B'), plain('C')])
     expect(out.components).toBe(2)
+  })
+})
+
+describe('sourceTitle (document extensions)', () => {
+  it('strips every extension a document can arrive with', () => {
+    for (const ext of ['pdf', 'epub', 'docx', 'html', 'htm', 'xhtml', 'md', 'markdown', 'txt', 'text'])
+      expect(sourceTitle(`Book.${ext}`)).toBe('Book')
+  })
+})
+
+describe('citation provenance in the frontmatter', () => {
+  it('records where a reader would find the quote, escaped like the quote', () => {
+    const md = renderNote(
+      note({
+        citations: [
+          {
+            file: 'Book.pdf',
+            chunkId: 3,
+            start: 10,
+            end: 20,
+            quote: 'a quote',
+            where: 'Page 42: "the turn"'
+          }
+        ]
+      })
+    )
+    expect(md).toContain('    where: "Page 42: \\"the turn\\""')
+  })
+
+  it('leaves where out when the document has no headings', () => {
+    expect(renderNote(note())).not.toContain('where:')
+  })
+
+  it('shifts every span onto the book note by citeOffset', () => {
+    const [emitted] = emitNotes([note()], { citeOffset: 25 })
+    expect(emitted.content).toContain('span: 125-142')
+  })
+})
+
+describe('renderDocumentNote', () => {
+  it('declares what the note is, where it came from, and its identity', () => {
+    const { content } = renderDocumentNote({
+      text: '## Page 1\n\nthe book',
+      originalPath: '/books/A "quoted": name.pdf',
+      hash: 'a'.repeat(40)
+    })
+    expect(content).toMatch(/^---\nkind: document\n/)
+    // JSON-escaped, so a path with quotes or a colon stays one YAML scalar.
+    expect(content).toContain('document: "/books/A \\"quoted\\": name.pdf"')
+    expect(content).toContain(`hash: ${'a'.repeat(40)}`)
+  })
+
+  it('puts nothing after the header, so citeOffset lands on the text', () => {
+    const text = '## Page 1\n\nthe book'
+    const { content, citeOffset } = renderDocumentNote({ text, originalPath: '/x.pdf', hash: 'b'.repeat(40) })
+    expect(content.slice(citeOffset)).toBe(text)
+  })
+
+  it('is still a valid document note with nothing to say about the original', () => {
+    const { content, citeOffset } = renderDocumentNote({ text: 'body' })
+    expect(content).toBe('---\nkind: document\n---\n\nbody')
+    expect(content.slice(citeOffset)).toBe('body')
   })
 })
