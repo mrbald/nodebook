@@ -1,11 +1,18 @@
 # Body of knowledge — one growing graph, kept stable
 
-> **Status: research, not committed.** This is the speculative far end. It is
-> **firewalled from the v1 build** (explicit-graph mindmap + the shipped semantic
-> search): entity resolution, canonical merges, and stable incremental updates need
-> the durable-state model and the commit protocol in
-> [state-and-scopes.md](state-and-scopes.md) pinned down first. Treat the below as a
-> direction to validate, not a plan to build next.
+> **Status: the first two phases have shipped; the rest is still research.**
+> **K1 (merge target)** is built — a distill run merges into the vault proper, and
+> the document itself lands once in `Sources/` so two runs of one book share one
+> copy. **K2 has shipped in its deterministic, conservative half**: merge
+> candidates are found by *name match*, shown in the merge dialog, and become a
+> `same_as::` line **only when the user ticks the box** — a name clash on its own
+> is never treated as identity. `buildGraph` consumes confirmed pairs and draws
+> them as one node. What is **not** built is the semantic half — embedding-kNN
+> candidates ("RL" ≈ "Reinforcement Learning", which no name match will ever
+> catch) and optional LLM canonicalization — and **K3/K4** (stable incremental
+> updates, change-surfacing diffs) remain research. Those need the concept-grain
+> vectors and the general commit protocol still open in
+> [state-and-scopes.md](state-and-scopes.md).
 
 > Reconciles the two modes the design implies. [distill-documents.md](distill-documents.md)
 > makes *perspective artifacts* (a fresh map per source/angle). This is the other
@@ -22,11 +29,13 @@ ingested — and its graph is the always-on derived view. Reconciled:
   already grows incrementally: every save / new file re-indexes, and the graph is a
   pure function of the index ([mindmap-mode.md](mindmap-mode.md)).
 - **Many maps** = saved `.map.md` *views/lenses* over (subsets of) that graph, plus
-  the throwaway distill artifacts. Views, never the source of truth.
+  the staged distill runs. Views, never the canonical graph. (A staged run is not
+  *throwaway* state, though — its notes exist nowhere else until you merge or
+  discard it; see [state-and-scopes.md](state-and-scopes.md).)
 
-So ingesting a book has two possible destinations: a **standalone perspective
-artifact** (distill mode), or **merged into the canonical KB** (this mode). Same
-pipeline, different target.
+So ingesting a book has two possible destinations: it **stays a standalone
+perspective artifact** (distill mode — explore it, then discard it), or it is
+**merged into the canonical KB** (this mode). One pipeline; merge is the fork.
 
 ## Incremental growth is mostly already there
 
@@ -43,12 +52,26 @@ already incremental. Two things are new for a cumulative KB:
 When ingesting, a new "Reinforcement Learning" concept must recognize an existing
 "RL" note. Mechanism, conservative by default:
 
-- embedding-kNN of the new concept's vector against existing concept nodes → merge
-  **candidates** above a margin;
+- **candidates** — pairs that might be the same thing;
 - the LLM (optional) confirms + canonicalizes the name;
 - record a `same_as::` / alias triple (the store already takes arbitrary relations),
   or merge — **suggested, user-confirmed, never silent**. "Manage, don't draw"
   applies to merges too.
+
+**What shipped, and what did not.** The *confirmation* half is built end to end:
+the distill merge dialog lists every staged note whose name already exists in the
+vault, saves it beside yours under a disambiguated name (`Options (Sapiens)`) by
+default, and writes `same_as:: [[Options]]` only for the items you tick. That line
+is a plain triple in markdown, so it survives a `.nodebook` rebuild, and
+`buildGraph` folds the two into one node with the other name kept as an alias.
+Deleting the line splits them again.
+
+The *candidate generation* half is still name-match only, which is the weak end: it
+finds "Options" ≈ "Options" and never "RL" ≈ "Reinforcement Learning". Embedding-kNN
+over concept vectors is the next step, and it is blocked on the same thing it always
+was — whole-note centroids are a poor substrate for multi-topic and generated notes,
+so resolution needs vectors at the *concept* grain, which is an `extracted`-scope
+concern (see [state-and-scopes.md](state-and-scopes.md)).
 
 The merge decision itself is a **tier-1 durable decision that lives in markdown**
 (the `same_as::` field → a triple), so it survives a `.nodebook` rebuild — it was
@@ -59,6 +82,12 @@ centroids are also a poor matching substrate, so resolution operates on
 A concept then accumulates **multi-source provenance**: `cite:: BookA §3`,
 `cite:: BookB §7`, your own note — the inspector shows every source that fed it.
 Provenance across sources is a feature, not bookkeeping.
+
+*Not yet.* Merge never edits a note you already have: a confirmed pair stays two
+files joined by `same_as::`, so the citations of both are reachable through the
+alias but they are not accumulated into one note. "Append the run's citations into
+the existing note" is a deliberate later opt-in — it is the first operation in this
+whole design that would rewrite a user's file.
 
 ## A definition of stability (the crux)
 
@@ -101,12 +130,18 @@ deltas" are *both* true once separated — is the contract in
 
 ## Phases (compose with auto-mindmap + distill)
 
-- **K1. Merge target** — distill/ingest can land into the canonical vault (not just a
-  standalone artifact); multi-source `cite::` accumulation.
-- **K2. Entity-resolution suggestions** — embedding-kNN merge candidates +
-  user-confirmed `same_as`; optional LLM canonicalization.
+- ✅ **K1. Merge target — shipped.** A distill run merges into the canonical vault
+  (`Distilled/<run>/`), the document lands once in `Sources/`, and the merge is
+  planned, hash-checked and undoable. *Open within K1:* multi-source `cite::`
+  accumulation into one note.
+- ◐ **K2. Entity-resolution suggestions — half shipped.** Name-match candidates in
+  the merge dialog + **user-confirmed `same_as`**, consumed by `buildGraph`.
+  *Next:* embedding-kNN candidates over concept-grain vectors, and optional LLM
+  canonicalization.
 - **K3. Stable update** — seeded layout + label-aligned clusters + hysteresis.
+  (The seeded force layout shipped with the map; the semantic half has not.)
 - **K4. Change-surfacing** — the per-update diff/inspector ("what changed, confirm").
+  The merge dialog is a first instance of the pattern, for one run.
 
 Built on the index (already incremental), the embeddings (resolution + clustering),
 and the provider abstraction (optional LLM). Stability is **curated**, like
