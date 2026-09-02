@@ -201,6 +201,42 @@ describe('source hubs (showSources)', () => {
     expect(g.hiddenSources).toBe(0)
   })
 
+  it('with themes, a shown hub keeps only its theme edges: book → themes → notes, not a star', () => {
+    // Every note hangs under a theme and every theme links to the book, so the
+    // note → book edges add nothing the map does not already show. Hidden, the
+    // whole hub still goes, theme edge included.
+    const T = '/v/Theme.md'
+    const themedFiles: FileRow[] = [...withSource, { path: T, title: 'Theme', kind: 'theme' }]
+    const themedTriples: TripleRow[] = [
+      ...sourceTriples,
+      t(A, 'part_of', 'Theme'),
+      t(B, 'part_of', 'Theme'),
+      t(T, 'source', 'Book')
+    ]
+    const g = buildGraph(themedFiles, themedTriples, null, { showSources: true })
+    expect(ids(g)).toEqual(new Set([A, B, T, BOOK]))
+    expect(g.edges.filter((e) => e.relation === 'source')).toEqual([
+      { source: T, target: BOOK, relation: 'source' }
+    ])
+    expect(g.edges.filter((e) => e.relation === 'part_of')).toHaveLength(2)
+    expect(g.hiddenSources).toBe(0)
+
+    const h = buildGraph(themedFiles, themedTriples, null)
+    expect(ids(h)).toEqual(new Set([A, B, T]))
+    expect(h.edges.filter((e) => e.relation === 'source')).toHaveLength(0)
+    expect(h.hiddenSources).toBe(1)
+  })
+
+  it('opening the book itself still shows every note that cites it', () => {
+    // The focus exemption wins over the theme rule: the user asked for the
+    // book, so its full neighbourhood is what they get.
+    const T = '/v/Theme.md'
+    const themedFiles: FileRow[] = [...withSource, { path: T, title: 'Theme', kind: 'theme' }]
+    const themedTriples: TripleRow[] = [...sourceTriples, t(A, 'part_of', 'Theme'), t(T, 'source', 'Book')]
+    const g = buildGraph(themedFiles, themedTriples, BOOK, { showSources: true, depth: 1 })
+    expect(g.edges.filter((e) => e.relation === 'source').map((e) => e.source).sort()).toEqual([A, B, T].sort())
+  })
+
   it('a vault with no source triples is untouched, hiddenSources=0', () => {
     const g = buildGraph(files, triples, null)
     expect(ids(g)).toEqual(new Set([A, B, C, 'ghost:Ghost']))

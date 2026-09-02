@@ -299,7 +299,10 @@ first.
 - **The document's node** — every distilled note links back to the document it came
   from. The run's own map shows that node (it's what the run is about), but once
   merged, your vault's knowledge map hides it — otherwise it sits in the middle of a
-  giant star and swallows the picture. **📕 Source** toggles it in either view.
+  giant star and swallows the picture. **📕 Source** toggles it in either view. When
+  the run has themes, the map draws the document connected to its themes only, so it
+  reads as the root of *document → themes → notes* rather than a star; each note's
+  own link to the document stays in the note and its Sources.
 
 ## Performance telemetry
 
