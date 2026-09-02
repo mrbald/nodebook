@@ -132,7 +132,7 @@ const COLUMNS = [
   'yieldPer10k',
   'coverage',
   'dropped',
-  'failedClusters',
+  'failedWindows',
   'merged',
   'edgesPerNote',
   'ghostLinkRate',

@@ -8,7 +8,9 @@ import {
   type CheckpointStore
 } from './artifact'
 import { tagError } from './retry'
-import type { Embedder, ChatModel } from '../rag/provider'
+import { coverageOf } from './windows'
+import { chunkMarkdown, weightOf } from '../rag/chunk'
+import { ContextLengthError, type ChatModel } from '../rag/provider'
 
 // A small two-topic corpus: three "faction" sections, three "power" sections.
 const SRC = [
@@ -34,13 +36,11 @@ const SRC = [
   ''
 ].join('\n')
 
-// Stub embedder: faction chunks → [1,0], power chunks → [0,1] (heading carries the
-// keyword too), so k-means splits the corpus cleanly in two.
-const embedder: Embedder = {
-  id: 'stub',
-  dims: 2,
-  async embed(texts) {
-    return texts.map((t) => Float32Array.from(t.toLowerCase().includes('faction') ? [1, 0] : [0, 1]))
+/** Nothing in this phase embeds anything; the dependency is still in the
+ *  interface (the themes phase uses it), so tests pass one that would shout. */
+const embedder = {
+  embed: async (): Promise<Float32Array[]> => {
+    throw new Error('distill must not embed chunks any more')
   }
 }
 
@@ -63,8 +63,9 @@ function quotingChat(): ChatModel {
   }
 }
 
-// Force two clusters on the small corpus.
-const opts = { minClusters: 2, perCluster: 3 }
+// Two windows on the small corpus: the three faction sections, then the three
+// power ones (each chunk weighs 85-102 with its prompt scaffolding).
+const opts = { windowSize: 300 }
 
 describe('probeChat', () => {
   it('resolves when the model responds', async () => {
@@ -139,20 +140,40 @@ describe('distill', () => {
       { ...opts, onProgress: (p) => phases.push(p) }
     )
     expect(res.stats.chunks).toBe(6)
-    expect(res.stats.clusters).toBe(2)
+    expect(res.stats.windows).toBe(2)
+    expect(res.stats.calls).toBe(2)
+    expect(res.stats.splits).toBe(0)
     expect(res.stats.notes).toBe(2)
     expect(res.stats.dropped).toBe(0)
     expect(res.stats.droppedByReason).toEqual({ noEvidence: 0, notFound: 0, ambiguous: 0 })
     expect(res.stats.recovered).toBe(0)
     expect(res.notes.every((n) => n.content.includes('source:: [[Book]]'))).toBe(true)
+    // No embedding phase, no clustering phase: the document is read in order.
     expect([...new Set(phases.map((p) => p.phase))]).toEqual([
       'chunking',
-      'embedding',
-      'clustering',
       'extracting',
       'finalizing',
       'done'
     ])
+  })
+
+  it('reads the whole document in one call when the model’s budget allows it', async () => {
+    // No window size forced: the default budget swallows this small corpus.
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: quotingChat() })
+    expect(res.stats.windows).toBe(1)
+    expect(res.stats.coverage).toBe(1)
+  })
+
+  it('sizes its windows from the budget the model declares', async () => {
+    const small: ChatModel = { ...quotingChat(), inputBudget: 6_000 }
+    const large: ChatModel = { ...quotingChat(), inputBudget: 40_000 }
+    const text = SRC.repeat(20)
+    const a = await distill({ file: 'B.md', text }, { embedder, chat: small })
+    const b = await distill({ file: 'B.md', text }, { embedder, chat: large })
+    expect(a.stats.windows).toBeGreaterThan(b.stats.windows)
+    // Either way the whole document is read.
+    expect(a.stats.coverage).toBe(1)
+    expect(b.stats.coverage).toBe(1)
   })
 
   it('drops claims whose quote is not in the source (the grounding gate)', async () => {
@@ -234,12 +255,12 @@ describe('distill', () => {
       }
     }
     const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: flaky }, opts)
-    expect(res.stats.failedClusters).toBe(0)
+    expect(res.stats.failedWindows).toBe(0)
     expect(res.stats.notes).toBe(2)
-    expect(calls).toBe(4) // 2 clusters × (1 bad + 1 repair)
+    expect(calls).toBe(4) // 2 windows × (1 bad + 1 repair)
   })
 
-  it('counts a still-malformed cluster, never silently swallows it', async () => {
+  it('counts a still-malformed window, never silently swallows it', async () => {
     const broken: ChatModel = {
       id: 'broken',
       async *chat() {
@@ -247,27 +268,8 @@ describe('distill', () => {
       }
     }
     const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: broken }, opts)
-    expect(res.stats.failedClusters).toBe(2)
+    expect(res.stats.failedWindows).toBe(2)
     expect(res.stats.notes).toBe(0)
-  })
-
-  it('a cancel during embedding reaches the embedder and surfaces as DistillAborted', async () => {
-    // The bridge (main's rendererEmbedder) rejects on abort; the orchestrator
-    // must report that as a cancellation, not as an embedding failure.
-    const hanging = {
-      embed: (_texts: string[], signal?: AbortSignal): Promise<Float32Array[]> =>
-        new Promise((_resolve, reject) => {
-          signal?.addEventListener('abort', () => reject(new Error('bridge closed')))
-        })
-    }
-    const ctrl = new AbortController()
-    const p = distill(
-      { file: 'Book.md', text: SRC },
-      { embedder: hanging, chat: quotingChat() },
-      { ...opts, signal: ctrl.signal }
-    )
-    setTimeout(() => ctrl.abort(), 5)
-    await expect(p).rejects.toBeInstanceOf(DistillAborted)
   })
 
   it('keeps the book note: a concept titled like the source gets a suffixed name', async () => {
@@ -322,23 +324,7 @@ describe('distill', () => {
     const res = await distill({ file: 'Book.md', text: '' }, { embedder, chat: quotingChat() }, opts)
     expect(res.stats.chunks).toBe(0)
     expect(res.notes).toEqual([])
-    expect(res.stats.coverage).toBe(1) // nothing to sample — trivially "fully covered"
-  })
-
-  it('reports coverage as the fraction of chunks actually shown to the LLM', async () => {
-    // 6 chunks, forced into 2 clusters (opts), default repsPerCluster=4 — every
-    // cluster has 3 members, so all 3 become representatives: full coverage.
-    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: quotingChat() }, opts)
-    expect(res.stats.coverage).toBe(1)
-  })
-
-  it('reports partial coverage when a cluster has more members than reps shown', async () => {
-    const res = await distill(
-      { file: 'Book.md', text: SRC },
-      { embedder, chat: quotingChat() },
-      { ...opts, repsPerCluster: 1 } // 2 clusters × 1 rep = 2 of 6 chunks shown
-    )
-    expect(res.stats.coverage).toBeCloseTo(2 / 6)
+    expect(res.stats.coverage).toBe(1) // nothing to read — trivially "fully read"
   })
 
   it('is deterministic for fixed stubs', async () => {
@@ -348,10 +334,210 @@ describe('distill', () => {
   })
 })
 
+// --- Coverage: read everything, or say exactly what was read ----------------
+
+describe('distill — coverage', () => {
+  it('reads every passage when the plan fits the call budget', async () => {
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: quotingChat() }, opts)
+    expect(res.stats.coverage).toBe(1)
+  })
+
+  it('samples evenly and reports the share BY WEIGHT when it cannot', async () => {
+    // Six one-chunk windows, three calls allowed: windows 1, 3 and 5.
+    const res = await distill(
+      { file: 'Book.md', text: SRC },
+      { embedder, chat: quotingChat() },
+      { windowSize: 102, maxCalls: 3 }
+    )
+    expect(res.stats.windows).toBe(3)
+    expect(res.stats.coverage).toBeLessThan(1)
+    expect(res.stats.coverage).toBeCloseTo(coverageOf(chunkMarkdown(SRC), [1, 3, 5]))
+  })
+})
+
+// --- The context-budget contract -------------------------------------------
+// A document long enough to need several windows, with every section's wording
+// unique so a quote is never ambiguous across the book.
+const LONG = Array.from(
+  { length: 8 },
+  (_, i) =>
+    `## Part ${i}\n\n` +
+    `Part ${i} records that the council debated measure number ${i} and wrote the decision down. `
+      .repeat(6)
+      .trim()
+).join('\n\n')
+
+/** A chat stub that declares a prompt budget, optionally enforces a DIFFERENT
+ *  (lower) real limit, and remembers every prompt it was sent. */
+function budgetedChat(
+  declared: number,
+  realLimit = Infinity
+): ChatModel & { prompts: { system: string; user: string; weight: number }[] } {
+  const model = {
+    id: 'budgeted',
+    inputBudget: declared,
+    prompts: [] as { system: string; user: string; weight: number }[],
+    async *chat(req: { system?: string; messages: { content: string }[] }) {
+      const system = req.system ?? ''
+      const user = req.messages.map((m) => m.content).join('\n')
+      const weight = weightOf(system) + weightOf(user)
+      model.prompts.push({ system, user, weight })
+      if (weight > realLimit) throw new ContextLengthError('prompt is too long')
+      const first = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)
+      if (!first) {
+        yield '{"items":[]}'
+        return
+      }
+      const quote = first[2].split(/\s+/).slice(0, 8).join(' ')
+      yield JSON.stringify({
+        items: [
+          {
+            kind: 'concept',
+            title: `Part ${first[1]}`,
+            summary: 's',
+            evidence: [{ chunkId: Number(first[1]), quote }],
+            links: []
+          }
+        ]
+      })
+    }
+  }
+  return model as unknown as ChatModel & {
+    prompts: { system: string; user: string; weight: number }[]
+  }
+}
+
+/** The chunk ids a prompt actually showed the model. */
+function chunkIdsIn(user: string): number[] {
+  return [...user.matchAll(/\[chunk (\d+)[^\]]*\]/g)].map((m) => Number(m[1]))
+}
+
+describe('distill — the declared budget', () => {
+  it.each([4_000, 8_000, 16_000])(
+    'keeps every prompt inside the %i-weight budget the model declares',
+    async (budget) => {
+      const chat = budgetedChat(budget)
+      const res = await distill({ file: 'L.md', text: LONG }, { embedder, chat })
+      expect(chat.prompts.length).toBeGreaterThan(0)
+      for (const p of chat.prompts) expect(p.weight).toBeLessThanOrEqual(budget)
+      expect(res.stats.coverage).toBe(1)
+      expect(res.stats.splits).toBe(0) // the plan fits: nothing had to be split
+    }
+  )
+
+  it('makes fewer, fuller calls as the declared budget grows', async () => {
+    const small = budgetedChat(4_000)
+    const large = budgetedChat(16_000)
+    await distill({ file: 'L.md', text: LONG }, { embedder, chat: small })
+    await distill({ file: 'L.md', text: LONG }, { embedder, chat: large })
+    expect(small.prompts.length).toBeGreaterThan(large.prompts.length)
+  })
+
+  it('lets [distill] windowSize override the derived size', async () => {
+    const chat = budgetedChat(16_000)
+    await distill({ file: 'L.md', text: LONG }, { embedder, chat }, { windowSize: 600 })
+    // One ~535-weight chunk per window: eight calls, not one.
+    expect(chat.prompts).toHaveLength(8)
+  })
+})
+
+describe('distill — a hidden lower limit', () => {
+  it('splits a rejected window in two and reads both halves, losing no text', async () => {
+    // Declares 40k (so all eight chunks are planned as one window), really
+    // rejects anything over 3k: the first call is refused, and the halving
+    // continues until the halves fit.
+    const chat = budgetedChat(40_000, 3_000)
+    const res = await distill({ file: 'L.md', text: LONG }, { embedder, chat })
+
+    expect(res.stats.windows).toBe(1) // one window PLANNED…
+    expect(res.stats.calls).toBe(7) // …but 1 + 2 + 4 calls attempted
+    expect(res.stats.splits).toBe(3)
+    expect(res.stats.failedWindows).toBe(0)
+
+    // The rejected parents are in the call count, and in the prompt log.
+    const rejected = chat.prompts.filter((p) => p.weight > 3_000)
+    expect(rejected).toHaveLength(3)
+    expect(chat.prompts).toHaveLength(res.stats.calls)
+
+    // Every chunk was read exactly once: the halves partition the window.
+    const processed = chat.prompts.filter((p) => p.weight <= 3_000).map((p) => chunkIdsIn(p.user))
+    const seen = processed.flat()
+    expect([...seen].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(new Set(seen).size).toBe(seen.length)
+
+    // …so coverage still counts each passage once, and stays 1.
+    expect(res.stats.coverage).toBe(1)
+    expect(res.stats.notes).toBeGreaterThan(0)
+  })
+
+  it('never retries a too-long prompt — retrying it could only fail again', async () => {
+    const chat = budgetedChat(40_000, 3_000)
+    await distill({ file: 'L.md', text: LONG }, { embedder, chat }, { retry: { tries: 3 } })
+    // With retries the 3 rejected calls would have cost 9; they cost 3.
+    expect(chat.prompts).toHaveLength(7)
+  })
+
+  it('stops splitting at the depth bound and marks the window failed, not the run', async () => {
+    // Rejects even a single chunk: 1 + 2 + 4 = 7 calls of halving, then eight
+    // one-chunk calls at the bound that are written off.
+    const chat = budgetedChat(40_000, 1_500)
+    const res = await distill({ file: 'L.md', text: LONG }, { embedder, chat })
+    expect(res.stats.calls).toBe(15)
+    expect(res.stats.splits).toBe(7)
+    expect(res.stats.failedWindows).toBe(8)
+    expect(res.stats.notes).toBe(0)
+    // A window that cannot fit is this window's problem: the run still ends
+    // normally, with the failure counted rather than thrown.
+    expect(res.stats.windows).toBe(1)
+  })
+})
+
+// --- The concept registry ---------------------------------------------------
+
+describe('distill — the concept registry', () => {
+  it('carries the titles one window grounded into the next window’s prompt', async () => {
+    const systems: string[] = []
+    const chat: ChatModel = {
+      id: 'recorder',
+      async *chat(req) {
+        systems.push(req.system ?? '')
+        const user = req.messages.map((m) => m.content).join('\n')
+        const m = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)!
+        const quote = m[2].split(/\s+/).slice(0, 4).join(' ')
+        yield JSON.stringify({
+          items: [
+            { kind: 'concept', title: quote, summary: 's', evidence: [{ chunkId: Number(m[1]), quote }], links: [] }
+          ]
+        })
+      }
+    }
+    await distill({ file: 'Book.md', text: SRC }, { embedder, chat }, opts)
+    expect(systems).toHaveLength(2)
+    // Nothing is known before the first window.
+    expect(systems[0]).not.toMatch(/known concepts/i)
+    // The first window's title is offered to the second, by its exact name.
+    expect(systems[1]).toMatch(/known concepts/i)
+    expect(systems[1]).toContain('Faction arises from liberty')
+  })
+
+  it('advertises only titles that survived the quote check', async () => {
+    const systems: string[] = []
+    const liar: ChatModel = {
+      id: 'liar',
+      async *chat(req) {
+        systems.push(req.system ?? '')
+        yield '{"items":[{"kind":"claim","title":"Invented concept","summary":"x","evidence":[{"chunkId":0,"quote":"nowhere in this book"}],"links":[]}]}'
+      }
+    }
+    await distill({ file: 'Book.md', text: SRC }, { embedder, chat: liar }, opts)
+    // An ungrounded title must not become the run's shared vocabulary.
+    expect(systems[1]).not.toContain('Invented concept')
+  })
+})
+
 // --- Resilience: retry, per-window failure, circuit breaker, resume ---------
-// A four-idea corpus, one idea per section, with an embedder that gives each
-// its own vector — so the plan is exactly four one-chunk windows and a test can
-// talk about "the third call" without guessing how clustering fell out.
+// A four-idea corpus, one idea per section, read one section per window — so a
+// test can talk about "the third call" without guessing how packing fell out.
 const SRC4 = [
   '# Book',
   '',
@@ -369,18 +555,8 @@ const SRC4 = [
   ''
 ].join('\n')
 
-const WORDS = ['alpha', 'beta', 'gamma', 'delta']
-const embedder4: Embedder = {
-  id: 'stub4',
-  dims: 4,
-  async embed(texts) {
-    return texts.map((t) =>
-      Float32Array.from(WORDS.map((w) => (t.toLowerCase().includes(w) ? 1 : 0)))
-    )
-  }
-}
-/** Four windows of one chunk each. */
-const opts4 = { minClusters: 4, perCluster: 1 }
+/** Four windows of one chunk each (a chunk here weighs ~75 with scaffolding). */
+const opts4 = { windowSize: 80 }
 /** No real waiting in tests — the backoff itself is covered in retry.test.ts. */
 const noWait = { retry: { sleep: async (): Promise<void> => {} } }
 
@@ -431,9 +607,9 @@ const rateLimit = (): Error => tagError(new Error('API 429'), { status: 429 })
 describe('distill — resilience', () => {
   it('retries a transient failure and completes, at the cost of one extra call', async () => {
     const chat = scriptedChat((n) => (n === 1 ? rateLimit() : null))
-    const res = await distill({ file: 'B.md', text: SRC4 }, { embedder: embedder4, chat }, { ...opts4, ...noWait })
-    expect(res.stats.clusters).toBe(4)
-    expect(res.stats.failedClusters).toBe(0)
+    const res = await distill({ file: 'B.md', text: SRC4 }, { embedder, chat }, { ...opts4, ...noWait })
+    expect(res.stats.windows).toBe(4)
+    expect(res.stats.failedWindows).toBe(0)
     expect(res.stats.notes).toBe(4)
     expect(chat.calls).toBe(5) // 4 windows + 1 retried call
   })
@@ -441,8 +617,8 @@ describe('distill — resilience', () => {
   it('a window that keeps failing costs that window, not the run', async () => {
     // Every attempt at the second window fails; the other three are fine.
     const chat = scriptedChat((_n, prompt) => (/beta/i.test(prompt) ? rateLimit() : null))
-    const res = await distill({ file: 'B.md', text: SRC4 }, { embedder: embedder4, chat }, { ...opts4, ...noWait })
-    expect(res.stats.failedClusters).toBe(1)
+    const res = await distill({ file: 'B.md', text: SRC4 }, { embedder, chat }, { ...opts4, ...noWait })
+    expect(res.stats.failedWindows).toBe(1)
     expect(res.stats.notes).toBe(3) // the other three windows still produced notes
     expect(chat.calls).toBe(6) // 3 good windows + 3 tries on the bad one
   })
@@ -450,7 +626,7 @@ describe('distill — resilience', () => {
   it('stops the run after three failing windows in a row, reporting the real error', async () => {
     const chat = scriptedChat(() => tagError(new Error('API 500: gateway'), { status: 500 }))
     await expect(
-      distill({ file: 'B.md', text: SRC4 }, { embedder: embedder4, chat }, { ...opts4, ...noWait })
+      distill({ file: 'B.md', text: SRC4 }, { embedder, chat }, { ...opts4, ...noWait })
     ).rejects.toThrow('API 500: gateway')
     expect(chat.calls).toBe(9) // 3 windows × 3 tries — the fourth is never attempted
   })
@@ -458,7 +634,7 @@ describe('distill — resilience', () => {
   it('does not retry a permanent failure (a wrong key must not be spent three times)', async () => {
     const chat = scriptedChat(() => tagError(new Error('API 401'), { status: 401 }))
     await expect(
-      distill({ file: 'B.md', text: SRC4 }, { embedder: embedder4, chat }, { ...opts4, ...noWait })
+      distill({ file: 'B.md', text: SRC4 }, { embedder, chat }, { ...opts4, ...noWait })
     ).rejects.toThrow('API 401')
     expect(chat.calls).toBe(3) // one per window, three windows, then the breaker
   })
@@ -474,29 +650,24 @@ describe('distill — resilience', () => {
     await expect(
       distill(
         { file: 'B.md', text: SRC4 },
-        { embedder: embedder4, chat: first },
+        { embedder, chat: first },
         { ...opts4, ...noWait, checkpoint: store, signal: ctrl.signal }
       )
     ).rejects.toBeInstanceOf(DistillAborted)
     expect(store.records.filter((r) => r.type === 'window')).toHaveLength(2)
+    // The plan is the chunk ids per window, recorded before the first call.
+    expect(store.records[0]).toEqual({ type: 'plan', windows: [[0], [1], [2], [3]] })
 
-    // Resume: same store, a healthy model, no embedding needed.
-    let embedded = 0
-    const countingEmbedder = {
-      embed: (texts: string[]): Promise<Float32Array[]> => {
-        embedded += texts.length
-        return embedder4.embed(texts)
-      }
-    }
+    // Resume: same store, a healthy model.
     const second = scriptedChat(() => null)
     const res = await distill(
       { file: 'B.md', text: SRC4 },
-      { embedder: countingEmbedder, chat: second },
+      { embedder, chat: second },
       { ...opts4, ...noWait, checkpoint: store }
     )
     expect(second.calls).toBe(2) // only the two windows that were left
-    expect(embedded).toBe(0) // the plan was saved, so nothing is re-embedded
-    expect(res.stats.clusters).toBe(4)
+    expect(res.stats.windows).toBe(4)
+    expect(res.stats.calls).toBe(2) // a replayed window costs nothing
     expect(res.stats.notes).toBe(4) // including the notes from the first attempt
   })
 
@@ -505,19 +676,19 @@ describe('distill — resilience', () => {
     const failing = scriptedChat((_n, prompt) => (/beta/i.test(prompt) ? rateLimit() : null))
     const a = await distill(
       { file: 'B.md', text: SRC4 },
-      { embedder: embedder4, chat: failing },
+      { embedder, chat: failing },
       { ...opts4, ...noWait, checkpoint: store }
     )
-    expect(a.stats.failedClusters).toBe(1)
+    expect(a.stats.failedWindows).toBe(1)
 
     const again = scriptedChat(() => null)
     const b = await distill(
       { file: 'B.md', text: SRC4 },
-      { embedder: embedder4, chat: again },
+      { embedder, chat: again },
       { ...opts4, ...noWait, checkpoint: store }
     )
     expect(again.calls).toBe(0) // everything was already decided
-    expect(b.stats.failedClusters).toBe(1) // and the failure is still reported
+    expect(b.stats.failedWindows).toBe(1) // and the failure is still reported
     expect(b.notes).toEqual(a.notes) // replay is exact
   })
 
@@ -527,11 +698,25 @@ describe('distill — resilience', () => {
     const chat = scriptedChat(() => null)
     const res = await distill(
       { file: 'B.md', text: SRC4 },
-      { embedder: embedder4, chat },
+      { embedder, chat },
       { ...opts4, ...noWait, checkpoint: store }
     )
-    expect(res.stats.clusters).toBe(4)
+    expect(res.stats.windows).toBe(4)
     expect(res.stats.notes).toBe(4)
+  })
+
+  it('reports the coverage of a resumed plan, not of a freshly planned one', async () => {
+    const store = fakeCheckpoint()
+    // A plan that read half the document — as a sampled first attempt would.
+    store.save({ type: 'plan', windows: [[0], [2]] })
+    const chat = scriptedChat(() => null)
+    const res = await distill(
+      { file: 'B.md', text: SRC4 },
+      { embedder, chat },
+      { ...opts4, ...noWait, checkpoint: store }
+    )
+    expect(res.stats.windows).toBe(2)
+    expect(res.stats.coverage).toBeCloseTo(coverageOf(chunkMarkdown(SRC4), [0, 2]))
   })
 })
 
@@ -540,29 +725,43 @@ describe('estimateDistill', () => {
     const est = estimateDistill(SRC4, opts4)
     const res = await distill(
       { file: 'B.md', text: SRC4 },
-      { embedder: embedder4, chat: scriptedChat(() => null) },
+      { embedder, chat: scriptedChat(() => null) },
       opts4
     )
     expect(est.chunks).toBe(res.stats.chunks)
-    expect(est.calls).toBe(res.stats.clusters)
+    expect(est.calls).toBe(res.stats.windows)
     expect(est.coverage).toBe(res.stats.coverage)
+    expect(est.totalWindows).toBe(4)
   })
 
-  it('is honest about sampling a long document', () => {
-    // 400 passages: 24 calls (the ceiling) × 4 shown each = 96 of them.
-    const est = estimateDistill('x'.repeat(400_000))
-    expect(est.calls).toBe(24)
+  it('is honest about a document that needs more steps than the budget allows', () => {
+    const est = estimateDistill(LONG, { windowSize: 600, maxCalls: 3 })
+    expect(est.totalWindows).toBe(8)
+    expect(est.calls).toBe(3)
+    expect(est.maxCalls).toBe(3)
     expect(est.coverage).toBeLessThan(1)
   })
 
+  it('reads the whole document by default', () => {
+    const est = estimateDistill(LONG)
+    expect(est.coverage).toBe(1)
+    expect(est.calls).toBe(est.totalWindows)
+  })
+
   it('handles an empty document', () => {
-    expect(estimateDistill('')).toEqual({ chunks: 0, calls: 0, coverage: 1 })
+    expect(estimateDistill('')).toEqual({
+      chunks: 0,
+      calls: 0,
+      coverage: 1,
+      totalWindows: 0,
+      maxCalls: 120
+    })
   })
 })
 
 describe('distill — link integrity', () => {
   /**
-   * Two clusters. The first names one idea twice, so dedup merges them and the
+   * Two windows. The first names one idea twice, so dedup merges them and the
    * longer title stops existing; the second links to that lost title. Without
    * the alias map that link would be a dead end in the run's map.
    */
@@ -578,7 +777,7 @@ describe('distill — link integrity', () => {
         }
         const quote = m[2].split(/\s+/).slice(0, 4).join(' ')
         const evidence = [{ chunkId: Number(m[1]), quote }]
-        const items = /faction/i.test(user)
+        const items = /faction/i.test(m[2])
           ? [
               { kind: 'concept', title: 'Faction and its causes', summary: 's', evidence, links: [] },
               { kind: 'concept', title: 'Faction', summary: 's', evidence, links: [] }

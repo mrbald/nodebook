@@ -51,6 +51,9 @@ export interface GraphNode {
    *  a collision a merge would have to decide about, drawn as two dots joined by
    *  a `same_name` edge. */
   sameName?: boolean
+  /** Other note names folded into this one because they say `same_as:: [[this]]`
+   *  — a decision the user confirmed when merging. Absent when there are none. */
+  aliases?: string[]
 }
 
 /** A directed edge: `source --relation--> target` (a harvested triple). */
@@ -236,7 +239,21 @@ export interface Settings {
       command: string
       /** 'cli' only: arguments placed before the stdin-fed prompt. */
       args: string[]
+      /** Tokens of prompt this model accepts. 0 = the provider family's own
+       *  default. Distill sizes its reading steps from this. */
+      contextTokens: number
     }
+  }
+  /** "Distill a document" — how much of a document one run reads, and how
+   *  many model calls it may spend doing it. */
+  distill: {
+    /** Weight units of source text per reading step (see `weightOf`: a Latin
+     *  character = 1, a CJK code point = 3). 0 = derived from the chat model's
+     *  context budget, which is what almost everyone should leave it at. */
+    windowSize: number
+    /** Maximum model calls one run may make. A document needing more is read
+     *  in evenly spaced steps, and the run says what share it read. */
+    maxCalls: number
   }
   /** Main-process telemetry (event-loop lag + CPU/RAM). Off by default; when on,
    *  a tiny status-bar widget appears. */
@@ -248,7 +265,15 @@ export interface Settings {
 /** The extraction funnel for a distill run — surfaced, never silently capped. */
 export interface DistillStats {
   chunks: number
-  clusters: number
+  /** Reading steps the run planned — the document in consecutive windows, one
+   *  model call each. */
+  windows: number
+  /** Model calls actually attempted, including any a provider rejected for
+   *  length before its two halves were read. */
+  calls: number
+  /** How many times a rejected step was halved and read as two, so the text
+   *  was still read in full. */
+  splits: number
   extracted: number
   grounded: number
   /** Everything grounding dropped: the three `droppedByReason` counts summed. */
@@ -262,7 +287,8 @@ export interface DistillStats {
   recovered: number
   merged: number
   notes: number
-  failedClusters: number
+  /** Steps the model never answered usably — counted, never hidden. */
+  failedWindows: number
   /** Links between the run's notes, `source::` excluded — the map's edges. */
   edges: number
   /** Of those, how many still name a note the run did not write (a dead end
@@ -274,10 +300,10 @@ export interface DistillStats {
   /** Separate islands of notes in the run's map (a lower number means the run
    *  came out as one connected body of knowledge rather than loose piles). */
   components: number
-  /** Fraction (0..1) of `chunks` actually shown to the LLM as a cluster
-   *  representative. A big source is clustered + sampled, not read in full —
-   *  this is the honesty number: 1.0 means every chunk was shown, well below
-   *  1.0 means the run leaned on sampling. */
+  /** Share (0..1) of the document's text — BY WEIGHT, each passage counted
+   *  once — the model was actually shown. This is the honesty number: 1.0
+   *  means the whole document was read, below 1.0 means it needed more steps
+   *  than `[distill] maxCalls` allows and evenly spaced steps were read. */
   coverage: number
 }
 
@@ -311,16 +337,41 @@ export interface DistillRunInfo {
 export interface DistillEstimate {
   /** Passages the document splits into. */
   chunks: number
-  /** Model calls the run will make. */
+  /** Reading steps the run will take — one model call each. */
   calls: number
-  /** Fraction (0..1) of the passages the model will actually be shown. */
+  /** Share (0..1) of the document's text, by weight, the model will be shown. */
   coverage: number
+  /** Steps the whole document needs, before the call budget is applied. More
+   *  than `maxCalls` means the run has to sample, and the user is asked first. */
+  totalWindows: number
+  /** The user's call budget (`[distill] maxCalls`) this was measured against. */
+  maxCalls: number
 }
 
 export interface DistillProgress {
-  phase: 'chunking' | 'embedding' | 'clustering' | 'extracting' | 'finalizing' | 'done'
+  phase: 'chunking' | 'extracting' | 'finalizing' | 'done'
   done: number
   total: number
+}
+
+/** What a merge would do with one staged note (see main/distill/mergePlan.ts). */
+export interface DistillMergePlanEntry {
+  /** The staged note's own name. */
+  name: string
+  /** `new` — the vault has no note of that name. `identical` — it has one with
+   *  exactly these bytes, so the merge skips it. `collides` — it has a
+   *  DIFFERENT note of that name, so this one is saved beside it under
+   *  `targetName` and you are asked whether they are really the same thing. */
+  action: 'new' | 'identical' | 'collides'
+  /** The name it will be written under (`name` unless it collides). */
+  targetName: string
+}
+
+/** What merging a run would do, worked out before anything is written. */
+export interface DistillMergePlan {
+  /** The document's short title — the disambiguator in a collision's new name. */
+  sourceTitle: string
+  entries: DistillMergePlanEntry[]
 }
 
 /** Outcome of merging a run into the vault (reversible). */
@@ -328,6 +379,9 @@ export interface DistillMergeResult {
   /** Vault-relative folder the notes were written into. */
   folder: string
   count: number
+  /** Notes the vault already held byte-for-byte, so nothing was written for
+   *  them. Absent in results from before the merge plan existed. */
+  skipped?: number
 }
 
 /** Outcome of undoing a merge. Notes you edited after merging are moved to the

@@ -1,4 +1,11 @@
-import type { ChatModel, ChatRequest, ProviderConfig } from './provider'
+import {
+  ContextLengthError,
+  inputBudgetFor,
+  isContextLengthMessage,
+  type ChatModel,
+  type ChatRequest,
+  type ProviderConfig
+} from './provider'
 import { claudeCliChat, codexCliChat, genericCliChat } from './cliChat'
 import { tagError } from '../distill/retry'
 
@@ -62,11 +69,16 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
       })
       // The status travels with the error: a 429 or a 5xx is worth retrying, a
       // 401 never is, and distill's retry policy must not guess from the prose.
-      if (!res.ok)
-        throw tagError(
-          new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 200)}`),
-          { status: res.status }
-        )
+      if (!res.ok) {
+        const body = await res.text()
+        // "Too long" is not a fault to retry — it is an instruction to send
+        // less, which distill answers by splitting the window.
+        if (isContextLengthMessage(body))
+          throw new ContextLengthError(`Anthropic API ${res.status}: ${body.slice(0, 200)}`)
+        throw tagError(new Error(`Anthropic API ${res.status}: ${body.slice(0, 200)}`), {
+          status: res.status
+        })
+      }
       // No `[DONE]` sentinel on this path — that's an OpenAI-ism (see
       // openaiCompatChat below). Anthropic's stream just ends.
       for await (const data of sseData(res)) {
@@ -106,10 +118,16 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
         },
         body: JSON.stringify({ model: cfg.model, messages, stream: true })
       })
-      if (!res.ok)
-        throw tagError(new Error(`Chat API ${res.status}: ${(await res.text()).slice(0, 200)}`), {
+      if (!res.ok) {
+        const body = await res.text()
+        // Covers OpenAI's `context_length_exceeded` and Ollama's "input
+        // exceeds the context" alike — both arrive on this path.
+        if (isContextLengthMessage(body))
+          throw new ContextLengthError(`Chat API ${res.status}: ${body.slice(0, 200)}`)
+        throw tagError(new Error(`Chat API ${res.status}: ${body.slice(0, 200)}`), {
           status: res.status
         })
+      }
       for await (const data of sseData(res)) {
         if (data === '[DONE]') break
         try {
@@ -166,7 +184,7 @@ function stubChat(): ChatModel {
 /** Ollama's default local OpenAI-compatible endpoint. */
 const OLLAMA_DEFAULT_URL = 'http://localhost:11434/v1'
 
-export function makeChatModel(cfg: ProviderConfig): ChatModel {
+function build(cfg: ProviderConfig): ChatModel {
   if (process.env.NODEBOOK_E2E) return stubChat()
   if (cfg.kind === 'anthropic') return anthropicChat(cfg)
   if (cfg.kind === 'openai-compat') return openaiCompatChat(cfg)
@@ -177,4 +195,12 @@ export function makeChatModel(cfg: ProviderConfig): ChatModel {
   if (cfg.kind === 'claude-cli') return claudeCliChat(cfg)
   if (cfg.kind === 'cli') return genericCliChat(cfg)
   throw new Error(`Unsupported chat provider: ${cfg.kind}`)
+}
+
+/** The chat model for a config, carrying the prompt budget its family (or the
+ *  user's `contextTokens`) declares — distill sizes its reading windows from
+ *  it, so "how much can I send" is answered by the model side, not guessed at
+ *  the call site. */
+export function makeChatModel(cfg: ProviderConfig): ChatModel {
+  return Object.assign(build(cfg), { inputBudget: inputBudgetFor(cfg) })
 }

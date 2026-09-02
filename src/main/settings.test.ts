@@ -33,6 +33,7 @@ describe('parseSettings', () => {
       editor: { fontSize: 18, autosaveDelayMs: 0, autosaveOnSwitch: true, defaultMode: 'live' },
       theme: { followSystem: false, dark: 'dracula', light: 'solarized-light', name: 'nord' },
       talk: DEFAULTS.talk,
+      distill: DEFAULTS.distill,
       telemetry: DEFAULTS.telemetry
     })
   })
@@ -71,6 +72,7 @@ describe('parseSettings', () => {
       editor: { ...DEFAULTS.editor, fontSize: 20 },
       theme: { ...DEFAULTS.theme },
       talk: DEFAULTS.talk,
+      distill: DEFAULTS.distill,
       telemetry: DEFAULTS.telemetry
     })
     expect(parseSettings('')).toEqual(DEFAULTS)
@@ -96,6 +98,28 @@ describe('parseSettings', () => {
     expect(parseSettings('').talk.enabled).toBe(false)
     expect(parseSettings('[talk.embed]\nruntime = "cuda"').talk.embed.runtime).toBe('wasm')
     expect(parseSettings('[talk]\nenabled = "yes"').talk.enabled).toBe(false)
+  })
+
+  it('reads the chat context budget, in tokens, and defaults it to the family value', () => {
+    expect(parseSettings('[talk.chat]\ncontextTokens = 8000').talk.chat.contextTokens).toBe(8000)
+    // 0 means "whatever the provider family declares" — the shipped default.
+    expect(parseSettings('').talk.chat.contextTokens).toBe(0)
+    // Fractional, negative and non-numeric values revert rather than being sent
+    // to the planner as a budget.
+    expect(parseSettings('[talk.chat]\ncontextTokens = -1').talk.chat.contextTokens).toBe(0)
+    expect(parseSettings('[talk.chat]\ncontextTokens = 1.5').talk.chat.contextTokens).toBe(0)
+    expect(parseSettings('[talk.chat]\ncontextTokens = "big"').talk.chat.contextTokens).toBe(0)
+  })
+
+  it('reads the [distill] reading budget and validates it', () => {
+    const s = parseSettings('[distill]\nwindowSize = 9000\nmaxCalls = 40')
+    expect(s.distill).toEqual({ windowSize: 9000, maxCalls: 40 })
+    // Defaults: derive the window from the model's context, 120 calls.
+    expect(parseSettings('').distill).toEqual({ windowSize: 0, maxCalls: 120 })
+    expect(parseSettings('[distill]\nwindowSize = -5').distill.windowSize).toBe(0)
+    expect(parseSettings('[distill]\nmaxCalls = "many"').distill.maxCalls).toBe(120)
+    // A budget of zero calls would read nothing at all.
+    expect(parseSettings('[distill]\nmaxCalls = 0').distill.maxCalls).toBe(1)
   })
 
   it('upgrades an old shipped default embed model in place, and only that', () => {
@@ -153,7 +177,8 @@ describe('parseSettings', () => {
       model: 'claude-x',
       baseUrl: 'http://h/v1',
       command: '',
-      args: []
+      args: [],
+      contextTokens: 0
     })
     // unknown provider falls back to "none" (search-only)
     expect(parseSettings('[talk.chat]\nprovider = "bogus"').talk.chat.provider).toBe('none')
@@ -188,7 +213,8 @@ describe('parseSettings', () => {
       model: '',
       baseUrl: '',
       command: '',
-      args: []
+      args: [],
+      contextTokens: 0
     })
   })
 

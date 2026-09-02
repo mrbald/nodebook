@@ -26,6 +26,23 @@ describe('buildExtractionPrompt', () => {
     expect(system).toMatch(/same\s+language/i)
     expect(system).toMatch(/never\s+translate/i)
   })
+
+  it('carries the concepts earlier windows named, after the schema', () => {
+    const chunks = [{ chunkId: 7, heading: '', text: 'Faction returns here.' }]
+    const registry = 'Known concepts so far — reuse these exact titles:\n- Faction'
+    const { system, user } = buildExtractionPrompt(chunks, { registry })
+    expect(system).toContain('- Faction')
+    // After the schema, so the shape of the answer is stated before the names
+    // it may reuse — and never mixed into the source chunks themselves.
+    expect(system.indexOf('- Faction')).toBeGreaterThan(system.indexOf('"items"'))
+    expect(user).not.toContain('- Faction')
+  })
+
+  it('says nothing about known concepts on the first window', () => {
+    const chunks = [{ chunkId: 0, heading: '', text: 'A first passage.' }]
+    expect(buildExtractionPrompt(chunks).system).not.toMatch(/known concepts/i)
+    expect(buildExtractionPrompt(chunks, { registry: '   ' }).system).not.toMatch(/known concepts/i)
+  })
 })
 
 describe('locateQuote', () => {

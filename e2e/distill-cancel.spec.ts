@@ -15,8 +15,10 @@ import { join, resolve, sep } from 'path'
 const projectRoot = resolve(__dirname, '..')
 const fixtureVault = join(__dirname, 'fixtures', 'vault')
 
-/** Per chat call, in ms — enough to click Cancel mid-extraction. */
-const CHAT_DELAY_MS = 1500
+/** Per chat call, in ms — enough to click Cancel mid-extraction. A short book
+ *  now fits ONE reading window (the run reads it in one call instead of one per
+ *  cluster), so this single stall is the whole window the click has to land in. */
+const CHAT_DELAY_MS = 3000
 
 let app: ElectronApplication
 let page: Page

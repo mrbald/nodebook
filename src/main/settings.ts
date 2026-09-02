@@ -28,8 +28,9 @@ export const DEFAULTS: Settings = {
     enabled: false,
     relatedMinScore: 0.5,
     embed: { runtime: 'wasm', model: DEFAULT_EMBED_MODEL, threads: 0 },
-    chat: { provider: 'none', model: '', baseUrl: '', command: '', args: [] }
+    chat: { provider: 'none', model: '', baseUrl: '', command: '', args: [], contextTokens: 0 }
   },
+  distill: { windowSize: 0, maxCalls: 120 },
   telemetry: { enabled: false }
 }
 
@@ -131,6 +132,22 @@ command = ""
 # "cli" provider only: arguments placed before the prompt (which is written to
 # the command's stdin), e.g. args = ["-p"].
 args = []
+# How many tokens of prompt this model accepts. 0 = a safe default for the
+# provider (smaller for "ollama", since local models usually have small
+# windows). Distilling reads a document in steps sized from this, so raising it
+# on a big-context model means fewer, longer steps — and a cheaper run.
+contextTokens = 0
+
+[distill]
+# "Distill a document" reads the whole document, in steps.
+# How much text goes into one step. 0 = work it out from the chat model's
+# context above, which is almost always what you want. Set a number only to
+# force smaller or larger steps (counted like contextTokens × 3).
+windowSize = 0
+# The most model calls one run may make. A document that needs more steps than
+# this is read in evenly spaced steps instead, and Nodebook asks you first and
+# then says what share of the text it read.
+maxCalls = 120
 
 [telemetry]
 # Show a tiny status-bar widget with event-loop lag (a log-bucketed histogram),
@@ -164,6 +181,7 @@ export function parseSettings(raw: string): Settings {
   const talk = (data.talk ?? {}) as Record<string, unknown>
   const embed = (talk.embed ?? {}) as Record<string, unknown>
   const chat = (talk.chat ?? {}) as Record<string, unknown>
+  const distill = (data.distill ?? {}) as Record<string, unknown>
   const telemetry = (data.telemetry ?? {}) as Record<string, unknown>
   const runtime = RUNTIMES.includes(embed.runtime as (typeof RUNTIMES)[number])
     ? (embed.runtime as (typeof RUNTIMES)[number])
@@ -180,6 +198,10 @@ export function parseSettings(raw: string): Settings {
   // unknown names to the default, so main needn't know the theme registry.
   const str = (v: unknown, fallback: string): string =>
     typeof v === 'string' && v ? v : fallback
+  // Budgets are whole non-negative counts; anything else reverts to the
+  // default rather than sending a fractional or negative budget to the planner.
+  const count = (v: unknown, fallback: number): number =>
+    Number.isInteger(v) && (v as number) >= 0 ? (v as number) : fallback
   return {
     editor: {
       fontSize: Number.isFinite(fontSize) ? fontSize : DEFAULTS.editor.fontSize,
@@ -221,8 +243,14 @@ export function parseSettings(raw: string): Settings {
         model: str(chat.model, DEFAULTS.talk.chat.model),
         baseUrl: str(chat.baseUrl, DEFAULTS.talk.chat.baseUrl),
         command: str(chat.command, DEFAULTS.talk.chat.command),
-        args: Array.isArray(chat.args) ? chat.args.filter((x): x is string => typeof x === 'string') : []
+        args: Array.isArray(chat.args) ? chat.args.filter((x): x is string => typeof x === 'string') : [],
+        contextTokens: count(chat.contextTokens, DEFAULTS.talk.chat.contextTokens)
       }
+    },
+    distill: {
+      windowSize: count(distill.windowSize, DEFAULTS.distill.windowSize),
+      // 0 calls would read nothing at all; the planner clamps it, and so does this.
+      maxCalls: Math.max(1, count(distill.maxCalls, DEFAULTS.distill.maxCalls))
     },
     telemetry: {
       enabled:
@@ -356,6 +384,7 @@ export function chatProviderConfig(): ProviderConfig | null {
     baseUrl: s.talk.chat.baseUrl || undefined,
     apiKey: isCli ? undefined : envKey || tomlKey || undefined,
     command: s.talk.chat.command || undefined,
-    args: s.talk.chat.args.length ? s.talk.chat.args : undefined
+    args: s.talk.chat.args.length ? s.talk.chat.args : undefined,
+    contextTokens: s.talk.chat.contextTokens || undefined
   }
 }
