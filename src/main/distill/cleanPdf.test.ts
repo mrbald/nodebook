@@ -114,6 +114,71 @@ describe('cleanPdf', () => {
     expect(out[3]).toBe('')
   })
 
+  it('drops a header or footer that prints the page number beside a changing title', () => {
+    // O'Reilly-style furniture: `102 | Chapter 4: NumPy Basics` on even pages,
+    // `4.1 The ndarray | 103` on odd ones. The title changes every chapter and
+    // section, so no line repeats on 30 % of the pages — but the numbers
+    // count up with the pages, and that is what gives them away.
+    const pages = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'].map((w, i) =>
+      page(
+        startsWith(w),
+        startsWith('more of it'),
+        i % 2 ? `${i + 100}   |   Chapter ${i}: Title ${i}` : `${i}.1 Section ${i}   |   ${i + 100}`
+      )
+    )
+    const out = cleanPdf(pages).join('\n')
+    expect(out).not.toContain('Chapter')
+    expect(out).not.toContain('Section')
+    expect(out).toContain('alpha')
+    expect(out).toContain('zeta')
+  })
+
+  it('keeps a number at a page edge that is not the printed page number', () => {
+    const pages = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'].map((w, i) =>
+      page(startsWith(w), `Chapter 1   |   ${i + 100}`)
+    )
+    pages[2] = page(startsWith('12 apostles gathered'), 'Chapter 1   |   102')
+    const out = cleanPdf(pages).join('\n')
+    expect(out).toContain('12 apostles gathered')
+    expect(out).not.toContain('Chapter 1')
+  })
+
+  it('keeps a code listing verbatim — never joined, never furniture, indent and all', () => {
+    // `Out[1]:` repeats on every page and `42` is a bare number; both are code.
+    const listing = ['    In [1]: x = 6 * 7', '    Out[1]:', '    42', '        nested = True']
+    const pages = ['alpha', 'beta', 'gamma', 'delta'].map((w) =>
+      page(startsWith(w), ...listing, startsWith(`and then ${w} again`))
+    )
+    const out = cleanPdf(pages)
+    for (const p of out) {
+      expect(p).toContain(listing.join('\n'))
+      expect(p.split('\n\n')).toHaveLength(3) // prose, listing, prose
+    }
+  })
+
+  it('escapes a paragraph that would open like a markdown heading or fence', () => {
+    const out = cleanPdf([
+      page(startsWith('alpha'), '', '# (hash mark) for comment, 27', '', '``` starts a fence', '', startsWith('beta'))
+    ])[0]
+    expect(out).toContain('\\# (hash mark) for comment, 27')
+    expect(out).toContain('\\``` starts a fence')
+    expect(out).not.toMatch(/^#/m)
+    expect(out).not.toMatch(/^```/m)
+  })
+
+  it('rejoins a word cut with the Unicode hyphen (U+2010) as well as the ASCII one', () => {
+    const out = cleanPdf([
+      page(endsWith('these pack‐'), startsWith('ages arrived'), startsWith('all packages were late'))
+    ])[0]
+    expect(out).toContain('packages arrived')
+    expect(out).not.toContain('‐')
+  })
+
+  it('collapses runs of spaces inside a prose line', () => {
+    const out = cleanPdf([page(startsWith('Arrays have the   transpose   method'))])[0]
+    expect(out).toContain('Arrays have the transpose method')
+  })
+
   it('handles an empty document and an empty page without throwing', () => {
     expect(cleanPdf([])).toEqual([])
     expect(cleanPdf([''])).toEqual([''])

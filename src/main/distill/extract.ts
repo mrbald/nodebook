@@ -241,33 +241,40 @@ export function parseExtraction(raw: string): { ok: boolean; items: ExtractedIte
  *  punctuation an LLM plainifies, and the ligatures a PDF extractor leaves
  *  behind. Fold both sides to the same plain form before comparing. A
  *  multi-char target (the ellipsis glyph, a ligature) folds to its
- *  multi-character equivalent. */
+ *  multi-character equivalent; a target of `''` folds to nothing. Every
+ *  quotation mark, single or double, straight or curly, becomes one and the
+ *  same: a model retyping “rows” as 'rows' is the rule, not the exception. */
 const CHAR_FOLD: Record<string, string> = {
   '’': "'", // ' RIGHT SINGLE QUOTATION MARK
   '‘': "'", // ' LEFT SINGLE QUOTATION MARK
   '`': "'", // `
   '´': "'", // ´
-  '“': '"', // " LEFT DOUBLE QUOTATION MARK
-  '”': '"', // " RIGHT DOUBLE QUOTATION MARK
-  '–': '-', // – EN DASH
-  '—': '-', // — EM DASH
+  '"': "'",
+  '“': "'", // " LEFT DOUBLE QUOTATION MARK
+  '”': "'", // " RIGHT DOUBLE QUOTATION MARK
+  '„': "'",
+  '«': "'",
+  '»': "'",
   '…': '...', // … HORIZONTAL ELLIPSIS
   // Typographic ligatures: PDF text keeps them, the model retypes the letters.
   'ﬀ': 'ff',
   'ﬁ': 'fi',
   'ﬂ': 'fl',
   'ﬃ': 'ffi',
-  'ﬄ': 'ffl'
+  'ﬄ': 'ffl',
+  // A markdown escape the converter added (`\#` for a line that would
+  // otherwise read as a heading, see cleanPdf.ts) — a model copying the
+  // quote drops it as often as not, so it counts for nothing on either side.
+  '\\': ''
 }
 
-/** A hyphen a typesetter inserted to break a word across lines: hyphen (or a
- *  soft hyphen) immediately at a line end, then the next line's indent, then a
- *  lowercase letter. The whole run folds to nothing, so "consti-\ntution"
- *  matches a quote's "constitution". Sticky: matched at a given index only. */
-const HYPHEN_BREAK = /[-\u00ad]\r?\n[ \t]*(?=\p{Ll})/uy
+/** The hyphens and dashes a typesetter or a model writes: ASCII, the Unicode
+ *  hyphen (U+2010, what InDesign-style layout uses at a line break), the
+ *  non-breaking hyphen, the en and em dash, and the invisible soft hyphen. */
+const HYPHENS = new Set(['-', '‐', '‑', '–', '—', '­'])
 
-/** SOFT HYPHEN — invisible, and never typed back by a model copying a quote. */
-const SOFT_HYPHEN = '\u00ad'
+const WORD_CHAR = /[\p{L}\p{N}]/u
+const LETTER = /\p{L}/u
 
 /** One normalized character, remembering the exact original span it came
  *  from — so a match found in the normalized string maps back to exact
@@ -279,39 +286,42 @@ interface NormChar {
 }
 
 /**
- * Fold `s` into normalized characters: whitespace runs collapse to a single
- * space (so reflowed line breaks still match — `\s` already covers NBSP and
- * the other Unicode spaces a PDF sprinkles in), line-end hyphenation and soft
- * hyphens disappear, fancy punctuation and ligatures fold to their plain
- * equivalent, and everything lower-cases. One-to-one with the *output*
- * string's characters (an expansion like `…` → `...` emits three entries, one
- * per output character), so `norm[i]` always identifies exactly which slice
- * of the original produced the i-th normalized character. A fold with no
- * output (a soft hyphen) emits no entry at all; a match spanning it still maps
- * back to a source range that includes it, since the entries around it keep
- * their own offsets.
+ * Fold `s` into normalized characters. Whitespace counts for nothing at all —
+ * not "one space", nothing — so a quote matches however the text was
+ * reflowed: a line break, a PDF's `swapaxes ,` with a space before the comma,
+ * a word the extractor split in two. A hyphen standing between two letters
+ * counts for nothing either, whitespace or not in between: that is a word
+ * cut at a line end (`consti-\ntution`, or `pack‐ ages` once the break became
+ * a space) or a compound the model spelt closed, and both sides fold the same
+ * way. A hyphen or dash anywhere else (a minus, a range, `4-1`, an em dash
+ * before a quote mark) is kept as a plain hyphen; a soft hyphen is never kept. Fancy punctuation and ligatures fold to
+ * their plain equivalent, and everything lower-cases. One-to-one with the
+ * *output* string's characters (an expansion like `…` → `...` emits three
+ * entries, one per output character), so `norm[i]` always identifies exactly
+ * which slice of the original produced the i-th normalized character. A fold
+ * with no output emits no entry at all; a match spanning it still maps back
+ * to a source range that includes it, since the entries around it keep their
+ * own offsets.
  */
 function foldChars(s: string): NormChar[] {
   const out: NormChar[] = []
   let i = 0
   while (i < s.length) {
     const ch = s[i]
-    if (ch === '-' || ch === SOFT_HYPHEN) {
-      HYPHEN_BREAK.lastIndex = i
-      if (HYPHEN_BREAK.test(s)) {
-        i = HYPHEN_BREAK.lastIndex // the break folds to nothing: the word joins
-        continue
-      }
-      if (ch === SOFT_HYPHEN) {
-        i++
-        continue
-      }
-    }
     if (/\s/.test(ch)) {
+      i++
+      continue
+    }
+    if (HYPHENS.has(ch)) {
       let j = i + 1
       while (j < s.length && /\s/.test(s[j])) j++
-      out.push({ ch: ' ', origStart: i, origEnd: j })
-      i = j
+      const prev = out.length ? out[out.length - 1].ch : ''
+      if (prev && WORD_CHAR.test(prev) && j < s.length && LETTER.test(s[j])) {
+        i = j // the break folds to nothing: the word joins
+        continue
+      }
+      if (ch !== '­') out.push({ ch: '-', origStart: i, origEnd: i + 1 })
+      i++
       continue
     }
     const folded = CHAR_FOLD[ch] ?? ch.toLowerCase()
@@ -356,12 +366,12 @@ function locateAllIn(
 }
 
 /**
- * Find `quote` inside `haystack`, tolerating whitespace reflow, curly
- * quotes/dashes/ellipses vs. their plain equivalents, line-end hyphenation,
- * ligatures and case differences — all things text extraction or an LLM
- * changes when a quote is "copied". Always returns EXACT offsets into the
- * original (unnormalized) `haystack`, or null if the quote can't be located
- * anywhere — which is what fails grounding.
+ * Find `quote` inside `haystack`, tolerating any difference in whitespace,
+ * curly quotes/dashes/ellipses vs. their plain equivalents, line-end
+ * hyphenation, ligatures and case — all things text extraction or an LLM
+ * changes when a quote is "copied" (see `foldChars`). Always returns EXACT
+ * offsets into the original (unnormalized) `haystack`, or null if the quote
+ * can't be located anywhere — which is what fails grounding.
  */
 export function locateQuote(
   haystack: string,

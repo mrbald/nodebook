@@ -40,7 +40,10 @@ export interface Chunk {
 }
 
 const HEADING = /^(#{1,6})\s+(.*)$/
-const FENCE = /^\s*```/
+// At most three spaces of indent, as CommonMark has it: four make an indented
+// code block, and a line of backticks inside one (a PDF's code listing, see
+// distill/cleanPdf.ts) is code, not a fence that would swallow every heading after it.
+const FENCE = /^ {0,3}```/
 
 /** Default budget for a chunk's body text, in token-cost units (see
  *  `weightOf`) — a Latin character costs 1 unit, so for English text this is

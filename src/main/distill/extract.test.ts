@@ -11,6 +11,12 @@ import {
   type ExtractedItem
 } from './extract'
 
+/** `[start, end]` of a located span, failing loudly when it is null. */
+function spanOf(loc: { start: number; end: number } | null): [number, number] {
+  if (!loc) throw new Error('quote not located')
+  return [loc.start, loc.end]
+}
+
 describe('buildExtractionPrompt', () => {
   it('tags chunks with ids and states the grounding rule', () => {
     const { system, user } = buildExtractionPrompt([
@@ -113,12 +119,48 @@ describe('locateQuote', () => {
     expect(locateQuote(wrapped, 'constitution protects liberty')).not.toBeNull()
   })
 
-  it('keeps a hyphen that is not a line-end break', () => {
-    // Only a hyphen AT a line end, continued in lower case, is a typesetter's
-    // break. A mid-line compound keeps its hyphen, and "Anti-\nFederalist" —
-    // continued with a capital — is a real compound too, not a broken word.
-    expect(locateQuote('a well-known fact', 'wellknown fact')).toBeNull()
-    expect(locateQuote('The Anti-\nFederalist papers.', 'AntiFederalist papers')).toBeNull()
+  it('lets a hyphen between two letters count for nothing, on either side', () => {
+    // The rendered citation is always the SOURCE span, so a quote that spells
+    // a compound closed, or a word the typesetter cut, still lands on the
+    // right words — and a hyphen the model added where the source has none is
+    // forgiven the same way.
+    const src = 'a well-known fact; the Anti-\nFederalist papers; pack‐ ages arrive'
+    expect(src.slice(...spanOf(locateQuote(src, 'wellknown fact')))).toBe('well-known fact')
+    expect(src.slice(...spanOf(locateQuote(src, 'AntiFederalist papers')))).toBe('Anti-\nFederalist papers')
+    expect(src.slice(...spanOf(locateQuote(src, 'packages arrive')))).toBe('pack‐ ages arrive')
+    expect(locateQuote('a wellknown fact', 'well-known fact')).not.toBeNull()
+  })
+
+  it('keeps a hyphen that is a minus, a range, or before a digit', () => {
+    expect(locateQuote('see Figure 4-1 here', 'see Figure 41 here')).toBeNull()
+    expect(locateQuote('x = -2 today', 'x = 2 today')).toBeNull()
+    expect(locateQuote('pages 10–12 cover it', 'pages 1012 cover it')).toBeNull()
+  })
+
+  it('ignores whitespace entirely: a space before a comma, a word split in two', () => {
+    // PDF text around inline code: `swapaxes , which` — and an extractor that
+    // splits a word at a font change or a column.
+    const src = 'ndarray has the method swapaxes , which takes a pair; broad casting too'
+    expect(src.slice(...spanOf(locateQuote(src, 'the method swapaxes, which takes')))).toBe(
+      'the method swapaxes , which takes'
+    )
+    expect(src.slice(...spanOf(locateQuote(src, 'broadcasting too')))).toBe('broad casting too')
+  })
+
+  it('treats every quotation mark as the same mark', () => {
+    // A model retyping “rows” as 'rows' or "rows" is the rule, not the exception.
+    const src = 'think of axis 0 as the “rows” of the array'
+    for (const q of ["as the 'rows' of", 'as the "rows" of', 'as the ‘rows’ of'])
+      expect(src.slice(...spanOf(locateQuote(src, q)))).toBe('as the “rows” of')
+  })
+
+  it('folds a markdown escape away (a `\\#` the converter added)', () => {
+    // The escape counts for nothing, so the span starts on the `#` itself —
+    // the citation shows the text, not the markup.
+    const src = 'the \\# (hash mark) for comment, 27'
+    expect(src.slice(...spanOf(locateQuote(src, '# (hash mark) for comment')))).toBe(
+      '# (hash mark) for comment'
+    )
   })
 
   it('folds typographic ligatures to their letters', () => {

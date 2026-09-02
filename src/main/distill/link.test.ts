@@ -6,6 +6,7 @@ import {
   isMentionable,
   findMention,
   noteName,
+  NAME_MAX_BYTES,
   type LinkableNote
 } from './link'
 
@@ -25,6 +26,19 @@ describe('noteName', () => {
   })
   it('falls back to "untitled" when nothing survives', () => {
     expect(noteName('///')).toBe('untitled')
+  })
+  it('caps a name at what a file name can carry, in bytes, at a word boundary', () => {
+    const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ')
+    const capped = noteName(long)
+    expect(Buffer.byteLength(capped, 'utf8')).toBeLessThanOrEqual(NAME_MAX_BYTES)
+    expect(capped.endsWith(' ')).toBe(false)
+    expect(long.startsWith(capped + ' ')).toBe(true)
+    // Multibyte scripts reach the limit in fewer characters; the cap is bytes.
+    const cyrillic = Array.from({ length: 30 }, () => 'слово').join(' ')
+    expect(Buffer.byteLength(noteName(cyrillic), 'utf8')).toBeLessThanOrEqual(NAME_MAX_BYTES)
+    expect(noteName(cyrillic).length).toBeLessThan(cyrillic.length)
+    // The same cap applies to a link target, so the two still meet.
+    expect(noteName(long)).toBe(noteName(`${long} and more`))
   })
 })
 
