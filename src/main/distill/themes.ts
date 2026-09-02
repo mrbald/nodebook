@@ -103,6 +103,9 @@ const SCHEMA_HINT = `{
   "themes": [ { "index": <the group's number>, "name": "2-4 words" } ]
 }`
 
+/** Every key the naming reply may carry (see `lenientJson.ts`). */
+export const THEME_KEYS: ReadonlySet<string> = new Set(['language', 'themes', 'index', 'name'])
+
 /**
  * The one prompt that names every group. The group blocks are marked
  * `[theme N]` and their members listed as `- <title>` with the summary
@@ -153,7 +156,7 @@ export function parseThemeNames(
   count: number
 ): { ok: boolean; names: (string | null)[] } {
   const names = new Array<string | null>(count).fill(null)
-  const parsed = parseLenientObject(raw)
+  const parsed = parseLenientObject(raw, THEME_KEYS)
   if (parsed === undefined) return { ok: false, names }
   const list = (parsed as { themes?: unknown } | null)?.themes
   if (!Array.isArray(list)) return { ok: false, names }

@@ -118,7 +118,9 @@ stubs.
    writes is kept as an edge but typed `related_to`. The reply is read
    leniently (`lenientJson.ts`): a quote the model forgot to escape inside a
    string — Python's `df["data1"]` in a summary — is mended before parsing,
-   because a quote only closes a string where the grammar allows one to. Over
+   because a quote only closes a string where the grammar allows one to, and a
+   comma only where one of the reply's own keys follows (so prose quoting a
+   dict literal cannot end a field early). Over
    the 171-window book that was 4 replies (2 %), each of which had cost a
    second, repair call that recovered fewer items than the first reply held.
    Text a machine cannot mend still gets that one repair call.

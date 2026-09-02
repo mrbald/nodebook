@@ -138,6 +138,22 @@ const SCHEMA_HINT = `{
   ]
 }`
 
+/** Every key the extraction reply may carry, at any depth — what the lenient
+ *  parser lets a comma introduce (see `lenientJson.ts`). */
+export const EXTRACTION_KEYS: ReadonlySet<string> = new Set([
+  'language',
+  'items',
+  'kind',
+  'title',
+  'summary',
+  'evidence',
+  'chunkId',
+  'quote',
+  'links',
+  'relation',
+  'target'
+])
+
 export interface PromptOptions {
   /** Titles already extracted from earlier windows, rendered by
    *  `ConceptRegistry.render` (`registry.ts`). Appended after the schema so
@@ -236,7 +252,7 @@ function coerceItem(raw: unknown): ExtractedItem | null {
  * that carried nothing usable.
  */
 export function parseExtraction(raw: string): { ok: boolean; items: ExtractedItem[] } {
-  const parsed = parseLenientObject(raw)
+  const parsed = parseLenientObject(raw, EXTRACTION_KEYS)
   if (parsed === undefined) return { ok: false, items: [] }
   const rawItems = (parsed as { items?: unknown } | null)?.items
   if (!Array.isArray(rawItems)) return { ok: false, items: [] }
