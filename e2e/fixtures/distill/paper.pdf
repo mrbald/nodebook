@@ -1,0 +1,1202 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R 14 0 R 16 0 R 18 0 R 20 0 R 22 0 R 24 0 R 26 0 R 28 0 R 30 0 R 32 0 R 34 0 R 36 0 R 38 0 R 40 0 R 42 0 R 44 0 R] /Count 21 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 6036 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (PART I: THE SPECIAL THEORY OF RELATIVITY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (I. Physical Meaning of Geometrical Propositions) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (In your schooldays most of you who read this book made acquaintance with the noble building) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (of Euclid's geometry, and you remember--perhaps with more respect than love--the magnificent) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (structure, on the lofty staircase of which you were chased about for uncounted hours by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (conscientious teachers. By reason of our past experience, you would certainly regard) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (everyone with disdain who should pronounce even the most out-of-the-way proposition of this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (science to be untrue. But perhaps this feeling of proud certainty would leave you) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (immediately if some one were to ask you: "What, then, do you mean by the assertion that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (these propositions are true?" Let us proceed to give this question a little consideration.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (Geometry sets out from certain conceptions such as "plane," "point," and "straight line,") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (with which we are able to associate more or less definite ideas, and from certain simple) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (propositions \(axioms\) which, in virtue of these ideas, we are inclined to accept as "true.") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (Then, on the basis of a logical process, the justification of which we feel ourselves) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (compelled to admit, all remaining propositions are shown to follow from those axioms, i.e.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (they are proven. A proposition is then correct \("true"\) when it has been derived in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (recognised manner from the axioms. The question of "truth" of the individual geometrical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (propositions is thus reduced to one of the "truth" of the axioms. Now it has long been known) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (that the last question is not only unanswerable by the methods of geometry, but that it is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (in itself entirely without meaning. We cannot ask whether it is true that only one straight) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (line goes through two points. We can only say that Euclidean geometry deals with things) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (called "straight lines," to each of which is ascribed the property of being uniquely) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (determined by two points situated on it. The concept "true" does not tally with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (assertions of pure geometry, because by the word "true" we are eventually in the habit of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (designating always the correspondence with a "real" object; geometry, however, is not) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (concerned with the relation of the ideas involved in it to objects of experience, but only) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (with the logical connection of these ideas among themselves.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (It is not difficult to understand why, in spite of this, we feel constrained to call the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (propositions of geometry "true." Geometrical ideas correspond to more or less exact objects) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (in nature, and these last are undoubtedly the exclusive cause of the genesis of those ideas.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (Geometry ought to refrain from such a course, in order to give to its structure the largest) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (possible logical unity. The practice, for example, of seeing in a "distance" two marked) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (positions on a practically rigid body is something which is lodged deeply in our habit of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (thought. We are accustomed further to regard three points as being situated on a straight) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (line, if their apparent positions can be made to coincide for observation with one eye,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (under suitable choice of our place of observation.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (If, in pursuance of our habit of thought, we now supplement the propositions of Euclidean) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (geometry by the single proposition that two points on a practically rigid body always) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (correspond to the same distance \(line-interval\), independently of any changes in position to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (which we may subject the body, the propositions of Euclidean geometry then resolve) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (themselves into propositions on the possible relative position of practically rigid bodies.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (Geometry which has been supplemented in this way is then to be treated as a branch of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (physics. We can now legitimately ask as to the "truth" of geometrical propositions) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (interpreted in this way, since we are justified in asking whether these propositions are) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (satisfied for those real things we have associated with the geometrical ideas. In less exact) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (terms we can express this by saying that by the "truth" of a geometrical proposition in this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (sense we understand its validity for a construction with rule and compasses.) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 1 -) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 5544 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (Of course the conviction of the "truth" of geometrical propositions in this sense is founded) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (exclusively on rather incomplete experience. For the present we shall assume the "truth" of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (the geometrical propositions, then at a later stage \(in the general theory of relativity\) we) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (shall see that this "truth" is limited, and we shall consider the extent of its limitation.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (II. The System of Co-ordinates) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (On the basis of the physical interpretation of distance which has been indicated, we are) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (also in a position to establish the distance between two points on a rigid body by means of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (measurements. For this purpose we require a "distance" \(rod S\) which is to be used once and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (for all, and which we employ as a standard measure. If, now, A and B are two points on a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (rigid body, we can construct the line joining them according to the rules of geometry; then,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (starting from A, we can mark off the distance S time after time until we reach B. The number) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (of these operations required is the numerical measure of the distance AB. This is the basis) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (of all measurement of length.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (Every description of the scene of an event or of the position of an object in space is based) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (on the specification of the point on a rigid body \(body of reference\) with which that event) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (or object coincides. This applies not only to scientific description, but also to everyday) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (life. If I analyse the place specification "Trafalgar Square, London" I arrive at the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (following result. The earth is the rigid body to which the specification of place refers;) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm ("Trafalgar Square, London" is a well-defined point, to which a name has been assigned, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (with which the event coincides in space.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (I have chosen this as being more familiar to the English reader than the "Potzdammer Platz,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (Berlin," which is referred to in the original. \(R. W. L.\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (This primitive method of place specification deals only with places on the surface of rigid) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (bodies, and is dependent on the existence of points on this surface which are) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (distinguishable from each other. But we can free ourselves from both of these limitations) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (without altering the nature of our specification of position. If, for instance, a cloud is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (hovering over Trafalgar Square, then we can determine its position relative to the surface) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (of the earth by erecting a pole perpendicularly on the Square, so that it reaches the cloud.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (The length of the pole measured with the standard measuring-rod, combined with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (specification of the position of the foot of the pole, supplies us with a complete place) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (specification. On the basis of this illustration, we are able to see the manner in which a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (refinement of the conception of position has been developed.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (\(a\) We imagine the rigid body, to which the place specification is referred, supplemented in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (such a manner that the object whose position we require is reached by the completed rigid) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (body.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (\(b\) In locating the position of the object, we make use of a number \(here the length of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (pole measured with the measuring-rod\) instead of designated points of reference.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (\(c\) We speak of the height of the cloud even when the pole which reaches the cloud has not) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (been erected. By means of optical observations of the cloud from different positions on the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (ground, and taking into account the properties of the propagation of light, we determine the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (length of the pole we should have required in order to reach the cloud.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (From this consideration we see that it will be advantageous if, in the description of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (position, it should be possible by means of numerical measures to make ourselves independent) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (of the existence of marked positions \(possessing names\) on the rigid body of reference. In) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 2 -) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 5835 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (the physics of measurement this is attained by the application of the Cartesian system of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (co-ordinates.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (This consists of three plane surfaces perpendicular to each other and rigidly attached to a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (rigid body. Referred to a system of co-ordinates, the scene of any event will be determined) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (\(for the main part\) by the specification of the lengths of the three perpendiculars or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (co-ordinates \(x, y, z\) which can be dropped from the scene of the event to those three plane) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (surfaces. The lengths of these three perpendiculars can be determined by a series of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (manipulations with rigid measuring-rods performed according to the rules and methods laid) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (down by Euclidean geometry.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (In practice, the rigid surfaces which constitute the system of co-ordinates are generally) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (not available; furthermore, the magnitudes of the co-ordinates are not actually determined) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (by constructions with rigid rods, but by indirect means. If the results of physics and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (astronomy are to maintain their clearness, the physical meaning of specifications of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (position must always be sought in accordance with the above considerations.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (We thus obtain the following result: Every description of events in space involves the use) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (of a rigid body to which such events have to be referred. The resulting relationship takes) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (for granted that the laws of Euclidean geometry hold for "distances;" the "distance" being) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (represented physically by means of the convention of two marks on a rigid body.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (III. Space and Time in Classical Mechanics) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (The purpose of mechanics is to describe how bodies change their position in space with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm ("time." I should load my conscience with grave sins against the sacred spirit of lucidity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (were I to formulate the aims of mechanics in this way, without serious reflection and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (detailed explanations. Let us proceed to disclose these sins.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (It is not clear what is to be understood here by "position" and "space." I stand at the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (window of a railway carriage which is travelling uniformly, and drop a stone on the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (embankment, without throwing it. Then, disregarding the influence of the air resistance, I) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (see the stone descend in a straight line. A pedestrian who observes the misdeed from the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (footpath notices that the stone falls to earth in a parabolic curve. I now ask: Do the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm ("positions" traversed by the stone lie "in reality" on a straight line or on a parabola?) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (Moreover, what is meant here by motion "in space"? From the considerations of the previous) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (section the answer is self-evident. In the first place we entirely shun the vague word) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm ("space," of which, we must honestly acknowledge, we cannot form the slightest conception,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (and we replace it by "motion relative to a practically rigid body of reference." The) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (positions relative to the body of reference \(railway carriage or embankment\) have already) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (been defined in detail in the preceding section. If instead of "body of reference" we insert) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm ("system of co-ordinates," which is a useful idea for mathematical description, we are in a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (position to say: The stone traverses a straight line relative to a system of co-ordinates) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (rigidly attached to the carriage, but relative to a system of co-ordinates rigidly attached) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (to the ground \(embankment\) it describes a parabola. With the aid of this example it is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (clearly seen that there is no such thing as an independently existing trajectory \(lit.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm ("path-curve", but only a trajectory relative to a particular body of reference.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (In order to have a complete description of the motion, we must specify how the body alters) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (its position with time; i.e. for every point on the trajectory it must be stated at what) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (time the body is situated there. These data must be supplemented by such a definition of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (time that, in virtue of this definition, these time-values can be regarded essentially as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (magnitudes \(results of measurements\) capable of observation. If we take our stand on the) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 3 -) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 5809 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (ground of classical mechanics, we can satisfy this requirement for our illustration in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (following manner. We imagine two clocks of identical construction; the man at the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (railway-carriage window is holding one of them, and the man on the footpath the other. Each) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (of the observers determines the position on his own reference-body occupied by the stone at) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (each tick of the clock he is holding in his hand. In this connection we have not taken) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (account of the inaccuracy involved by the finiteness of the velocity of propagation of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (light. With this and with a second difficulty prevailing here we shall have to deal in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (detail later.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (IV. THE GALILEIAN SYSTEM OF CO-ORDINATES) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (As is well known, the fundamental law of the mechanics of Galilei-Newton, which is known as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (the law of inertia, can be stated thus: A body removed sufficiently far from other bodies) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (continues in a state of rest or of uniform motion in a straight line. This law not only says) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (something about the motion of the bodies, but it also indicates the reference-bodies or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (systems of coordinates, permissible in mechanics, which can be used in mechanical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (description. The visible fixed stars are bodies for which the law of inertia certainly holds) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (to a high degree of approximation. Now if we use a system of co-ordinates which is rigidly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (attached to the earth, then, relative to this system, every fixed star describes a circle of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (immense radius in the course of an astronomical day, a result which is opposed to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (statement of the law of inertia. So that if we adhere to this law we must refer these) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (motions only to systems of coordinates relative to which the fixed stars do not move in a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (circle. A system of co-ordinates of which the state of motion is such that the law of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (inertia holds relative to it is called a "Galileian system of co-ordinates." The laws of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (mechanics of Galilei-Newton can be regarded as valid only for a Galileian system of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (co-ordinates.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (V. The Principle of Relativity \(in the Restricted Sense\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (In order to attain the greatest possible clearness, let us return to our example of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (railway carriage supposed to be travelling uniformly. We call its motion a uniform) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (translation \("uniform" because it is of constant velocity and direction, "translation") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (because although the carriage changes its position relative to the embankment yet it does) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (not rotate in so doing\). Let us imagine a raven flying through the air in such a manner that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (its motion, as observed from the embankment, is uniform and in a straight line. If we were) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (to observe the flying raven from the moving railway carriage. we should find that the motion) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (of the raven would be one of different velocity and direction, but that it would still be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (uniform and in a straight line. Expressed in an abstract manner we may say: If a mass m is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (moving uniformly in a straight line with respect to a co-ordinate system K, then it will) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (also be moving uniformly and in a straight line relative to a second co-ordinate system K') Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (provided that the latter is executing a uniform translatory motion with respect to K. In) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (accordance with the discussion contained in the preceding section, it follows that:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (If K is a Galileian co-ordinate system. then every other co-ordinate system K' is a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (Galileian one, when, in relation to K, it is in a condition of uniform motion of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (translation. Relative to K' the mechanical laws of Galilei-Newton hold good exactly as they) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (do with respect to K.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (We advance a step farther in our generalisation when we express the tenet thus: If, relative) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (to K, K' is a uniformly moving co-ordinate system devoid of rotation, then natural phenomena) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (run their course with respect to K' according to exactly the same general laws as with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (respect to K. This statement is called the principle of relativity \(in the restricted) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (sense\).) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 4 -) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 13 0 R >>
+endobj
+13 0 obj
+<< /Length 5961 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (As long as one was convinced that all natural phenomena were capable of representation with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (the help of classical mechanics, there was no need to doubt the validity of this principle) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (of relativity. But in view of the more recent development of electrodynamics and optics it) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (became more and more evident that classical mechanics affords an insufficient foundation for) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (the physical description of all natural phenomena. At this juncture the question of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (validity of the principle of relativity became ripe for discussion, and it did not appear) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (impossible that the answer to this question might be in the negative.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (Nevertheless, there are two general facts which at the outset speak very much in favour of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (the validity of the principle of relativity. Even though classical mechanics does not supply) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (us with a sufficiently broad basis for the theoretical presentation of all physical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (phenomena, still we must grant it a considerable measure of "truth," since it supplies us) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (with the actual motions of the heavenly bodies with a delicacy of detail little short of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (wonderful. The principle of relativity must therefore apply with great accuracy in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (domain of mechanics. But that a principle of such broad generality should hold with such) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (exactness in one domain of phenomena, and yet should be invalid for another, is a priori not) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (very probable.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (We now proceed to the second argument, to which, moreover, we shall return later. If the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (principle of relativity \(in the restricted sense\) does not hold, then the Galileian) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (co-ordinate systems K, K', K", etc., which are moving uniformly relative to each other, will) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (not be equivalent for the description of natural phenomena. In this case we should be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (constrained to believe that natural laws are capable of being formulated in a particularly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (simple manner, and of course only on condition that, from amongst all possible Galileian) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (co-ordinate systems, we should have chosen one \(K0\) of a particular state of motion as our) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (body of reference. We should then be justified \(because of its merits for the description of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (natural phenomena\) in calling this system "absolutely at rest," and all other Galileian) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (systems K "in motion." If, for instance, our embankment were the system K0 then our rail-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (way carriage would be a system K, relative to which less simple laws would hold than with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (respect to K0. This diminished simplicity would be due to the fact that the carriage K would) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (be in motion \(i.e. "really"\)with respect to K0. In the general laws of nature which have) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (been formulated with reference to K, the magnitude and direction of the velocity of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (carriage would necessarily play a part. We should expect, for instance, that the note) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (emitted by an organpipe placed with its axis parallel to the direction of travel would be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (different from that emitted if the axis of the pipe were placed perpendicular to this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (direction.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (Now in virtue of its motion in an orbit round the sun, our earth is comparable with a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (railway carriage travelling with a velocity of about 30 kilometres per second. If the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (principle of relativity were not valid we should therefore expect that the direction of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (motion of the earth at any moment would enter into the laws of nature, and also that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (physical systems in their behaviour would be dependent on the orientation in space with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (respect to the earth. For owing to the alteration in direction of the velocity of revol-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (ution of the earth in the course of a year, the earth cannot be at rest relative to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (hypothetical system K0 throughout the whole year. However, the most careful observations) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (have never revealed such anisotropic properties in terrestrial physical space, i.e. a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (physical non-equivalence of different directions. This is very powerful argument in favour) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (of the principle of relativity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (VI. The Theorem of the Addition of Velocities Employed in Classical Mechanics) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (Let us suppose our old friend the railway carriage to be travelling along the rails with a) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 5 -) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 15 0 R >>
+endobj
+15 0 obj
+<< /Length 5899 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (constant velocity v, and that a man traverses the length of the carriage in the direction of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (travel with a velocity w. How quickly or, in other words, with what velocity W does the man) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (advance relative to the embankment during the process? The only possible answer seems to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (result from the following consideration: If the man were to stand still for a second, he) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (would advance relative to the embankment through a distance v equal numerically to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (velocity of the carriage. As a consequence of his walking, however, he traverses an) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (additional distance w relative to the carriage, and hence also relative to the embankment,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (in this second, the distance w being numerically equal to the velocity with which he is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (walking. Thus in total he covers the distance W = v + w relative to the embankment in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (second considered. We shall see later that this result, which expresses the theorem of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (addition of velocities employed in classical mechanics, cannot be maintained; in other) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (words, the law that we have just written down does not hold in reality. For the time being,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (however, we shall assume its correctness.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (VII. The Apparent Incompatibility of the Law of Propagation of Light with the Principle of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (Relativity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (There is hardly a simpler law in physics than that according to which light is propagated in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (empty space. Every child at school knows, or believes he knows, that this propagation takes) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (place in straight lines with a velocity c = 300,000 km./sec. At all events we know with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (great exactness that this velocity is the same for all colours, because if this were not the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (case, the minimum of emission would not be observed simultaneously for different colours) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (during the eclipse of a fixed star by its dark neighbour. By means of similar conside-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (rations based on observations of double stars, the Dutch astronomer De Sitter was also able to show) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (that the velocity of propagation of light cannot depend on the velocity of motion of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (body emitting the light. The assumption that this velocity of propagation is dependent on) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (the direction "in space" is in itself improbable.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (In short, let us assume that the simple law of the constancy of the velocity of light c \(in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (vacuum\) is justifiably believed by the child at school. Who would imagine that this simple) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (law has plunged the conscientiously thoughtful physicist into the greatest intell-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (ectual difficulties? Let us consider how these difficulties arise.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (Of course we must refer the process of the propagation of light \(and indeed every other) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (process\) to a rigid reference-body \(co-ordinate system\). As such a system let us again) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (choose our embankment. We shall imagine the air above it to have been removed. If a ray of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (light be sent along the embankment, we see from the above that the tip of the ray will be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (transmitted with the velocity c relative to the embankment. Now let us suppose that our) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (railway carriage is again travelling along the railway lines with the velocity v, and that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (its direction is the same as that of the ray of light, but its velocity of course much less.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (Let us inquire about the velocity of propagation of the ray of light relative to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (carriage. It is obvious that we can here apply the consideration of the previous section,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (since the ray of light plays the part of the man walking along relatively to the carriage.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (The velocity W of the man relative to the embankment is here replaced by the velocity of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (light relative to the embankment. w is the required velocity of light with respect to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (carriage, and we have) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (The velocity of propagation ot a ray of light relative to the carriage thus comes out) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (smaller than c.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (But this result comes into conflict with the principle of relativity set forth in Section V.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (For, like every other general law of nature, the law of the transmission of light in vacuo) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm ([in vacuum] must, according to the principle of relativity, be the same for the railway) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 6 -) Tj ET
+endstream
+endobj
+16 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 17 0 R >>
+endobj
+17 0 obj
+<< /Length 6261 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (carriage as reference-body as when the rails are the body of reference. But, from our above) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (consideration, this would appear to be impossible. If every ray of light is propa-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (gated relative to the embankment with the velocity c, then for this reason it would appear that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (another law of propagation of light must necessarily hold with respect to the carriage--a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (result contradictory to the principle of relativity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (In view of this dilemma there appears to be nothing else for it than to abandon either the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (principle of relativity or the simple law of the propagation of light in vacuo. Those of you) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (who have carefully followed the preceding discussion are almost sure to expect that we) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (should retain the principle of relativity, which appeals so convincingly to the intellect) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (because it is so natural and simple. The law of the propagation of light in vacuo would then) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (have to be replaced by a more complicated law conformable to the principle of relativity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (The development of theoretical physics shows, however, that we cannot pursue this course.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (The epoch-making theoretical investigations of H. A. Lorentz on the electrodynamical and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (optical phenomena connected with moving bodies show that experience in this domain leads) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (conclusively to a theory of electromagnetic phenomena, of which the law of the constancy of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (the velocity of light in vacuo is a necessary consequence. Prominent theoretical physicists) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (were therefore more inclined to reject the principle of relativity, in spite of the fact) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (that no empirical data had been found which were contradictory to this principle.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (At this juncture the theory of relativity entered the arena. As a result of an analysis of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (the physical conceptions of time and space, it became evident that in reality there is not) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (the least incompatibilitiy between the principle of relativity and the law of propagation of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (light, and that by systematically holding fast to both these laws a logically rigid theory) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (could be arrived at. This theory has been called the special theory of relativity to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (distinguish it from the extended theory, with which we shall deal later. In the following) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (pages we shall present the fundamental ideas of the special theory of relativity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (VIII. On the Idea of Time in Physics) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (Lightning has struck the rails on our railway embankment at two places A and B far distant) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (from each other. I make the additional assertion that these two lightning flashes occurred) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (simultaneously. If I ask you whether there is sense in this statement, you will answer my) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (question with a decided "Yes." But if I now approach you with the request to explain to me) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (the sense of the statement more precisely, you find after some consideration that the answer) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (to this question is not so easy as it appears at first sight.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (After some time perhaps the following answer would occur to you: "The significance of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (statement is clear in itself and needs no further explanation; of course it would require) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (some consideration if I were to be commissioned to determine by observations whether in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (actual case the two events took place simultaneously or not." I cannot be satisfied with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (this answer for the following reason. Supposing that as a result of ingenious considerations) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (an able meteorologist were to discover that the lightning must always strike the places A) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (and B simultaneously, then we should be faced with the task of testing whether or not this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (theoretical result is in accordance with the reality. We encounter the same difficulty with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (all physical statements in which the conception "simultaneous" plays a part. The conc-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (ept does not exist for the physicist until he has the possibility of discovering whether or not) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (it is fulfilled in an actual case. We thus require a definition of simultaneity such that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (this definition supplies us with the method by means of which, in the present case, he can) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (decide by experiment whether or not both the lightning strokes occurred simultaneously. As) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (long as this requirement is not satisfied, I allow myself to be deceived as a physicist \(and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (of course the same applies if I am not a physicist\), when I imagine that I am able to attach) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (a meaning to the statement of simultaneity. \(I would ask the reader not to proceed farther) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 7 -) Tj ET
+endstream
+endobj
+18 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 19 0 R >>
+endobj
+19 0 obj
+<< /Length 5902 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (until he is fully convinced on this point.\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (After thinking the matter over for some time you then offer the following suggestion with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (which to test simultaneity. By measuring along the rails, the connecting line AB should be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (measured up and an observer placed at the mid-point M of the distance AB. This observer) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (should be supplied with an arrangement \(e.g. two mirrors inclined at 90 degrees\) which) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (allows him visually to observe both places A and B at the same time. If the observer) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (perceives the two flashes of lightning at the same time, then they are simultaneous.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (I am very pleased with this suggestion, but for all that I cannot regard the matter as quite) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (settled, because I feel constrained to raise the following objection: "Your definition would) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (certainly be right, if only I knew that the light by means of which the observer at M) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (perceives the lightning flashes travels along the length A to M with the same velocity as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (along the length B to M. But an examination of this supposition would only be possible if we) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (already had at our disposal the means of measuring time. It would thus appear as though we) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (were moving here in a logical circle.") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (After further consideration you cast a somewhat disdainful glance at me--and rightly so--and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (you declare: "I maintain my previous definition nevertheless, because in reality it assumes) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (absolutely nothing about light. There is only one demand to be made of the definition of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (simultaneity, namely, that in every real case it must supply us with an empirical decision) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (as to whether or not the conception that has to be defined is fulfilled. That my defin-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (ition satisfies this demand is indisputable. That light requires the same time to traverse the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (path A to M as for the path B to M is in reality neither a supposition nor a hypothesis) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (about the physical nature of light, but a stipulation which I can make of my own freewill in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (order to arrive at a definition of simultaneity.") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (It is clear that this definition can be used to give an exact meaning not only to two) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (events, but to as many events as we care to choose, and independently of the positions of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (the scenes of the events with respect to the body of reference \(here the railway) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (embankment\). We are thus led also to a definition of "time" in physics. For this purpose we) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (suppose that clocks of identical construction are placed at the points A, B and C of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (railway line \(co-ordinate system\) and that they are set in such a manner that the posit-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (ions of their pointers are simultaneously \(in the above sense\) the same. Under these conditions) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (we understand by the "time" of an event the reading \(position of the hands\) of that one of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (these clocks which is in the immediate vicinity \(in space\) of the event. In this manner a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (time-value is associated with every event which is essentially capable of observation.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (This stipulation contains a further physical hypothesis, the validity of which will hardly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (be doubted without empirical evidence to the contrary. It has been assumed that all these) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (clocks go at the same rate if they are of identical construction. Stated more exactly: When) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (two clocks arranged at rest in different places of a reference-body are set in such a manner) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (that a particular position of the pointers of the one clock is simultaneous \(in the above) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (sense\) with the same position, of the pointers of the other clock, then identical "settings") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (are always simultaneous \(in the sense of the above definition\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (IX. The Relativity of Simultaneity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (Up to now our considerations have been referred to a particular body of reference, which we) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (have styled a "railway embankment." We suppose a very long train travelling along the rails) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (with the constant velocity v and in the direction indicated in Fig 1. People travelling in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (this train will with a vantage view the train as a rigid reference-body \(co-ordinate) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (system\); they regard all events in reference to the train. Then every event which takes) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 8 -) Tj ET
+endstream
+endobj
+20 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 21 0 R >>
+endobj
+21 0 obj
+<< /Length 5718 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (place along the line also takes place at a particular point of the train. Also the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (definition of simultaneity can be given relative to the train in exactly the same way as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (with respect to the embankment. As a natural consequence, however, the following question) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (arises:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (Are two events \(e.g. the two strokes of lightning A and B\) which are simultaneous with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (reference to the railway embankment also simultaneous relatively to the train? We shall show) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (directly that the answer must be in the negative.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (When we say that the lightning strokes A and B are simultaneous with respect to be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (embankment, we mean: the rays of light emitted at the places A and B, where the lightning) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (occurs, meet each other at the mid-point M of the length A to B of the embankment. But the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (events A and B also correspond to positions A and B on the train. Let M' be the mid-point of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (the distance A to B on the travelling train. Just when the flashes \(as judged from the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (embankment\) of lightning occur, this point M' naturally coincides with the point M but it) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (moves towards the right in the diagram with the velocity v of the train. If an observer) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (sitting in the position M' in the train did not possess this velocity, then he would remain) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (permanently at M, and the light rays emitted by the flashes of lightning A and B would reach) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (him simultaneously, i.e. they would meet just where he is situated. Now in reality) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (\(considered with reference to the railway embankment\) he is hastening towards the beam of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (light coming from B, whilst he is riding on ahead of the beam of light coming from A. Hence) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (the observer will see the beam of light emitted from B earlier than he will see that emitted) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (from A. Observers who take the railway train as their reference-body must therefore come to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (the conclusion that the lightning flash B took place earlier than the lightning flash A. We) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (thus arrive at the important result:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (Events which are simultaneous with reference to the embankment are not simultaneous with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (respect to the train, and vice versa \(relativity of simultaneity\). Every reference-body) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (\(co-ordinate system\) has its own particular time; unless we are told the reference-body to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (which the statement of time refers, there is no meaning in a statement of the time of an) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (event.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (Now before the advent of the theory of relativity it had always tacitly been assumed in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (physics that the statement of time had an absolute significance, i.e. that it is independent) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (of the state of motion of the body of reference. But we have just seen that this assumption) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (is incompatible with the most natural definition of simultaneity; if we discard this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (assumption, then the conflict between the law of the propagation of light in vacuo and the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (principle of relativity \(developed in Section VII\) disappears.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (We were led to that conflict by the considerations of Section VI, which are now no longer) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (tenable. In that section we concluded that the man in the carriage, who traverses the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (distance w per second relative to the carriage, traverses the same distance also with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (respect to the embankment in each second of time. But, according to the foregoing) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (considerations, the time required by a particular occurrence with respect to the carriage) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (must not be considered equal to the duration of the same occurrence as judged from the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (embankment \(as reference-body\). Hence it cannot be contended that the man in walking travels) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (the distance w relative to the railway line in a time which is equal to one second as judged) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (from the embankment.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (Moreover, the considerations of Section VI are based on yet a second assumption, which, in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (the light of a strict consideration, appears to be arbitrary, although it was always tacitly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (made even before the introduction of the theory of relativity.) Tj ET
+BT /F1 9 Tf 1 0 0 1 295 40 Tm (- 9 -) Tj ET
+endstream
+endobj
+22 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 23 0 R >>
+endobj
+23 0 obj
+<< /Length 5645 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (X. On the Relativity of the Conception of Distance) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (Let us consider two particular points on the train travelling along the embankment with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (velocity v, and inquire as to their distance apart. We already know that it is necessary to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (have a body of reference for the measurement of a distance, with respect to which body the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (distance can be measured up. It is the simplest plan to use the train itself as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (reference-body \(co-ordinate system\). An observer in the train measures the interval by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (marking off his measuring-rod in a straight line \(e.g. along the floor of the carriage\) as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (many times as is necessary to take him from the one marked point to the other. Then the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (number which tells us how often the rod has to be laid down is the required distance.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (It is a different matter when the distance has to be judged from the railway line. Here the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (following method suggests itself. If we call A' and B' the two points on the train whose) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (distance apart is required, then both of these points are moving with the velocity v along) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (the embankment. In the first place we require to determine the points A and B of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (embankment which are just being passed by the two points A' and B' at a particular time) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (t--judged from the embankment. These points A and B of the embankment can be determined by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (applying the definition of time given in Section VIII. The distance between these points A) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (and B is then measured by repeated application of the measuring-rod along the embankment.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (A priori it is by no means certain that this last measurement will supply us with the same) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (result as the first. Thus the length of the train as measured from the embankment may be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (different from that obtained by measuring in the train itself. This circumstance leads us to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (a second objection which must be raised against the apparently obvious consideration of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (Section VI. Namely, if the man in the carriage covers the distance w in a unit of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (time--measured from the train,--then this distance--as measured from the embankment is not) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (necessarily also equal to w.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (XI. The Lorentz Transformation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (The results of the last three sections show that the apparent incompatibility of the law of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (propagation of light with the principle of relativity \(Section VII\) has been derived by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (means of a consideration which borrowed two unjustifiable hypotheses from classical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (mechanics; these are as follows:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (\(1\) The time-interval \(time\) between two events is independent of the condition of motion of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (the body of reference.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (\(2\) The space-interval \(distance\) between two points of a rigid body is independent of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (condition of motion of the body of reference.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (If we drop these hypotheses, then the dilemma of Section VII disappears, because the theorem) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (of the addition of velocities derived in Section VI becomes invalid. The possibility) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (presents itself that the law of the propagation of light in vacuo may be compatible with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (principle of relativity, and the question arises: How have we to modify the considerations) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (of Section VI in order to remove the apparent disagreement between these two fundamental) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (results of experience? This question leads to a general one. In the discussion of Section VI) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (we have to do with places and times relative both to the train and to the embankment. How) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (are we to find the place and time of an event in relation to the train, when we know the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (place and time of the event with respect to the railway embankment? Is there a thinkable) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (answer to this question of such a nature that the law of transmission of light in vacuo does) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (not contradict the principle of relativity? In other words: Can we conceive of a relation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (between place and time of the individual events relative to both reference-bodies, such that) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 10 -) Tj ET
+endstream
+endobj
+24 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 25 0 R >>
+endobj
+25 0 obj
+<< /Length 5641 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (every ray of light possesses the velocity of transmission c relative to the embankment and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (relative to the train? This question leads to a quite definite positive answer, and to a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (perfectly definite transformation law for the space-time magnitudes of an event when) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (changing over from one body of reference to another.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (Before we deal with this, we shall introduce the following incidental consideration. Up to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (the present we have only considered events taking place along the embankment, which had) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (mathematically to assume the function of a straight line. In the manner indicated in Section) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (II we can imagine this reference-body supplemented laterally and in a vertical direction by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (means of a framework of rods, so that an event which takes place anywhere can be localised) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (with reference to this framework. Similarly, we can imagine the train travelling with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (velocity v to be continued across the whole of space, so that every event, no matter how far) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (off it may be, could also be localised with respect to the second framework. Without) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (committing any fundamental error, we can disregard the fact that in reality these frameworks) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (would continually interfere with each other, owing to the impenetrability of solid bodies.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (In every such framework we imagine three surfaces perpendicular to each other marked out,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (and designated as "co-ordinate planes" \("co-ordinate system"\). A co-ordinate system K then) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (corresponds to the embankment, and a co-ordinate system K' to the train. An event, wherever) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (it may have taken place, would be fixed in space with respect to K by the three) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (perpendiculars x, y, z on the co-ordinate planes, and with regard to time by a time value t.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (Relative to K', the same event would be fixed in respect of space and time by corresponding) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (values x', y', z', t', which of course are not identical with x, y, z, t. It has already) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (been set forth in detail how these magnitudes are to be regarded as results of physical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (measurements.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (Obviously our problem can be exactly formulated in the following manner. What are the values) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (x', y', z', t', of an event with respect to K', when the magnitudes x, y, z, t, of the same) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (event with respect to K are given? The relations must be so chosen that the law of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (transmission of light in vacuo is satisfied for one and the same ray of light \(and of course) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (for every ray\) with respect to K and K'. For the relative orientation in space of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (co-ordinate systems indicated in the diagram \(Fig. 2\), this problem is solved by means of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (the equations:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (This system of equations is known as the "Lorentz transformation.") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (If in place of the law of transmission of light we had taken as our basis the tacit) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (assumptions of the older mechanics as to the absolute character of times and lengths, then) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (instead of the above we should have obtained the following equations:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (This system of equations is often termed the "Galilei transformation." The Galilei) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (transformation can be obtained from the Lorentz transformation by substituting an infinitely) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (large value for the velocity of light c in the latter transformation.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (Aided by the following illustration, we can readily see that, in accordance with the Lorentz) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (transformation, the law of the transmission of light in vacuo is satisfied both for the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (reference-body K and for the reference-body K'. A light-signal is sent along the positive) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (x-axis, and this light-stimulus advances in accordance with the equation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (i.e. with the velocity c. According to the equations of the Lorentz transformation, this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (simple relation between x and t involves a relation between x' and t'. In point of fact, if) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (we substitute for x the value ct in the first and fourth equations of the Lorentz) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (transformation, we obtain:) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 11 -) Tj ET
+endstream
+endobj
+26 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 27 0 R >>
+endobj
+27 0 obj
+<< /Length 4797 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (from which, by division, the expression) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (immediately follows. If referred to the system K', the propagation of light takes place) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (according to this equation. We thus see that the velocity of transmission relative to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (reference-body K' is also equal to c. The same result is obtained for rays of light) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (advancing in any other direction whatsoever. Of cause this is not surprising, since the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (equations of the Lorentz transformation were derived conformably to this point of view.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (XII. The Behaviour of Measuring-rods and Clocks in Motion) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (Place a metre-rod in the x'-axis of K' in such a manner that one end \(the beginning\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (coincides with the point x' = 0 whilst the other end \(the end of the rod\) coincides with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (point x' = 1. What is the length of the metre-rod relatively to the system K? In order to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (learn this, we need only ask where the beginning of the rod and the end of the rod lie with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (respect to K at a particular time t of the system K. By means of the first equation of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (Lorentz transformation the values of these two points at the time t = 0 can be shown to be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (the distance between the points being) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (But the metre-rod is moving with the velocity v relative to K. It therefore follows that the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (length of a rigid metre-rod moving in the direction of its length with a velocity v is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (of a metre. The rigid rod is thus shorter when in motion than when at rest, and the more) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (quickly it is moving, the shorter is the rod. For the velocity v = c we should have) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (and for still greater velocities the square-root becomes imaginary. From this we conclude) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (that in the theory of relativity the velocity c plays the part of a limiting velocity, which) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (can neither be reached nor exceeded by any real body.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (Of course this feature of the velocity c as a limiting velocity also clearly follows from) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (the equations of the Lorentz transformation, for these became meaningless if we choose) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (values of v greater than c.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (If, on the contrary, we had considered a metre-rod at rest in the x-axis with respect to K,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (then we should have found that the length of the rod as judged from K' would have been) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (this is quite in accordance with the principle of relativity which forms the basis of our) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (considerations.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (A priori it is quite clear that we must be able to learn something about the physical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (behaviour of measuring-rods and clocks from the equations of transformation, for the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (magnitudes z, y, x, t, are nothing more nor less than the results of measurements obtainable) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (by means of measuring-rods and clocks. If we had based our considerations on the Galileian) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (transformation we should not have obtained a contraction of the rod as a consequence of its) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (motion.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (Let us now consider a seconds-clock which is permanently situated at the origin \(x' = 0\) of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (K'. t' = 0 and t' = 1 are two successive ticks of this clock. The first and fourth equations) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (of the Lorentz transformation give for these two ticks:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (As judged from K, the clock is moving with the velocity v; as judged from this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (reference-body, the time which elapses between two strokes of the clock is not one second,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (but) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 12 -) Tj ET
+endstream
+endobj
+28 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 29 0 R >>
+endobj
+29 0 obj
+<< /Length 5153 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (seconds, i.e. a somewhat larger time. As a consequence of its motion the clock goes more) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (slowly than when at rest. Here also the velocity c plays the part of an unattainable) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (limiting velocity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (XIII. Theorem of the Addition of Velocities. the Experiment of Fizeau) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (Now in practice we can move clocks and measuring-rods only with velocities that are small) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (compared with the velocity of light; hence we shall hardly be able to compare the results of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (the previous section directly with the reality. But, on the other hand, these results must) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (strike you as being very singular, and for that reason I shall now draw another conclusion) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (from the theory, one which can easily be derived from the foregoing considerations, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (which has been most elegantly confirmed by experiment.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (In Section VI we derived the theorem of the addition of velocities in one direction in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (form which also results from the hypotheses of classical mechanics. This theorem can also be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (deduced readily from the Galilei transformation \(Section XI\). In place of the man walking) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (inside the carriage, we introduce a point moving relatively to the co-ordinate system K' in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (accordance with the equation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (By means of the first and fourth equations of the Galilei transformation we can express x') Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (and t' in terms of x and t, and we then obtain) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (This equation expresses nothing else than the law of motion of the point with reference to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (the system K \(of the man with reference to the embankment\). We denote this velocity by the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (symbol W, and we then obtain, as in Section VI,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (But we can carry out this consideration just as well on the basis of the theory of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (relativity. In the equation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (we must then express x' and t' in terms of x and t, making use of the first and fourth) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (equations of the Lorentz transformation. Instead of the equation \(A\) we then obtain the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (equation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (which corresponds to the theorem of addition for velocities in one direction according to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (the theory of relativity. The question now arises as to which of these two theorems is the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (better in accord with experience. On this point we are enlightened by a most important) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (experiment which the brilliant physicist Fizeau performed more than half a century ago, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (which has been repeated since then by some of the best experimental physicists, so that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (there can be no doubt about its result. The experiment is concerned with the following) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (question. Light travels in a motionless liquid with a particular velocity w. How quickly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (does it travel in the direction of the arrow in the tube T \(see the accompanying diagram,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (Fig. 3\) when the liquid above mentioned is flowing through the tube with a velocity v?) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (In accordance with the principle of relativity we shall certainly have to take for granted) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (that the propagation of light always takes place with the same velocity w with respect to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (the liquid, whether the latter is in motion with reference to other bodies or not. The) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (velocity of light relative to the liquid and the velocity of the latter relative to the tube) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (are thus known, and we require the velocity of light relative to the tube.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (It is clear that we have the problem of Section VI again before us. The tube plays the part) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (of the railway embankment or of the co-ordinate system K, the liquid plays the part of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (carriage or of the co-ordinate system K', and finally, the light plays the part of the man) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 13 -) Tj ET
+endstream
+endobj
+30 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 31 0 R >>
+endobj
+31 0 obj
+<< /Length 5385 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (walking along the carriage, or of the moving point in the present section. If we denote the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (velocity of the light relative to the tube by W, then this is given by the equation \(A\) or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (\(B\), according as the Galilei transformation or the Lorentz transformation corresponds to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (the facts. Experiment decides in favour of equation \(B\) derived from the theory of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (relativity, and the agreement is, indeed, very exact. According to recent and most excellent) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (measurements by Zeeman, the influence of the velocity of flow v on the propagation of light) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (is represented by formula \(B\) to within one per cent.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (is the index of refraction of the liquid. On the other hand, owing to the smallness of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (as compared with 1, we can replace \(B\) in the first place by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (or to the same order of approximation by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (which agrees with Fizeau's result.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (Nevertheless we must now draw attention to the fact that a theory of this phenomenon was) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (given by H. A. Lorentz long before the statement of the theory of relativity. This theory) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (was of a purely electrodynamical nature, and was obtained by the use of particular) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (hypotheses as to the electromagnetic structure of matter. This circumstance, however, does) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (not in the least diminish the conclusiveness of the experiment as a crucial test in favour) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (of the theory of relativity, for the electrodynamics of Maxwell-Lorentz, on which the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (original theory was based, in no way opposes the theory of relativity. Rather has the latter) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (been developed trom electrodynamics as an astoundingly simple combination and generalisation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (of the hypotheses, formerly independent of each other, on which electrodynamics was built.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (XIV. The Heuristic Value of the Theory of Relativity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (Our train of thought in the foregoing pages can be epitomised in the following manner.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (Experience has led to the conviction that, on the one hand, the principle of relativity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (holds true and that on the other hand the velocity of transmission of light in vacuo has to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (be considered equal to a constant c. By uniting these two postulates we obtained the law of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (transformation for the rectangular co-ordinates x, y, z and the time t of the events which) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (constitute the processes of nature. In this connection we did not obtain the Galilei) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (transformation, but, differing from classical mechanics, the Lorentz transformation.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (The law of transmission of light, the acceptance of which is justified by our actual) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (knowledge, played an important part in this process of thought. Once in possession of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (Lorentz transformation, however, we can combine this with the principle of relativity, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (sum up the theory thus:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (Every general law of nature must be so constituted that it is transformed into a law of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (exactly the same form when, instead of the space-time variables x, y, z, t of the original) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (coordinate system K, we introduce new space-time variables x', y', z', t' of a co-ordinate) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (system K'. In this connection the relation between the ordinary and the accented magnitudes) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (is given by the Lorentz transformation. Or in brief: General laws of nature are co-variant) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (with respect to Lorentz transformations.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (This is a definite mathematical condition that the theory of relativity demands of a natural) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (law, and in virtue of this, the theory becomes a valuable heuristic aid in the search for) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (general laws of nature. If a general law of nature were to be found which did not satisfy) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (this condition, then at least one of the two fundamental assumptions of the theory would) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (have been disproved. Let us now examine what general results the latter theory has hitherto) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 14 -) Tj ET
+endstream
+endobj
+32 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 33 0 R >>
+endobj
+33 0 obj
+<< /Length 5286 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (evinced.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (XV. General Results of the Theory) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (It is clear from our previous considerations that the \(special\) theory of relativity has) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (grown out of electrodynamics and optics. In these fields it has not appreciably altered the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (predictions of theory, but it has considerably simplified the theoretical structure, i.e.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (the derivation of laws, and--what is incomparably more important--it has considerably) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (reduced the number of independent hypotheses forming the basis of theory. The special theory) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (of relativity has rendered the Maxwell-Lorentz theory so plausible, that the latter would) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (have been generally accepted by physicists even if experiment had decided less unequivocally) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (in its favour.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (Classical mechanics required to be modified before it could come into line with the demands) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (of the special theory of relativity. For the main part, however, this modification affects) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (only the laws for rapid motions, in which the velocities of matter v are not very small as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (compared with the velocity of light. We have experience of such rapid motions only in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (case of electrons and ions; for other motions the variations from the laws of classical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (mechanics are too small to make themselves evident in practice. We shall not consider the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (motion of stars until we come to speak of the general theory of relativity. In accordance) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (with the theory of relativity the kinetic energy of a material point of mass m is no longer) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (given by the well-known expression) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (but by the expression) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (This expression approaches infinity as the velocity v approaches the velocity of light c.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (The velocity must therefore always remain less than c, however great may be the energies) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (used to produce the acceleration. If we develop the expression for the kinetic energy in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (form of a series, we obtain) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (is small compared with unity, the third of these terms is always small in comparison with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (the second, which last is alone considered in classical mechanics. The first term mc2 does) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (not contain the velocity, and requires no consideration if we are only dealing with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (question as to how the energy of a point-mass; depends on the velocity. We shall speak of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (its essential significance later.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (The most important result of a general character to which the special theory of relativity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (has led is concerned with the conception of mass. Before the advent of relativity, physics) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (recognised two conservation laws of fundamental importance, namely, the law of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (conservation of energy and the law of the conservation of mass these two fundamental laws) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (appeared to be quite independent of each other. By means of the theory of relativity they) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (have been united into one law. We shall now briefly consider how this unification came) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (about, and what meaning is to be attached to it.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (The principle of relativity requires that the law of the conservation of energy should hold) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (not only with reference to a co-ordinate system K, but also with respect to every) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (co-ordinate system K' which is in a state of uniform motion of translation relative to K,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (or, briefly, relative to every "Galileian" system of co-ordinates. In contrast to classical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (mechanics; the Lorentz transformation is the deciding factor in the transition from one such) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (system to another.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (By means of comparatively simple considerations we are led to draw the following conclusion) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (from these premises, in conjunction with the fundamental equations of the electrodynamics of) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 15 -) Tj ET
+endstream
+endobj
+34 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 35 0 R >>
+endobj
+35 0 obj
+<< /Length 5058 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (Maxwell: A body moving with the velocity v, which absorbs an amount of energy E0 in the form) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (of radiation without suffering an alteration in velocity in the process, has, as a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (consequence, its energy increased by an amount) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (In consideration of the expression given above for the kinetic energy of the body, the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (required energy of the body comes out to be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (Thus the body has the same energy as a body of mass) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (moving with the velocity v. Hence we can say: If a body takes up an amount of energy E0,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (then its inertial mass increases by an amount) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (the inertial mass of a body is not a constant but varies according to the change in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (energy of the body. The inertial mass of a system of bodies can even be regarded as a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (measure of its energy. The law of the conservation of the mass of a system becomes identical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (with the law of the conservation of energy, and is only valid provided that the system) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (neither takes up nor sends out energy. Writing the expression for the energy in the form) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (we see that the term mc2, which has hitherto attracted our attention, is nothing else than) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (the energy possessed by the body before it absorbed the energy E0.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (A direct comparison of this relation with experiment is not possible at the present time) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (\(1920; see[Note], p. 48\), owing to the fact that the changes in energy E0 to which we can) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (subject a system are not large enough to make themselves perceptible as a change in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (inertial mass of the system.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (is too small in comparison with the mass m, which was present before the alteration of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (energy. It is owing to this circumstance that classical mechanics was able to establish) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (successfully the conservation of mass as a law of independent validity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm ([Note] The equation E = mc2 has been thoroughly proved time and again since this time.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (Let me add a final remark of a fundamental nature. The success of the Faraday-Maxwell) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (interpretation of electromagnetic action at a distance resulted in physicists becoming) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (convinced that there are no such things as instantaneous actions at a distance \(not) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (involving an intermediary medium\) of the type of Newton's law of gravitation.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (According to the theory of relativity, action at a distance with the velocity of light) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (always takes the place of instantaneous action at a distance or of action at a distance with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (an infinite velocity of transmission. This is connected with the fact that the velocity c) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (plays a fundamental role in this theory. In Part II we shall see in what way this result) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (becomes modified in the general theory of relativity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (XVI. Experience and the Special Theory of Relativity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (To what extent is the special theory of relativity supported by experience? This question is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (not easily answered for the reason already mentioned in connection with the fundamental) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (experiment of Fizeau. The special theory of relativity has crystallised out from the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (Maxwell-Lorentz theory of electromagnetic phenomena. Thus all facts of experience which) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (support the electromagnetic theory also support the theory of relativity. As being of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (particular importance, I mention here the fact that the theory of relativity enables us to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (predict the effects produced on the light reaching us from the fixed stars. These results) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (are obtained in an exceedingly simple manner, and the effects indicated, which are due to) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 16 -) Tj ET
+endstream
+endobj
+36 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 37 0 R >>
+endobj
+37 0 obj
+<< /Length 6029 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (the relative motion of the earth with reference to those fixed stars are found to be in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (accord with experience. We refer to the yearly movement of the apparent position of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (fixed stars resulting from the motion of the earth round the sun \(aberration\), and to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (influence of the radial components of the relative motions of the fixed stars with respect) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (to the earth on the colour of the light reaching us from them. The latter effect manifests) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (itself in a slight displacement of the spectral lines of the light transmitted to us from a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (fixed star, as compared with the position of the same spectral lines when they are produced) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (by a terrestrial source of light \(Doppler principle\). The experimental arguments in favour) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (of the Maxwell-Lorentz theory, which are at the same time arguments in favour of the theory) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (of relativity, are too numerous to be set forth here. In reality they limit the theoretical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (possibilities to such an extent, that no other theory than that of Maxwell and Lorentz has) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (been able to hold its own when tested by experience.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (But there are two classes of experimental facts hitherto obtained which can be represented) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (in the Maxwell-Lorentz theory only by the introduction of an auxiliary hypothesis, which in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (itself--i.e. without making use of the theory of relativity--appears extraneous.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (It is known that cathode rays and the so-called -rays emitted by radioactive substances) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (consist of negatively electrified particles \(electrons\) of very small inertia and large) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (velocity. By examining the deflection of these rays under the influence of electric and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (magnetic fields, we can study the law of motion of these particles very exactly.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (In the theoretical treatment of these electrons, we are faced with the difficulty that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (electrodynamic theory of itself is unable to give an account of their nature. For since) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (electrical masses of one sign repel each other, the negative electrical masses constituting) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (the electron would necessarily be scattered under the influence of their mutual repulsions,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (unless there are forces of another kind operating between them, the nature of which has) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (hitherto remained obscure to us. If we now assume that the relative distances between the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (electrical masses constituting the electron remain unchanged during the motion of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (electron \(rigid connection in the sense of classical mechanics\), we arrive at a law of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (motion of the electron which does not agree with experience. Guided by purely formal points) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (of view, H. A. Lorentz was the first to introduce the hypothesis that the form of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (electron experiences a contraction in the direction of motion in consequence of that motion.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (the contracted length being proportional to the expression) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (This, hypothesis, which is not justifiable by any electrodynamical facts, supplies us then) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (with that particular law of motion which has been confirmed with great precision in recent) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (years.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (The theory of relativity leads to the same law of motion, without requiring any special) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (hypothesis whatsoever as to the structure and the behaviour of the electron. We arrived at a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (similar conclusion in Section XIII in connection with the experiment of Fizeau, the result) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (of which is foretold by the theory of relativity without the necessity of drawing on) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (hypotheses as to the physical nature of the liquid.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (The second class of facts to which we have alluded has reference to the question whether or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (not the motion of the earth in space can be made perceptible in terrestrial experiments. We) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (have already remarked in Section V that all attempts of this nature led to a negative) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (result. Before the theory of relativity was put forward, it was difficult to become) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (reconciled to this negative result, for reasons now to be discussed. The inherited) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (prejudices about time and space did not allow any doubt to arise as to the prime importance) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (of the Galileian transformation for changing over from one body of reference to another. Now) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (assuming that the Maxwell-Lorentz equations hold for a reference-body K, we then find that) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 17 -) Tj ET
+endstream
+endobj
+38 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 39 0 R >>
+endobj
+39 0 obj
+<< /Length 6294 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (they do not hold for a reference-body K' moving uniformly with respect to K, if we assume) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (that the relations of the Galileian transformation exist between the co-ordinates of K and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (K'. It thus appears that, of all Galileian co-ordinate systems, one \(K\) corresponding to a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (particular state of motion is physically unique. This result was interpreted physically by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (regarding K as at rest with respect to a hypothetical ther of space. On the other hand, all) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (coordinate systems K' moving relatively to K were to be regarded as in motion with respect) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (to the ther. To this motion of K' against the ther \(" ther-drift" relative to K'\) were) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (attributed the more complicated laws which were supposed to hold relative to K'. Strictly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (speaking, such an ther-drift ought also to be assumed relative to the earth, and for a long) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (time the efforts of physicists were devoted to attempts to detect the existence of an) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (ther-drift at the earth's surface.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (In one of the most notable of these attempts Michelson devised a method which appears as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (though it must be decisive. Imagine two mirrors so arranged on a rigid body that the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (reflecting surfaces face each other. A ray of light requires a perfectly definite time T to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (pass from one mirror to the other and back again, if the whole system be at rest with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (respect to the ther. It is found by calculation, however, that a slightly different time T') Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (is required for this process, if the body, together with the mirrors, be moving relatively) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (to the ther. And yet another point: it is shown by calculation that for a given velocity v) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (with reference to the ther, this time T' is different when the body is moving) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (perpendicularly to the planes of the mirrors from that resulting when the motion is parallel) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (to these planes. Although the estimated difference between these two times is exceedingly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (small, Michelson and Morley performed an experiment involving interference in which this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (difference should have been clearly detectable. But the experiment gave a negative result--a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (fact very perplexing to physicists. Lorentz and FitzGerald rescued the theory from this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (difficulty by assuming that the motion of the body relative to the ther produces a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (contraction of the body in the direction of motion, the amount of contraction being just) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (sufficient to compensate for the difference in time mentioned above. Comparison with the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (discussion in Section XII shows that also from the standpoint of the theory of relativity) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (this solution of the difficulty was the right one. But on the basis of the theory of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (relativity the method of interpretation is incomparably more satisfactory. According to this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (theory there is no such thing as a "specially favoured" \(unique\) co-ordinate system to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (occasion the introduction of the ther-idea, and hence there can be no ther-drift, nor any) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (experiment with which to demonstrate it. Here the contraction of moving bodies follows from) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (the two fundamental principles of the theory, without the introduction of particular) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (hypotheses; and as the prime factor involved in this contraction we find, not the motion in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (itself, to which we cannot attach any meaning, but the motion with respect to the body of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (reference chosen in the particular case in point. Thus for a co-ordinate system moving with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (the earth the mirror system of Michelson and Morley is not shortened, but it is shortened) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (for a co-ordinate system which is at rest relatively to the sun.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (XVII. Minkowski's Four-dimensional Space) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (The non-mathematician is seized by a mysterious shuddering when he hears of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm ("four-dimensional" things, by a feeling not unlike that awakened by thoughts of the occult.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (And yet there is no more common-place statement than that the world in which we live is a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (four-dimensional space-time continuum.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (Space is a three-dimensional continuum. By this we mean that it is possible to describe the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (position of a point \(at rest\) by means of three numbers \(co-ordinates\) x, y, z, and that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (there is an indefinite number of points in the neighbourhood of this one, the position of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (which can be described by co-ordinates such as x1, y1, z1, which may be as near as we choose) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (to the respective values of the co-ordinates x, y, z, of the first point. In virtue of the) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 18 -) Tj ET
+endstream
+endobj
+40 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 41 0 R >>
+endobj
+41 0 obj
+<< /Length 5660 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (latter property we speak of a "continuum," and owing to the fact that there are three) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (co-ordinates we speak of it as being "three-dimensional.") Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (Similarly, the world of physical phenomena which was briefly called "world" by Minkowski is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (naturally four dimensional in the space-time sense. For it is composed of individual events,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (each of which is described by four numbers, namely, three space co-ordinates x, y, z, and a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (time co-ordinate, the time value t. The "world" is in this sense also a continuum; for to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (every event there are as many "neighbouring" events \(realised or at least thinkable\) as we) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (care to choose, the co-ordinates x1, y1, z1, t1 of which differ by an indefinitely small) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (amount from those of the event x, y, z, t originally considered. That we have not been) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (accustomed to regard the world in this sense as a four-dimensional continuum is due to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (fact that in physics, before the advent of the theory of relativity, time played a different) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (and more independent r le, as compared with the space coordinates. It is for this reason) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (that we have been in the habit of treating time as an independent continuum. As a matter of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (fact, according to classical mechanics, time is absolute, i.e. it is independent of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (position and the condition of motion of the system of co-ordinates. We see this expressed in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (the last equation of the Galileian transformation \(t' = t\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (The four-dimensional mode of consideration of the "world" is natural on the theory of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (relativity, since according to this theory time is robbed of its independence. This is shown) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (by the fourth equation of the Lorentz transformation:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (Moreover, according to this equation the time difference t' of two events with respect to K') Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (does not in general vanish, even when the time difference t of the same events with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (reference to K vanishes. Pure "space-distance" of two events with respect to K results in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm ("time-distance " of the same events with respect to K. But the discovery of Minkowski, which) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (was of importance for the formal development of the theory of relativity, does not lie here.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (It is to be found rather in the fact of his recognition that the four-dimensional space-time) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 388 Tm (continuum of the theory of relativity, in its most essential formal properties, shows a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (pronounced relationship to the three-dimensional continuum of Euclidean geometrical space.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (In order to give due prominence to this relationship, however, we must replace the usual) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (time co-ordinate t by an imaginary magnitude) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (proportional to it. Under these conditions, the natural laws satisfying the demands of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (\(special\) theory of relativity assume mathematical forms, in which the time co-ordinate) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (plays exactly the same role as the three space co-ordinates. Formally, these four) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 288 Tm (co-ordinates correspond exactly to the three space co-ordinates in Euclidean geometry. It) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (must be clear even to the non-mathematician that, as a consequence of this purely formal) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (addition to our knowledge, the theory perforce gained clearness in no mean measure.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (These inadequate remarks can give the reader only a vague notion of the important idea) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (contributed by Minkowski. Without it the general theory of relativity, of which the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (fundamental ideas are developed in the following pages, would perhaps have got no farther) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (than its long clothes. Minkowski's work is doubtless difficult of access to anyone) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (inexperienced in mathematics, but since it is not necessary to have a very exact grasp of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (this work in order to understand the fundamental ideas of either the special or the general) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (theory of relativity, I shall leave it here at present, and revert to it only towards the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (end of Part II.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (PART II: THE GENERAL THEORY OF RELATIVITY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 100.5 Tm (XVIII. Special and General Principle of Relativity) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 19 -) Tj ET
+endstream
+endobj
+42 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 43 0 R >>
+endobj
+43 0 obj
+<< /Length 5372 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (The basal principle, which was the pivot of all our previous considerations, was the special) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (principle of relativity, i.e. the principle of the physical relativity of all uniform) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (motion. Let as once more analyse its meaning carefully.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (It was at all times clear that, from the point of view of the idea it conveys to us, every) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 675.5 Tm (motion must be considered only as a relative motion. Returning to the illustration we have) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (frequently used of the embankment and the railway carriage, we can express the fact of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (motion here taking place in the following two forms, both of which are equally justifiable:) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (\(a\) The carriage is in motion relative to the embankment,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (\(b\) The embankment is in motion relative to the carriage.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (In \(a\) the embankment, in \(b\) the carriage, serves as the body of reference in our statement) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (of the motion taking place. If it is simply a question of detecting or of describing the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (motion involved, it is in principle immaterial to what reference-body we refer the motion.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (As already mentioned, this is self-evident, but it must not be confused with the much more) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (comprehensive statement called "the principle of relativity," which we have taken as the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (basis of our investigations.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (The principle we have made use of not only maintains that we may equally well choose the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (carriage or the embankment as our reference-body for the description of any event \(for this,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (too, is self-evident\). Our principle rather asserts what follows: If we formulate the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (general laws of nature as they are obtained from experience, by making use of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (\(a\) the embankment as reference-body,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (\(b\) the railway carriage as reference-body,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 375.5 Tm (then these general laws of nature \(e.g. the laws of mechanics or the law of the propagation) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 363 Tm (of light in vacuo\) have exactly the same form in both cases. This can also be expressed as) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 350.5 Tm (follows: For the physical description of natural processes, neither of the reference bodies) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 338 Tm (K, K' is unique \(lit. "specially marked out"\) as compared with the other. Unlike the first,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 325.5 Tm (this latter statement need not of necessity hold a priori; it is not contained in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 313 Tm (conceptions of "motion" and "reference-body" and derivable from them; only experience can) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 300.5 Tm (decide as to its correctness or incorrectness.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 275.5 Tm (Up to the present, however, we have by no means maintained the equivalence of all bodies of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 263 Tm (reference K in connection with the formulation of natural laws. Our course was more on the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 250.5 Tm (following Iines. In the first place, we started out from the assumption that there exists a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 238 Tm (reference-body K, whose condition of motion is such that the Galileian law holds with) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 225.5 Tm (respect to it: A particle left to itself and sufficiently far removed from all other) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 213 Tm (particles moves uniformly in a straight line. With reference to K \(Galileian reference-body\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 200.5 Tm (the laws of nature were to be as simple as possible. But in addition to K, all bodies of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 188 Tm (reference K' should be given preference in this sense, and they should be exactly equivalent) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 175.5 Tm (to K for the formulation of natural laws, provided that they are in a state of uniform) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 163 Tm (rectilinear and non-rotary motion with respect to K; all these bodies of reference are to be) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 150.5 Tm (regarded as Galileian reference-bodies. The validity of the principle of relativity was) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 138 Tm (assumed only for these reference-bodies, but not for others \(e.g. those possessing motion of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 125.5 Tm (a different kind\). In this sense we speak of the special principle of relativity, or special) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 113 Tm (theory of relativity.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 88 Tm (In contrast to this we wish to understand by the "general principle of relativity" the) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 20 -) Tj ET
+endstream
+endobj
+44 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 45 0 R >>
+endobj
+45 0 obj
+<< /Length 3490 >>
+stream
+BT /F1 9 Tf 1 0 0 1 72 758 Tm (RELATIVITY: THE SPECIAL AND GENERAL THEORY) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 738 Tm (following statement: All bodies of reference K, K', etc., are equivalent for the description) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 725.5 Tm (of natural phenomena \(formulation of the general laws of nature\), whatever may be their) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 713 Tm (state of motion. But before proceeding farther, it ought to be pointed out that this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 700.5 Tm (formulation must be replaced later by a more abstract one, for reasons which will become) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 688 Tm (evident at a later stage.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 663 Tm (Since the introduction of the special principle of relativity has been justified, every) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 650.5 Tm (intellect which strives after generalisation must feel the temptation to venture the step) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 638 Tm (towards the general principle of relativity. But a simple and apparently quite reliable) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 625.5 Tm (consideration seems to suggest that, for the present at any rate, there is little hope of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 613 Tm (success in such an attempt; Let us imagine ourselves transferred to our old friend the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 600.5 Tm (railway carriage, which is travelling at a uniform rate. As long as it is moving uniformly,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 588 Tm (the occupant of the carriage is not sensible of its motion, and it is for this reason that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 575.5 Tm (he can without reluctance interpret the facts of the case as indicating that the carriage is) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 563 Tm (at rest, but the embankment in motion. Moreover, according to the special principle of) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 550.5 Tm (relativity, this interpretation is quite justified also from a physical point of view. If) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 538 Tm (the motion of the carriage is now changed into a non-uniform motion, as for instance by a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 525.5 Tm (powerful application of the brakes, then the occupant of the carriage experiences a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 513 Tm (correspondingly powerful jerk forwards. The retarded motion is manifested in the mechanical) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 500.5 Tm (behaviour of bodies relative to the person in the railway carriage. The mechanical behaviour) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 488 Tm (is different from that of the case previously considered, and for this reason it would) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 475.5 Tm (appear to be impossible that the same mechanical laws hold relatively to the non-uniformly) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 463 Tm (moving carriage, as hold with reference to the carriage when at rest or in uniform motion.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 450.5 Tm (At all events it is clear that the Galileian law does not hold with respect to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 438 Tm (non-uniformly moving carriage. Because of this, we feel compelled at the present juncture to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 425.5 Tm (grant a kind of absolute physical reality to non-uniform motion, in opposition to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 413 Tm (general principle of relativity. But in what follows we shall soon see that this conclusion) Tj ET
+BT /F1 10 Tf 1 0 0 1 72 400.5 Tm (cannot be maintained.) Tj ET
+BT /F1 9 Tf 1 0 0 1 292.8 40 Tm (- 21 -) Tj ET
+endstream
+endobj
+xref
+0 46
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000254 00000 n 
+0000000351 00000 n 
+0000000477 00000 n 
+0000006564 00000 n 
+0000006690 00000 n 
+0000012285 00000 n 
+0000012411 00000 n 
+0000018297 00000 n 
+0000018425 00000 n 
+0000024286 00000 n 
+0000024414 00000 n 
+0000030427 00000 n 
+0000030555 00000 n 
+0000036506 00000 n 
+0000036634 00000 n 
+0000042947 00000 n 
+0000043075 00000 n 
+0000049029 00000 n 
+0000049157 00000 n 
+0000054927 00000 n 
+0000055055 00000 n 
+0000060752 00000 n 
+0000060880 00000 n 
+0000066573 00000 n 
+0000066701 00000 n 
+0000071550 00000 n 
+0000071678 00000 n 
+0000076883 00000 n 
+0000077011 00000 n 
+0000082448 00000 n 
+0000082576 00000 n 
+0000087914 00000 n 
+0000088042 00000 n 
+0000093152 00000 n 
+0000093280 00000 n 
+0000099361 00000 n 
+0000099489 00000 n 
+0000105835 00000 n 
+0000105963 00000 n 
+0000111675 00000 n 
+0000111803 00000 n 
+0000117227 00000 n 
+0000117355 00000 n 
+trailer
+<< /Size 46 /Root 1 0 R >>
+startxref
+120897
+%%EOF

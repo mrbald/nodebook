@@ -134,3 +134,30 @@ write many).
 Depends on talk-to-docs (embeddings + the model-provider abstraction) and composes
 with auto-mindmap (clustering + map). Effectively **talk-to-docs inverted**:
 exhaustive push-distill instead of question-pull, sharing the same substrate.
+
+## Baseline — Phase 1 (2026-09-02, heuristic stub)
+
+The eval harness (`npm run eval:distill`) runs the real `distill()` pipeline
+over three fixtures — `book-en` (seven Federalist Papers essays), `paper.pdf`
+(a generated ~20-page PDF with a running header, page-number footers, and
+deliberately hyphenated line breaks), and `chapter-ru.md` (a Chekhov story) —
+against hand-curated golden concepts/edges (`e2e/fixtures/distill/golden.json`),
+and reports the metrics in `src/main/distill/eval/metrics.ts`. This run used
+the deterministic stand-ins (`src/main/distill/eval/stubs.ts`): a
+feature-hashing embedder and a regex-based heuristic "chat" model, neither of
+which understands the text — a floor, not a target. Later phases replace
+these numbers as the pipeline changes (see Phase 2 onward above), and a real
+provider run (below) is the actual quality signal to watch.
+
+| fixture | yieldPer10k | coverage | dropped | failedClusters | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgeRecall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| book-en | 5.36 | 0.34 | 0.00 | 0.00 | 84.00 | 1.83 | 0.01 | 5.00 | 0.00 | 0.27 | 0.00 | 0.00 |
+| paper.pdf | 5.89 | 0.39 | 0.00 | 0.00 | 63.00 | 2.07 | 0.01 | 1.00 | 0.00 | 0.14 | 0.00 | 0.00 |
+| chapter-ru.md | 13.61 | 0.56 | 0.00 | 0.00 | 18.00 | 1.48 | 0.00 | 1.00 | 0.00 | 0.21 | 0.06 | 0.10 |
+
+Reproduce with `npm run eval:distill` — it is deterministic (no network, no
+key) and finishes in under a second. To score a real provider instead of the
+stub, set `DISTILL_EVAL_PROVIDER` (plus `DISTILL_EVAL_MODEL` /
+`DISTILL_EVAL_BASE_URL` / `DISTILL_EVAL_COMMAND` and the usual
+`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` as needed), e.g.
+`DISTILL_EVAL_PROVIDER=anthropic DISTILL_EVAL_MODEL=claude-sonnet-4-6 npm run eval:distill`.
