@@ -278,7 +278,8 @@ export interface DistillStats {
    *  model call each. */
   windows: number
   /** Model calls actually attempted, including any a provider rejected for
-   *  length before its two halves were read. */
+   *  length before its two halves were read — and, for a run that was resumed,
+   *  the calls the earlier attempts made too. */
   calls: number
   /** How many times a rejected step was halved and read as two, so the text
    *  was still read in full. */
@@ -299,6 +300,10 @@ export interface DistillStats {
   /** Theme notes the run grouped its notes under — 0 when the run was too
    *  small to be worth grouping. */
   themes: number
+  /** 1 when the run tried to group its notes and could not (the embedder never
+   *  loaded, or the bridge went away), so the notes stayed flat; 0 otherwise.
+   *  Grouping runs last and is presentation, so it never fails a run. */
+  themesSkipped: number
   /** Steps the model never answered usably — counted, never hidden. */
   failedWindows: number
   /** Links between the run's notes, `source::` excluded — the map's edges. */

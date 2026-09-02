@@ -27,7 +27,7 @@ import { mkdirSync, existsSync, readFileSync, statSync } from 'fs'
 import { createHash } from 'crypto'
 import { basename, extname, join } from 'path'
 import { atomicWrite, distillRoot } from './artifact'
-import { sourceTitle } from './emit'
+import { DOC_EXT_RE, sourceTitle } from './emit'
 
 /** A converted document's identity: sha1 of its text, lowercase hex. */
 export function sha1(text: string): string {
@@ -130,15 +130,19 @@ export function readSourceText(vaultRoot: string, hash: string): string | null {
 }
 
 /**
- * The original file a hash came from, but only if it is still there.
+ * The original file a hash came from, but only if it is still openable.
  *
  * This is what "Open original" resolves: the renderer names the HASH and main
- * decides what path that is, so a note can never talk the app into opening an
- * arbitrary file.
+ * decides what path that is. The path itself comes from `sources.json` — a
+ * plain file inside the vault, so it is the user's to edit and NOT a trusted
+ * input. What makes this safe is the shape of what it may return, checked here
+ * every time: the path must still exist, be a REGULAR file (not a device, not a
+ * directory), and carry one of the extensions this app converts. Everything
+ * else is `null` — "Open original" hands the OS a document or nothing.
  */
 export function originalPathOf(vaultRoot: string, hash: string): string | null {
   const record = readSourceRecord(vaultRoot, hash)
-  if (!record) return null
+  if (!record || !DOC_EXT_RE.test(record.originalPath)) return null
   try {
     return statSync(record.originalPath).isFile() ? record.originalPath : null
   } catch {

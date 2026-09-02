@@ -125,6 +125,37 @@ describe('pdfToMarkdown', () => {
   })
 })
 
+/** An EPUB laid out the way real books often are: the package in `OEBPS/`, the
+ *  chapters in `OEBPS/text/`, and an EPUB 3 nav document of its own in
+ *  `OEBPS/nav/` whose hrefs point back out with `../`. */
+function makeEpubNested(): Uint8Array {
+  const container =
+    '<?xml version="1.0"?><container><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
+  const opf =
+    '<?xml version="1.0"?><package><manifest>' +
+    '<item id="nav" href="nav/toc.xhtml" properties="nav" media-type="application/xhtml+xml"/>' +
+    '<item id="c1" href="text/chap1.xhtml" media-type="application/xhtml+xml"/>' +
+    '<item id="c2" href="text/chap2.xhtml" media-type="application/xhtml+xml"/>' +
+    '</manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>'
+  const nav =
+    '<html><body><nav epub:type="toc"><ol>' +
+    '<li><a href="../text/chap1.xhtml">Of Faction</a></li>' +
+    '<li><a href="../text/chap2.xhtml">Of the Republic</a></li>' +
+    '</ol></nav></body></html>'
+  return zipSync({
+    mimetype: strToU8('application/epub+zip'),
+    'META-INF/container.xml': strToU8(container),
+    'OEBPS/content.opf': strToU8(opf),
+    'OEBPS/nav/toc.xhtml': strToU8(nav),
+    'OEBPS/text/chap1.xhtml': strToU8(
+      '<html><body><h1>Faction</h1><p>Faction arises from the unequal distribution of property.</p></body></html>'
+    ),
+    'OEBPS/text/chap2.xhtml': strToU8(
+      '<html><body><h1>Republic</h1><p>A republic refines public views through representatives.</p></body></html>'
+    )
+  })
+}
+
 describe('epubNavTitles', () => {
   it('reads an EPUB 2 toc.ncx, dropping the fragment', () => {
     const ncx = `<ncx><navMap>
@@ -148,6 +179,19 @@ describe('epubNavTitles', () => {
   it('is empty when there is no table of contents', () => {
     expect(epubNavTitles('', '<html><body><p>no nav</p></body></html>').size).toBe(0)
   })
+
+  it('resolves hrefs against the TOC document, not the package', () => {
+    // A nav document in its own folder points UP and across — its hrefs are
+    // relative to itself. Resolved against the OPF instead, they name files
+    // that do not exist and the book gets "Section 1" for every chapter.
+    const nav = `<html><body><nav epub:type="toc"><ol>
+      <li><a href="../text/chap1.xhtml">The Republic</a></li>
+      <li><a href="./chap-nav.xhtml">A page beside the nav</a></li>
+    </ol></nav></body></html>`
+    const titles = epubNavTitles('', nav, { navPath: 'OEBPS/nav/toc.xhtml' })
+    expect(titles.get('OEBPS/text/chap1.xhtml')).toBe('The Republic')
+    expect(titles.get('OEBPS/nav/chap-nav.xhtml')).toBe('A page beside the nav')
+  })
 })
 
 describe('epubToMarkdown', () => {
@@ -162,6 +206,13 @@ describe('epubToMarkdown', () => {
 
   it('names each section from the table of contents when the book has one', async () => {
     const md = await epubToMarkdown(makeEpub({ withNav: true }))
+    expect(md).toContain('## Of Faction')
+    expect(md).toContain('## Of the Republic')
+    expect(md).not.toContain('## Section 1')
+  })
+
+  it('names them when the nav sits in a subfolder and points back out', async () => {
+    const md = await epubToMarkdown(makeEpubNested())
     expect(md).toContain('## Of Faction')
     expect(md).toContain('## Of the Republic')
     expect(md).not.toContain('## Section 1')

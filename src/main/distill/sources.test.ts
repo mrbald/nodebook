@@ -171,6 +171,34 @@ describe('originalPathOf', () => {
     rmSync(original)
     expect(originalPathOf(v, hash)).toBeNull() // moved or deleted since
   })
+
+  it('opens a document or nothing — the recorded path is not trusted blindly', () => {
+    const v = tmpVault()
+    const original = document(v, 'Book.pdf')
+    const { hash } = putSource(v, original, 'converted')
+    const index = join(v, '.distill', 'sources.json')
+    const repoint = (to: string): void => {
+      const raw = JSON.parse(readFileSync(index, 'utf8')) as Record<
+        string,
+        { originalPath: string }
+      >
+      raw[hash].originalPath = to
+      writeFileSync(index, JSON.stringify(raw))
+    }
+
+    // `sources.json` is a plain file inside the vault, so it is editable — and
+    // "Open original" hands whatever it says to the OS. Only a real file with a
+    // document extension may come back.
+    repoint(join(v, 'originals')) // a directory
+    expect(originalPathOf(v, hash)).toBeNull()
+
+    const script = document(v, 'payload.sh', '#!/bin/sh\nsay no\n')
+    repoint(script) // a real file, but not a document
+    expect(originalPathOf(v, hash)).toBeNull()
+
+    repoint(original)
+    expect(originalPathOf(v, hash)).toBe(original)
+  })
 })
 
 describe('a damaged store', () => {

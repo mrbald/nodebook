@@ -115,32 +115,60 @@ function xmlText(fragment: string): string {
 }
 
 /**
+ * Resolve a zip-relative href against the directory of the document that wrote
+ * it, and normalise `.`/`..` away — so every path in this module is spelled
+ * one way and can be compared. `base` is a directory, with or without its
+ * trailing slash; an absolute href (a leading `/`) is taken from the zip root.
+ */
+export function resolveHref(base: string, href: string): string {
+  const from = href.startsWith('/') ? [] : base.replace(/[^/]*$/, '').split('/')
+  const out: string[] = []
+  for (const part of [...from, ...href.replace(/^\//, '').split('/')]) {
+    if (part === '' || part === '.') continue
+    if (part === '..') out.pop()
+    else out.push(part)
+  }
+  return out.join('/')
+}
+
+/**
  * href → chapter title, from an EPUB's table of contents.
  *
  * Both TOC formats are read: EPUB 2's `toc.ncx` (`<navPoint>` = a `<text>`
  * label plus a `<content src="…">`) and EPUB 3's `nav.xhtml` (`<nav
  * epub:type="toc">` wrapping ordinary `<a href="…">` links). The fragment
  * (`chapter1.xhtml#part2`) is dropped: the spine is per FILE, so the first
- * title pointing into a file names it. Paths are kept exactly as written, so
- * the caller resolves them against the same base as the manifest's.
+ * title pointing into a file names it.
+ *
+ * A TOC's hrefs are relative to the TOC DOCUMENT, which is not always beside
+ * the OPF — `OEBPS/nav/toc.xhtml` pointing at `../text/ch1.xhtml` is ordinary.
+ * So each document's own path comes in with it (`ncxPath`, `navPath`, both
+ * zip-relative), and every href is resolved against it. The keys are therefore
+ * zip-relative paths, which is what the caller resolves the manifest's hrefs to
+ * as well — before this, a nav in a subfolder simply named no chapter.
  *
  * Exported for tests; pure (it takes the two documents' text, not a zip).
  */
-export function epubNavTitles(ncx: string, nav: string): Map<string, string> {
+export function epubNavTitles(
+  ncx: string,
+  nav: string,
+  paths: { ncxPath?: string; navPath?: string } = {}
+): Map<string, string> {
   const titles = new Map<string, string>()
-  const add = (href: string, title: string): void => {
-    const file = href.split('#')[0].trim()
+  const add = (base: string, href: string, title: string): void => {
+    const file = resolveHref(base, href.split('#')[0].trim())
     if (file && title && !titles.has(file)) titles.set(file, title)
   }
   for (const point of ncx.matchAll(/<navPoint\b[\s\S]*?<\/navPoint>/g)) {
     const label = /<text\b[^>]*>([\s\S]*?)<\/text>/.exec(point[0])
     const content = /<content\b[^>]*>/.exec(point[0])
-    if (label && content) add(xmlAttr(content[0], 'src'), xmlText(label[1]))
+    if (label && content)
+      add(paths.ncxPath ?? '', xmlAttr(content[0], 'src'), xmlText(label[1]))
   }
   const toc = /<nav\b[^>]*epub:type\s*=\s*["'][^"']*\btoc\b[^"']*["'][^>]*>([\s\S]*?)<\/nav>/i.exec(nav)
   if (toc) {
     for (const a of toc[1].matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g))
-      add(xmlAttr(`<a${a[1]}>`, 'href'), xmlText(a[2]))
+      add(paths.navPath ?? '', xmlAttr(`<a${a[1]}>`, 'href'), xmlText(a[2]))
   }
   return titles
 }
@@ -182,23 +210,26 @@ export async function epubToMarkdown(data: Uint8Array): Promise<string> {
     if (/\bnav\b/.test(xmlAttr(m[0], 'properties'))) navHref = href
   }
   // Fall back to the conventional file names, for books whose OPF doesn't
-  // declare its TOC — reading one costs a map lookup, so try both.
-  const titles = epubNavTitles(
-    read(opfDir + (ncxHref || 'toc.ncx')),
-    read(opfDir + (navHref || 'nav.xhtml'))
-  )
+  // declare its TOC — reading one costs a map lookup, so try both. The TOC's
+  // own path goes with it: its hrefs are relative to IT, not to the OPF.
+  const ncxPath = resolveHref(opfDir, ncxHref || 'toc.ncx')
+  const navPath = resolveHref(opfDir, navHref || 'nav.xhtml')
+  const titles = epubNavTitles(read(ncxPath), read(navPath), { ncxPath, navPath })
 
   const sections: string[] = []
   let n = 0
   for (const m of opf.matchAll(/<itemref\b[^>]*>/g)) {
     const href = manifest.get(xmlAttr(m[0], 'idref'))
     if (!href) continue
-    const html = read(opfDir + href)
+    // The manifest's hrefs are relative to the OPF; the titles are keyed by
+    // zip-relative path, so both sides are resolved the same way.
+    const path = resolveHref(opfDir, href)
+    const html = read(path)
     if (!html) continue
     const md = await htmlBodyToMarkdown(html)
     if (!md) continue
     n++
-    sections.push(`## ${titles.get(href) ?? `Section ${n}`}\n\n${md}`)
+    sections.push(`## ${titles.get(path) ?? `Section ${n}`}\n\n${md}`)
   }
 
   const out = sections.join('\n\n')

@@ -23,6 +23,7 @@ import { distill, probeChat, estimateDistill, type DistillEmbedder } from './dis
 import { StagedRunStore } from './distill/staged'
 import { convertDocument } from './distill/convert'
 import { convertSource, originalPathOf } from './distill/sources'
+import { distillRunId, uniqueRunId } from './distill/runId'
 import {
   mergeRun,
   unmergeRun,
@@ -479,27 +480,6 @@ function rendererEmbedder(token: string): DistillEmbedder {
         mainWindow.webContents.send('distill:embed:req', token, id, texts)
       })
     }
-  }
-}
-
-/** A safe, readable run id from a document path (basename, sanitized). */
-function distillRunId(file: string): string {
-  const base = basename(file).replace(/\.[^.]+$/, '')
-  return (
-    base
-      .replace(/[^A-Za-z0-9 ._-]+/g, '-')
-      .replace(/^[^A-Za-z0-9]+/, '')
-      .slice(0, 80) || 'run'
-  )
-}
-
-/** De-collide a run id against already-staged runs: distilling two documents
- *  with the same basename must not silently replace the earlier run. */
-function uniqueRunId(base: string, taken: ReadonlySet<string>): string {
-  if (!taken.has(base)) return base
-  for (let n = 2; ; n++) {
-    const candidate = `${base}-${n}`
-    if (!taken.has(candidate)) return candidate
   }
 }
 
@@ -992,10 +972,10 @@ function registerIpc(): void {
     // clicks in the same tick can't both get past the guard. One document, one
     // run: the id is consumed here.
     pickedDocs.delete(docId)
-    const runId = uniqueRunId(
-      distillRunId(filePath),
-      new Set([...distillRuns.list(), ...RESERVED_RUN_IDS])
-    )
+    const runId = uniqueRunId(distillRunId(filePath), [
+      ...distillRuns.list(),
+      ...RESERVED_RUN_IDS
+    ])
     activeRunId = runId
     try {
       // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
@@ -1076,16 +1056,24 @@ function registerIpc(): void {
   ipcMain.handle('distill:listRuns', (): DistillRunInfo[] => {
     if (!distillRuns || !vaultRoot) return []
     const root = vaultRoot
-    return distillRuns.list().map((id) => {
-      const meta = readRunMeta(root, id)
-      return {
-        id,
-        notes: meta?.notes ?? 0,
-        themes: meta?.themes ?? [],
-        merged: readMergeManifest(root, id)?.complete === true,
-        unfinished: isUnfinishedRun(root, id)
+    const out: DistillRunInfo[] = []
+    for (const id of distillRuns.list()) {
+      // Per entry, not per list: `.distill/` is a real directory a user can put
+      // things in, and one unreadable run must not take the whole sidebar down.
+      try {
+        const meta = readRunMeta(root, id)
+        out.push({
+          id,
+          notes: meta?.notes ?? 0,
+          themes: meta?.themes ?? [],
+          merged: readMergeManifest(root, id)?.complete === true,
+          unfinished: isUnfinishedRun(root, id)
+        })
+      } catch {
+        /* not a run we can describe — leave it out of the list */
       }
-    })
+    }
+    return out
   })
 
   ipcMain.handle('distill:remove', (_e, runId: string) => distillRuns?.remove(runId))

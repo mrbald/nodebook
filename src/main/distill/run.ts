@@ -27,8 +27,9 @@
  * Last comes the shape of the result: the emitted notes are embedded, grouped
  * (`themes.ts`) and named in one call, so the map reads book → themes → notes
  * instead of one flat star. That pass is presentation, so it is the one pass
- * allowed to fail quietly — a naming call that never answers costs the names,
- * not the notes.
+ * allowed to fail quietly — and ALL of it, not just the naming call: it runs
+ * after every model call is paid for, so an embedder that never loaded costs
+ * the grouping (counted as `themesSkipped`) and never the run's notes.
  */
 
 import {
@@ -67,7 +68,7 @@ import {
   MIN_THEME_NOTES,
   type NoteCluster
 } from './themes'
-import { sourceNoteName, type CheckpointStore } from './artifact'
+import { sourceNoteName, type CheckpointStore, type WindowGroup } from './artifact'
 import { withRetry, type RetryOptions } from './retry'
 
 /** Thrown when a run is cancelled via its AbortSignal. */
@@ -270,9 +271,11 @@ export interface DistillResult {
     /** Windows read — one model call each, before any length-split. */
     windows: number
     /** Extraction calls actually attempted, including the ones a provider
-     *  rejected for length before their halves were read. */
+     *  rejected for length before their halves were read, and the ones an
+     *  earlier attempt of a resumed run made. */
     calls: number
-    /** How many times a rejected window was halved and read as two. */
+    /** How many times a rejected window was halved and read as two (an earlier
+     *  attempt's splits included). */
     splits: number
     extracted: number
     grounded: number
@@ -286,6 +289,9 @@ export interface DistillResult {
     notes: number
     /** Theme notes the run grouped its notes under (0 = not enough notes). */
     themes: number
+    /** 1 when grouping was attempted and failed (embedder or bridge), so the
+     *  run kept its notes flat; 0 otherwise. */
+    themesSkipped: number
     failedWindows: number
     /** Shape of the run's link graph (see shared DistillStats and link.ts). */
     edges: number
@@ -366,6 +372,10 @@ interface WindowOutcome {
   /** Calls that came back unusable — bad JSON, a hard failure, or a rejection
    *  that could not be split any further. */
   failed: number
+  /** The calls it actually took, in order: the chunks each was shown, how many
+   *  items it produced, and whether it landed. Recorded so a resume can replay
+   *  the window exactly as it happened (see `WindowGroup`). */
+  groups: WindowGroup[]
   /** The last hard error, if one occurred. Only these count towards the
    *  three-strikes circuit breaker: bad JSON and a too-long prompt are this
    *  window's problem, a dead provider is the run's. */
@@ -413,30 +423,37 @@ async function readWindow(ctx: ReadContext, ids: number[], depth: number): Promi
     heading: ctx.chunks[id].heading,
     text: ctx.chunks[id].text
   }))
+  const oneCall = (items: ExtractedItem[], ok: boolean): WindowGroup[] => [
+    { ids, count: items.length, ok }
+  ]
   try {
     const { items, failed } = await withRetry(
       () => extractWindow(ctx.chat, shown, ctx.registry.render(ctx.registryBudget), ctx.signal),
       { ...ctx.retry, signal: ctx.signal }
     )
     registerTitles(ctx, items, ids)
-    return { items, failed: failed ? 1 : 0 }
+    return { items, failed: failed ? 1 : 0, groups: oneCall(items, !failed) }
   } catch (err) {
     throwIfAborted(ctx.signal)
     if (err instanceof DistillAborted) throw err
     if (err instanceof ContextLengthError) {
-      if (depth >= MAX_SPLIT_DEPTH || ids.length < 2) return { items: [], failed: 1 }
+      if (depth >= MAX_SPLIT_DEPTH || ids.length < 2)
+        return { items: [], failed: 1, groups: oneCall([], false) }
       ctx.splits++
       const mid = Math.ceil(ids.length / 2)
       // In order, so the second half's prompt carries what the first half named.
       const a = await readWindow(ctx, ids.slice(0, mid), depth + 1)
       const b = await readWindow(ctx, ids.slice(mid), depth + 1)
+      // The rejected parent showed nothing, so only the halves are recorded —
+      // and they are what `windowOf` ends up holding for these chunks.
       return {
         items: [...a.items, ...b.items],
         failed: a.failed + b.failed,
+        groups: [...a.groups, ...b.groups],
         error: b.error ?? a.error
       }
     }
-    return { items: [], failed: 1, error: err }
+    return { items: [], failed: 1, groups: oneCall([], false), error: err }
   }
 }
 
@@ -627,13 +644,10 @@ export async function distill(
     inputBudget: opts.inputBudget ?? deps.chat.inputBudget
   })
   let plan: number[][]
-  let coverage: number
   if (savedPlan) {
     plan = savedPlan
-    coverage = coverageOf(chunks, savedPlan.flat())
   } else {
     plan = planned.windows.map((w) => w.chunkIds)
-    coverage = planned.coverage
     opts.checkpoint?.save({ type: 'plan', windows: plan })
   }
 
@@ -662,6 +676,17 @@ export async function distill(
   const maxConsecutive = opts.maxConsecutiveFailures ?? 3
   let failedWindows = 0
   let consecutiveErrors = 0
+  // Chunks a call actually read and answered for — what coverage is measured
+  // over. A window the model never answered usably was not read, whatever the
+  // plan said it would be.
+  const readIds: number[] = []
+  const takeGroups = (groups: WindowGroup[]): void => {
+    for (const g of groups) {
+      for (const id of g.ids) ctx.windowOf.set(id, g.ids)
+      if (g.ok) readIds.push(...g.ids)
+      else failedWindows++
+    }
+  }
   report('extracting', 0, plan.length)
   for (let i = 0; i < plan.length; i++) {
     throwIfAborted(opts.signal)
@@ -669,28 +694,50 @@ export async function distill(
     const already = saved?.done.get(i)
     if (already) {
       // Recorded by an earlier attempt — replay it, don't pay for it twice.
-      for (const id of ids) ctx.windowOf.set(id, ids)
-      if (already.failed) failedWindows++
-      registerTitles(ctx, already.items, ids)
+      // Faithfully: the calls it really took (a window the provider rejected
+      // was split, and grounding looks inside the call a chunk was shown in),
+      // the items each of them produced, and what they cost.
+      const groups = already.groups ?? [
+        { ids, count: already.items.length, ok: !already.failed }
+      ]
+      takeGroups(groups)
+      let at = 0
+      for (const g of groups) {
+        const part = already.items.slice(at, at + g.count)
+        at += g.count
+        if (g.ok) registerTitles(ctx, part, g.ids)
+      }
+      ctx.calls += already.calls
+      ctx.splits += already.splits
       extracted.push(...already.items)
       report('extracting', i + 1, plan.length)
       continue
     }
+    const callsBefore = ctx.calls
+    const splitsBefore = ctx.splits
     const outcome = await readWindow(ctx, ids, 0)
-    failedWindows += outcome.failed
+    takeGroups(outcome.groups)
     if (outcome.error) {
       if (++consecutiveErrors >= maxConsecutive) throw outcome.error
     } else consecutiveErrors = 0
-    // The checkpoint records the window as one unit whatever it took to read:
-    // a resume replays what the window produced, not how many calls it cost.
+    // The checkpoint records the window as one unit — plus how it fell into
+    // calls and what those cost, so a resume replays the same reading rather
+    // than an idealised one.
+    const cost = {
+      groups: outcome.groups,
+      calls: ctx.calls - callsBefore,
+      splits: ctx.splits - splitsBefore
+    }
     opts.checkpoint?.save(
       outcome.items.length === 0 && outcome.failed > 0
-        ? { type: 'window', index: i, failed: true }
-        : { type: 'window', index: i, items: outcome.items }
+        ? { type: 'window', index: i, failed: true, ...cost }
+        : { type: 'window', index: i, items: outcome.items, ...cost }
     )
     extracted.push(...outcome.items)
     report('extracting', i + 1, plan.length)
   }
+  // What was really read — the plan minus every window that came back unusable.
+  const coverage = coverageOf(chunks, readIds)
 
   // 4–6. Ground → dedup → emit (all pure).
   report('finalizing', 0, 1)
@@ -723,13 +770,24 @@ export async function distill(
   let themes: string[] = []
   let edges = emitted.edges
   let components = emitted.components
+  let themesSkipped = 0
   if (emitted.notes.length >= MIN_THEME_NOTES) {
     report('themes', 0, 1)
-    const pass = await addThemes(emitted, deduped, source, deps, opts, saved?.themes ?? null)
-    notes = pass.notes
-    themes = pass.names
-    edges = pass.edges
-    components = pass.components
+    try {
+      const pass = await addThemes(emitted, deduped, source, deps, opts, saved?.themes ?? null)
+      notes = pass.notes
+      themes = pass.names
+      edges = pass.edges
+      components = pass.components
+    } catch (err) {
+      // Grouping is presentation, and it runs AFTER every model call is paid
+      // for. An embedder that never loaded, a bridge that timed out, a renderer
+      // that reloaded mid-run — none of that may throw away a whole run's
+      // notes. The run keeps them, flat, and says so in its stats.
+      throwIfAborted(opts.signal)
+      if (err instanceof DistillAborted) throw err
+      themesSkipped = 1
+    }
     report('themes', 1, 1)
   }
   report('done', 1, 1)
@@ -750,6 +808,7 @@ export async function distill(
       merged,
       notes: emitted.notes.length,
       themes: themes.length,
+      themesSkipped,
       failedWindows,
       edges,
       ghostLinks: emitted.ghostLinks,

@@ -507,10 +507,10 @@ describe('distill — a hidden lower limit', () => {
     // A window that cannot fit is this window's problem: the run still ends
     // normally, with the failure counted rather than thrown.
     expect(res.stats.windows).toBe(1)
+    // …and nothing was read, so it does not claim to have read the book.
+    expect(res.stats.coverage).toBe(0)
   })
 })
-
-// --- The concept registry ---------------------------------------------------
 
 describe('distill — the concept registry', () => {
   it('carries the titles one window grounded into the next window’s prompt', async () => {
@@ -685,7 +685,9 @@ describe('distill — resilience', () => {
     )
     expect(second.calls).toBe(2) // only the two windows that were left
     expect(res.stats.windows).toBe(4)
-    expect(res.stats.calls).toBe(2) // a replayed window costs nothing
+    // `calls` is what the DOCUMENT cost to read, across attempts: the two
+    // windows this attempt paid for plus the two the first attempt did.
+    expect(res.stats.calls).toBe(4)
     expect(res.stats.notes).toBe(4) // including the notes from the first attempt
   })
 
@@ -723,6 +725,47 @@ describe('distill — resilience', () => {
     expect(res.stats.notes).toBe(4)
   })
 
+  it('replays a SPLIT window as the calls it really took, not as one big one', async () => {
+    // Declares 40k (one window over all eight chunks), really rejects over 3k:
+    // the window is halved until the halves fit. Grounding then looks for a
+    // mislabelled quote among the chunks shown in the SAME call — so a resume
+    // that replayed the window whole would search a wider set than the first
+    // attempt did, and a quote that was unique could come back ambiguous.
+    const store = fakeCheckpoint()
+    const a = await distill(
+      { file: 'L.md', text: LONG },
+      { embedder, chat: budgetedChat(40_000, 3_000) },
+      { checkpoint: store }
+    )
+    expect(a.stats.splits).toBe(3)
+    const record = store.records.find((r) => r.type === 'window')
+    const groups = record && 'groups' in record ? record.groups : undefined
+    expect(groups?.map((g) => g.ids)).toEqual([
+      [0, 1],
+      [2, 3],
+      [4, 5],
+      [6, 7]
+    ])
+
+    // Resume from that checkpoint against a model that would answer nothing:
+    // everything comes from the log, and comes out identical.
+    const idle = budgetedChat(40_000, 3_000)
+    const b = await distill(
+      { file: 'L.md', text: LONG },
+      { embedder, chat: idle },
+      { checkpoint: store }
+    )
+    expect(idle.prompts).toHaveLength(0)
+    expect(b.notes).toEqual(a.notes)
+    expect(b.stats.grounded).toBe(a.stats.grounded)
+    expect(b.stats.droppedByReason).toEqual(a.stats.droppedByReason)
+    // …and the replayed window still costs what it cost, so `calls` stays
+    // "calls actually attempted" rather than resetting to zero on a resume.
+    expect(b.stats.calls).toBe(a.stats.calls)
+    expect(b.stats.splits).toBe(a.stats.splits)
+    expect(b.stats.coverage).toBe(a.stats.coverage)
+  })
+
   it('reports the coverage of a resumed plan, not of a freshly planned one', async () => {
     const store = fakeCheckpoint()
     // A plan that read half the document — as a sampled first attempt would.
@@ -737,6 +780,47 @@ describe('distill — resilience', () => {
     expect(res.stats.coverage).toBeCloseTo(coverageOf(chunkMarkdown(SRC4), [0, 2]))
   })
 })
+
+describe('distill — coverage is what was READ', () => {
+  it('drops the failed windows out of coverage, instead of reporting the plan', async () => {
+    // Four windows of one chunk; the second one never answers usably.
+    const chat = scriptedChat((_n, prompt) => (/beta/i.test(prompt) ? rateLimit() : null))
+    const res = await distill(
+      { file: 'B.md', text: SRC4 },
+      { embedder, chat },
+      { ...opts4, ...noWait }
+    )
+    expect(res.stats.failedWindows).toBe(1)
+    expect(res.stats.coverage).toBeLessThan(1)
+    // Exactly the three passages that were read — not "all four, minus a bit".
+    const chunks = chunkMarkdown(SRC4)
+    expect(res.stats.coverage).toBeCloseTo(coverageOf(chunks, [0, 2, 3]))
+  })
+
+  it('counts a window read on the FIRST attempt when a resume finishes the run', async () => {
+    const store = fakeCheckpoint()
+    const ctrl = new AbortController()
+    const first = scriptedChat((n) => {
+      if (n === 3) ctrl.abort()
+      return null
+    })
+    await expect(
+      distill(
+        { file: 'B.md', text: SRC4 },
+        { embedder, chat: first },
+        { ...opts4, ...noWait, checkpoint: store, signal: ctrl.signal }
+      )
+    ).rejects.toBeInstanceOf(DistillAborted)
+    const res = await distill(
+      { file: 'B.md', text: SRC4 },
+      { embedder, chat: scriptedChat(() => null) },
+      { ...opts4, ...noWait, checkpoint: store }
+    )
+    expect(res.stats.coverage).toBe(1)
+  })
+})
+
+// --- The concept registry ---------------------------------------------------
 
 describe('estimateDistill', () => {
   it('predicts the passages, calls and coverage of a run, without calling anything', async () => {
@@ -926,14 +1010,17 @@ describe('distill — themes', () => {
       expect(themesOf(note.content)).toHaveLength(1)
       expect(res.themes).toContain(themesOf(note.content)[0])
     }
-    // A theme note says what it is, cites the book, and lists its members.
+    // A theme note says what it is, cites the book, and lists its members —
+    // as plain text, so a membership is ONE edge (the member's own part_of).
     for (const theme of themeNotes) {
       expect(theme.content).toContain('kind: theme')
       expect(theme.content).toContain('source:: [[Book]]')
-      const members = [...theme.content.matchAll(/^- \[\[([^\]]+)\]\]$/gm)].map((m) => m[1])
+      const members = [...theme.content.matchAll(/^- (.+)$/gm)].map((m) => m[1])
       expect(members.length).toBeGreaterThan(0)
-      for (const m of members)
+      for (const m of members) {
+        expect(m).not.toContain('[[')
         expect(themesOf(conceptNotes.find((n) => n.name === m)!.content)).toEqual([theme.name])
+      }
     }
     // The map is now one island per theme instead of eight loose notes.
     expect(res.stats.components).toBe(3)
@@ -978,6 +1065,36 @@ describe('distill — themes', () => {
     )
     expect(res.stats.notes).toBe(8)
     expect(res.stats.themes).toBe(3)
+  })
+
+  it('keeps the run when the embedder fails — grouping costs, the notes do not', async () => {
+    // The bridge to the renderer's embedder can be gone by the time this pass
+    // runs (never loaded, timed out, the window reloaded) — and by then every
+    // model call is already paid for.
+    const broken = {
+      embed: async (): Promise<Float32Array[]> => {
+        throw new Error('embedder is not available')
+      }
+    }
+    const chat = themingChat()
+    const res = await distill(
+      { file: 'Book.md', text: SRC8 },
+      { embedder: broken, chat },
+      { ...opts8, ...noWait }
+    )
+    expect(res.stats.notes).toBe(8) // every note kept…
+    expect(res.notes).toHaveLength(8)
+    expect(res.stats.themes).toBe(0) // …flat, and said so
+    expect(res.themes).toEqual([])
+    expect(res.stats.themesSkipped).toBe(1)
+    expect(chat.namingCalls).toBe(0) // nothing to name, so nothing was asked
+    for (const n of res.notes) expect(themesOf(n.content)).toEqual([])
+  })
+
+  it('says nothing was skipped when there was no grouping to do', async () => {
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: quotingChat() }, opts)
+    expect(res.stats.themes).toBe(0)
+    expect(res.stats.themesSkipped).toBe(0)
   })
 
   it('aborts while embedding the notes for themes', async () => {

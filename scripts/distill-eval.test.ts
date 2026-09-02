@@ -62,9 +62,9 @@ const FIXTURES: FixtureSpec[] = [
   },
   {
     key: 'paper.pdf',
-    // Through the real converter — pdf.js text extraction, page headings,
-    // hyphenation and running header/footer left exactly as pdf.js reads
-    // them (no cleanup pass exists yet; that's a later phase).
+    // Through the real converter — pdf.js text extraction with page headings,
+    // then the `cleanPdf` pass (de-hyphenation, running header/footer removal,
+    // paragraph reconstruction) exactly as a real run gets it.
     load: async () => ({ file: 'paper.pdf', text: await convertDocument(join(FIXTURES_DIR, 'paper.pdf')) })
   },
   {

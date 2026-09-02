@@ -41,7 +41,10 @@ export interface EmittedNote {
   content: string
 }
 
-const DOC_EXT_RE = /\.(pdf|epub|docx|html|htm|xhtml|md|markdown|txt|text)$/i
+/** The document types this app converts (`convert.ts`'s switch, as a test).
+ *  Used to strip the extension off a title, and to check that a path claiming
+ *  to be a source document could actually be one (`sources.ts`). */
+export const DOC_EXT_RE = /\.(pdf|epub|docx|html|htm|xhtml|md|markdown|txt|text)$/i
 const TITLE_CAP = 80
 
 /** Cut `s` back to the last word boundary at or before `max` chars. No ellipsis. */
@@ -295,6 +298,14 @@ export interface ThemeNote {
  * Render one theme note. Deliberately wordless apart from the links: the run
  * may be in any language, and an English sentence written into a Russian run's
  * map would be the one thing on it that isn't the book's.
+ *
+ * The members are listed as PLAIN TEXT, not `[[wikilinks]]`. One membership is
+ * one edge: the member's own `part_of::` (see `attachThemes`) is the edge, and
+ * a wikilink here would add a second, opposite one — `harvest()` reads every
+ * wikilink as a `links_to` triple — so every note would sit under its theme
+ * twice on the map. The theme note stays navigable the other way round: its
+ * members are exactly its `part_of` backlinks, which the note's own panel
+ * lists, and the map draws the same arrows.
  */
 export function renderThemeNote(theme: ThemeNote): string {
   const parts = [
@@ -305,7 +316,7 @@ export function renderThemeNote(theme: ThemeNote): string {
     `source:: [[${theme.sourceName}]]`,
     ''
   ]
-  for (const m of theme.members) parts.push(`- [[${m}]]`)
+  for (const m of theme.members) parts.push(`- ${m}`)
   return parts.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
 }
 

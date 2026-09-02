@@ -164,9 +164,15 @@ describe('renderThemeNote', () => {
     expect(md).toContain('# Checks on power')
   })
 
-  it('lists every member as a wikilink', () => {
-    expect(md).toContain('- [[Faction]]')
-    expect(md).toContain('- [[Union]]')
+  it('lists every member as plain text — one membership is one edge', () => {
+    expect(md).toContain('- Faction')
+    expect(md).toContain('- Union')
+    // A wikilink here would be a second, opposite edge on top of the member's
+    // own `part_of::` — two arrows per membership on the map.
+    expect(md).not.toContain('[[Faction]]')
+    expect(md).not.toContain('[[Union]]')
+    // The book is still a link: that one IS the theme note's own edge.
+    expect(md).toContain('source:: [[On Government]]')
   })
 })
 

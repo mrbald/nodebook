@@ -177,10 +177,13 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('.graph-node').first()).toBeVisible()
   expect(await page.locator('.graph-node').count()).toBeGreaterThan(1)
-  // Attached, not "visible": a two-node map can lay its nodes out exactly
-  // level, and a horizontal SVG line has a zero-height box Playwright calls
-  // hidden. The edge is drawn either way.
-  await expect(page.locator('.graph-edge').first()).toBeAttached()
+  // Not `toBeVisible`: a two-node map can lay its nodes out exactly level, and
+  // a horizontal SVG line has a zero-height box Playwright calls hidden. So ask
+  // the geometry instead — an edge that is really drawn has a length.
+  const edge = page.locator('.graph-edge').first()
+  await expect(edge).toBeAttached()
+  const edgeLength = await edge.evaluate((el) => (el as SVGGeometryElement).getTotalLength())
+  expect(edgeLength).toBeGreaterThan(0)
 
   // The completion banner says what happened and that nothing is merged yet.
   await expect(page.locator('.distill-coverage-banner')).toContainText(/Staged \d+ notes?/)
@@ -400,7 +403,11 @@ test('MERGE beside a note you already have: "Name (Book)", with the links rewrit
   await expect(page.locator('.merge-summary')).toContainText(
     /1 note shares a name with a note you already have/
   )
-  await expect(page.locator('.merge-summary')).toContainText(`${clashName} (on-government)`)
+  // The summary counts them; the rows below say, per note, name → new name.
+  await expect(page.locator('.merge-summary')).toContainText('as shown below')
+  await expect(page.locator('.merge-clashes')).toContainText(
+    `${clashName} → ${clashName} (on-government)`
+  )
   await expect(page.locator('.merge-clash input')).not.toBeChecked()
   await page.locator('.merge-confirm').click()
   await expect(page.locator('.distill-merged-banner')).toBeVisible()
@@ -414,10 +421,15 @@ test('MERGE beside a note you already have: "Name (Book)", with the links rewrit
   // The document itself lands ONCE, under Sources/ — never in the run's folder.
   expect(existsSync(join(realpathSync(vaultDir), 'Sources', 'on-government.md'))).toBe(true)
   expect(existsSync(join(folder, 'on-government.md'))).toBe(false)
-  // Every link to the renamed note followed it — no dead link in your vault.
+  // Every reference to the renamed note followed it — a `[[link]]` in another
+  // note's body, and a theme note's plain-text member list (which is the run's
+  // other place a note name is written). No stale name is left in your vault.
   const others = readdirSync(folder).filter((n) => n.endsWith('.md') && !n.startsWith(clashName))
-  const bodies = others.map((n) => readFileSync(join(folder, n), 'utf8')).join('\n')
-  expect(bodies).toContain(`[[${clashName} (on-government)]]`)
+  const bodies = others.map((n) => readFileSync(join(folder, n), 'utf8'))
+  expect(bodies.join('\n')).toContain(`${clashName} (on-government)`)
+  for (const body of bodies)
+    for (const line of body.split('\n'))
+      expect(line.trim()).not.toBe(`- ${clashName}`)
 
   // Two notes, two dots: an unconfirmed name clash is never collapsed.
   const g = await page.evaluate(() => window.nodebook.graph(null, { showSources: true }))

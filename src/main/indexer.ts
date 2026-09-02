@@ -71,15 +71,18 @@ export class VaultIndex {
    * The vault-open scan is mtime-gated, so a file that hasn't changed since the
    * column was added is never re-parsed and would keep `kind = 'note'` forever.
    * The index already holds every note's text (FTS body), so the kinds can be
-   * read back from there — cheaply, because only rows that literally start with
-   * a frontmatter `kind:` line are fetched. `user_version` marks it done, so
-   * this costs one scan per vault, ever.
+   * read back from there — cheaply, because only rows that open a frontmatter
+   * block and mention `kind:` are fetched. The `%` between the two covers a
+   * file saved with CRLF line endings (`---\r\nkind:`), which a literal
+   * `'---\nkind: %'` prefilter would silently skip; `frontmatterKind` below is
+   * what actually decides. `user_version` marks it done, so this costs one scan
+   * per vault, ever.
    */
   private backfillKinds(): void {
     if ((this.db.pragma('user_version', { simple: true }) as number) >= KIND_BACKFILL_VERSION) return
     const rows = this.db
       .prepare(`SELECT rowid AS id, body FROM notes_fts WHERE body LIKE ?`)
-      .all('---\nkind: %') as { id: number; body: string }[]
+      .all('---%kind: %') as { id: number; body: string }[]
     const set = this.db.prepare('UPDATE files SET kind = ? WHERE id = ?')
     this.db.transaction(() => {
       for (const r of rows) {
