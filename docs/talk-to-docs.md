@@ -119,9 +119,9 @@ clearly-private opt-in**.
    *"✨ Search by meaning — set up AI (local & private)."* It opens a small setup
    card: "Runs entirely on your machine — your notes never leave it. Downloads a
    model once (~285 MB; it understands ~100 languages), then indexes in the
-   background." `[Enable]` + an **Advanced** disclosure (runtime WASM/native,
-   model). Also in Settings (`[talk]`). The entry only promises what enabling
-   delivers.
+   background." `[Enable]` + an **Advanced** disclosure (model choice; the
+   runtime is WASM, and no native one is built). Also in Settings (`[talk]`). The
+   entry only promises what enabling delivers.
 2. **Activation states are designed.** Enable → model-download progress →
    "Indexing 120/450…" (background, non-blocking) → ready. Offline/error → message
    + Retry. Disable → stop + offer to delete the embeddings (they live in
@@ -147,7 +147,10 @@ user must manage; any AI control visible-but-inert before setup.
 enabled = false            # whole feature is opt-in; nothing loads until true
 
 [talk.embed]
-runtime = "wasm"           # wasm (default, lean, cross-platform) | native (faster)
+runtime = "wasm"           # wasm — the only runtime that is built. The key is
+                           # parsed and "native" is accepted, but no native
+                           # adapter is shipped (see Build / packaging below), so
+                           # the embedder runs on WASM either way.
 model = "Xenova/multilingual-e5-base"  # ~100 languages; see alternatives above
 threads = 0                # embedding CPU threads; 0 = auto (≈half the cores, max 4)
 # provider = "local"       # local | openai-compat (baseUrl/apiKey) for remote

@@ -16,7 +16,11 @@
    (`[[RL]] same_as:: [[Reinforcement Learning]]` — already a `key:: value` → a
    triple), pins, "name this cluster X". These live *in notes* (or a saved-view
    artifact) and survive a `.nodebook` rebuild **because they were never in
-   `.nodebook`**.
+   `.nodebook`**. *Shipped:* the distill merge dialog is the first producer of
+   `same_as::` — it writes the line only when the user ticks "same as the existing
+   note", never on a bare name clash — and `buildGraph` is its consumer, folding
+   a confirmed pair into one node and keeping the other name as an alias. Delete
+   the line and the two notes split apart again.
 2. **Saved views — source of truth, explicit artifact.** Focus, filters, pins, a
    frozen cluster hierarchy: a *named* thing the user chose to keep. Today that's
    `.map.md` — but `.map.md` is overloaded (below); saved-view *config* needs its
@@ -28,6 +32,14 @@
 
 Rule of thumb: **if a rebuild would lose a human decision, that state is in the
 wrong tier.** Decisions → markdown; only cosmetics → the cache.
+
+*Shipped, and it is tier 1:* an **unmerged distill run** lives in
+`<vault>/.distill/<run>/` as markdown. It is a dot-dir, so the vault scan and the
+watcher skip it exactly as they skip `.nodebook/` — but it is **durable staging,
+not cache**: the model output in it exists nowhere else and cannot be re-derived
+without paying for the run again. It is written atomically, migrated forward, and
+worth backing up. The run's own `run.db` beside it *is* cache, and rebuilds from
+the markdown when missing. `.nodebook/` goes back to being purely a cache.
 
 ## `.map.md` is two things — split them
 
@@ -44,7 +56,10 @@ round-trip rules:
 ## Scopes (domains) — not one vault-wide union
 
 Search, centrality, clustering, and export must know *which* notes participate.
-Folder prefixes are not a boundary; the index needs an explicit `scope`:
+Folder prefixes are not a boundary. The table below is the **requirement** — which
+domains exist and where each may be seen. It was written as one `scope` column on
+`files`/`chunks`; what shipped for distill is stronger and is described under it.
+No `scope` column exists today.
 
 | Scope | What | In search? | In canonical graph? |
 |---|---|---|---|
@@ -54,10 +69,29 @@ Folder prefixes are not a boundary; the index needs an explicit `scope`:
 | `distill-staged` | a distill run not yet adopted | scoped to that run | **no** |
 | `view` | saved-view artifacts | no (they're config) | n/a |
 
-**Distill output lands in `distill-staged`** and reaches the canonical graph only
-through an explicit **promote/merge** step — so throwaway runs can't distort search,
-centrality, clustering, or entity resolution. Implemented as a `scope` column on
-`files` / `chunks` that the relevant queries filter by, **not folders**.
+**Distill output reaches the canonical graph only through an explicit
+promote/merge step** — so an unadopted run can't distort search, centrality,
+clustering, or entity resolution. That requirement is met.
+
+**Staging is a separate database, not a scope value.** Each run owns a `run.db`
+inside `<vault>/.distill/<run>/` — its own `VaultIndex`, never the canonical one.
+The firewall is therefore structural: there is no query that could accidentally
+return a staged note, because the rows are not in the canonical database at all.
+A `scope` column would have needed every query to remember a predicate. **Merge
+*is* the promote step**: it copies the run's notes into `Distilled/<run>/` (and
+the document itself into `Sources/`, once), and from that moment they are ordinary
+vault notes the normal indexer picks up — nothing special about them remains.
+
+**No new scope value was added. `files.kind` carries what a note *is*** —
+`document | theme | concept | claim | entity`, read from a note's frontmatter
+`kind:` — which is a different axis from scope and answers the questions scope
+could not. A `kind: document` note is a whole book: it is searchable and
+answerable, but it is left out of the global degree ranking, out of the
+colour-by-meaning clustering, and out of "related" suggestions, and it skips the
+full parse on index (title + full text + chunks only — the cheap path for a 1 MB
+note). `kind: theme` lets the map draw a group differently. The contract's
+`source` scope still means "notes you wrote", and merged distill notes are exactly
+that once you own them.
 
 ## Live-derived vs staged-confirmed (resolving the contradiction)
 
@@ -82,12 +116,26 @@ to be specified before any canonical-KB / entity-resolution code:
 - **Scale targets** — concrete N (notes / chunks / nodes / edges) the renderer and
   the single synchronous `better-sqlite3` must hold; batching strategy for
   large write bursts (a distilled book = thousands of inserts) so the main loop
-  doesn't stall.
+  doesn't stall. *Partly addressed:* the `kind: document` cheap index path keeps
+  the biggest single note off the parser, and the telemetry histogram is the gate
+  — but no target number is written down yet.
 - **Concept-level vectors for resolution** — whole-note centroids are a poor merge
   substrate for multi-topic and generated notes; resolution needs vectors at the
-  *claim/concept* grain (an `extracted`-scope concern).
-- **Claim-level provenance** — `cite::` is note-level and drifts after edits; true
-  per-claim provenance, conflicting claims, and converter-dependent page anchors are
-  unsolved and currently oversold as the anti-hallucination guarantee.
+  *claim/concept* grain. Still open, and it is what stands between the shipped
+  name-match merge candidates and real entity resolution
+  ([body-of-knowledge.md](body-of-knowledge.md) K2).
+- **Claim-level provenance** — ~~`cite::` is note-level and drifts after edits~~.
+  *Largely solved:* a citation is a **quote-anchored** span. The stored offsets are
+  now exact (`content.slice(start, end)` is the chunk the quote was found in), a
+  quote is accepted only where it occurs **uniquely** in the document, and the
+  renderer re-locates the span from the quote when the text has moved — so an edit
+  shifts the anchor instead of breaking it. Each citation also records `where:`
+  (the page or section). What is still open is the harder half: *conflicting*
+  claims across sources, and provenance at a grain finer than one quote.
 - **Commit protocol** — import transactions, recompute boundaries, pre-confirmation
-  vs committed graph state, and rollback/unmerge for a staged merge.
+  vs committed graph state, and rollback/unmerge for a staged merge. *Shipped for
+  the distill merge:* the plan is computed and shown before a byte is written, the
+  manifest with expected hashes is written first, files are copied via temp +
+  rename, and Undo verifies each hash and sends anything you edited to the Trash.
+  The general case — many sources committing into one canonical graph — is still
+  open.

@@ -262,7 +262,10 @@ first.
   name listed beside it.
 - **Click a citation** — a distilled note lists its **Sources** in the right-hand
   panel — each one shows **where the passage is** (“Page 42”, or the chapter's
-  name) and the quote itself. Clicking one opens the document at that passage.
+  name) and the quote itself. Clicking one opens **Nodebook's own copy** of the
+  document at that passage, with the quote highlighted, so you can read around it.
+  If that copy is edited later the citation still finds its passage: it is
+  anchored to the quote itself, not to a position that drifts.
 - **Open the original file** — open the document's own note and the panel shows
   where the file came from, with an **Open original** button that opens it in
   whatever app your system uses for PDFs, EPUBs and the rest.

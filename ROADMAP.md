@@ -41,15 +41,24 @@ An independent spec review drew a firewall worth keeping explicit (see
 - **Committed / buildable now** — the **explicit-graph mindmap** (derive + curate
   from triples; live, deterministic) and the **already-shipped semantic search**.
   These rest on stable foundations and need no new persistent-state model.
-- **Research / not committed** — the **cumulative body of knowledge**: entity
-  resolution, canonical merges, and stable incremental graph updates
-  ([docs/body-of-knowledge.md](docs/body-of-knowledge.md)), plus **distill→canonical
-  merge** ([docs/distill-documents.md](docs/distill-documents.md)). These need a
-  durable-decision model, explicit scopes, a commit protocol, and scale targets
-  pinned down *first*. Distill's standalone (`distill-staged`) path is buildable;
-  the merge-into-canonical path is not, yet.
+- ✅ **Since shipped — distill, staging, and distill→vault merge.** The firewall
+  turned out to be stronger than a `scope` column: a staged run has its **own
+  database** under `<vault>/.distill/<run>/`, so no canonical query can reach it.
+  **Merge is the promote step** — planned before a byte is written, hash-checked,
+  undoable to the Trash — and a name clash becomes one node only when the user
+  ticks "same as the existing note", which writes `same_as::` into the markdown.
+  No new scope value was needed; `files.kind` (`document|theme|concept|claim|
+  entity`) carries what a note *is*. See
+  [docs/state-and-scopes.md](docs/state-and-scopes.md).
+- **Still research / not committed** — the **cumulative** body of knowledge:
+  semantic entity resolution (embedding-kNN candidates over concept-grain
+  vectors), citation accumulation into an existing note, stable incremental graph
+  updates and change-surfacing diffs
+  ([docs/body-of-knowledge.md](docs/body-of-knowledge.md)). These still need
+  concept-grain vectors, a general commit protocol, and scale targets pinned down
+  *first*.
 
-Net: build the mindmap + lean on shipped search; treat the KB/merge layer as a
+Net: the mindmap and distill are shipped; treat the *cumulative* KB layer as a
 direction to validate, not the next sprint.
 
 ## Mindmap mode — "manage, don't draw"
@@ -125,28 +134,52 @@ overlay reusing the talk-to-docs embeddings ("related but not linked" kNN edges 
 clustering + PCA/UMAP layout); **E** optional LLM last-mile (cluster names,
 missing-link suggestions) via the existing provider abstraction.
 
-### Distill a document (book → cited, editable notes)
+### Distill a document (book → cited, editable notes) — ✅ shipped
 
-Design in [docs/distill-documents.md](docs/distill-documents.md). Ingest a book →
-chunk (offsets = provenance) → embed → cluster → LLM extracts concepts/claims/
-relations, each **cited to the source span** → emit *editable* markdown notes
-(`[[links]]`, `key:: value`, `cite::`) → normal index → derived mindmap for free.
-Talk-to-docs *inverted* (push-distill vs question-pull); reuses the chunker's
-offsets, the embeddings, the clustering, and the provider abstraction. Phases:
-D1 markdown/text books, D2 provenance UX, D3 PDF/EPUB ingestion (swappable
-`DocumentConverter`; pure-JS default, MarkItDown-MCP upgrade), D4 perspectives +
-grounding. Many maps per vault — each run is a named artifact (perspective/seed).
+Design in [docs/distill-documents.md](docs/distill-documents.md). **File ▸ Distill
+a Document…** turns a PDF / EPUB / DOCX / HTML / markdown / text file into small,
+linked, **cited** notes. As built: convert (one switch on the extension; PDF text
+de-furnitured and de-hyphenated first) → content-addressed source store → chunk
+(offsets = provenance) → **read the whole document in order**, packing consecutive
+chunks into windows sized from the model's context budget, one call per window,
+each carrying a **concept registry** so names stay consistent and links cross
+windows → ground every quote by **unique match** in the document (no evidence, no
+item; drops counted by reason) → dedup + link remap + mention links → embed and
+group the notes into named **themes** → emit markdown (`[[links]]`, `key:: value`,
+`cite:` with `where:`) → stage under `<vault>/.distill/<run>/` → **Merge** into the
+vault, or discard. Talk-to-docs *inverted* (push-distill vs question-pull).
 
-### Body of knowledge (cumulative KB + stability)
+Original phases D1 (markdown/text) ✅, D2 (provenance UX) ✅, D3 (PDF/EPUB/DOCX/HTML
+ingestion) ✅, D4 (perspectives + grounding) ◐ — per-run metadata, grounding and
+intra-run dedup shipped; **extraction prompt presets** and a "maps in this vault"
+browser are still open. Runs are resilient (retry, split-on-length, checkpoint +
+**Resume**) and bounded (`[distill] maxCalls`, with honest coverage-by-weight when
+a document exceeds the budget). `npm run eval:distill` scores the pipeline against
+golden concepts/edges on three fixtures; the before/after tables are in the design
+doc. *Open:* prompt presets; a real-provider quality baseline in CI.
+
+### Body of knowledge (cumulative KB + stability) — K1 ✅, K2 half
 
 Design in [docs/body-of-knowledge.md](docs/body-of-knowledge.md). The other mode:
 **one canonical graph** grown incrementally from many sources (vs distill's
-throwaway lenses) — one source of truth, many `.map.md` views. New concerns:
-**entity resolution** (same concept across sources → one node, via embedding-kNN +
-user-confirmed `same_as`, never silent) and **stability** (bounded, explainable
-change on update: seeded layout + label-aligned clusters + hysteresis +
-change-surfacing diffs). Phases: K1 merge target, K2 entity-resolution suggestions,
-K3 stable update, K4 change-surfacing.
+per-run lenses) — one source of truth, many `.map.md` views. New concerns:
+**entity resolution** (same concept across sources → one node, never silent) and
+**stability** (bounded, explainable change on update).
+
+- ✅ **K1. Merge target** — a distill run lands in the canonical vault
+  (`Distilled/<run>/`); the document itself is written once to `Sources/`, shared
+  by later runs of the same file. *Open:* accumulating a second source's citations
+  **into** an existing note (the first operation that would rewrite a user's file).
+- ◐ **K2. Entity-resolution suggestions** — **user-confirmed `same_as` shipped**:
+  the merge dialog lists name collisions, saves each beside yours as
+  `Name (Book)`, and only a ticked item writes `same_as:: [[Name]]`, which
+  `buildGraph` folds into one node (the other name kept as an alias). *Open:* the
+  semantic half — embedding-kNN candidates over concept-grain vectors ("RL" ≈
+  "Reinforcement Learning"), optional LLM canonicalization.
+- **K3. Stable update** — seeded layout + label-aligned clusters + hysteresis. The
+  seeded force layout shipped with the map; the semantic half has not.
+- **K4. Change-surfacing** — the per-update diff/inspector. The merge dialog is the
+  pattern's first instance, for one run.
 
 ## Talk to docs (AI semantic search + chat)
 

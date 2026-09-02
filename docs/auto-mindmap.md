@@ -71,7 +71,13 @@ and goes through the existing `provider.ts` abstraction (search-only / local /
 cloud):
 
 1. **Name a cluster** — its notes' titles + one representative chunk each → a 2–4
-   word theme. Batched, cheap.
+   word theme. Batched, cheap. ✅ **Shipped for distill runs** as *themes*
+   (`src/main/distill/themes.ts`): a run's notes are grouped and **all** groups
+   are named in one call, with the group's most central note's title as the
+   fallback, so a failed naming call costs names and not notes. Each note gets a
+   `part_of:: [[Theme]]` edge, so the theme is a real note in the map, not a
+   label painted on it. Naming clusters of the *vault* map is the same machinery
+   and is still open.
 2. **Suggest missing links** — the high-value one: pairs that are **semantically
    near (embedding-kNN) but unlinked** → "connect these?", with the LLM proposing
    the relation label. Surfaces latent structure worth writing down. The kNN is
@@ -92,7 +98,8 @@ The split you intuited holds: **clustering = linear algebra; the LLM = the names
 - **D. Semantic overlay** (talk-to-docs on) — per-note centroid vectors → kNN
   "similar" edges + embedding clustering + an optional PCA/UMAP 2D "semantic
   layout" toggle.
-- **E. LLM last-mile** (opt-in) — cluster names, missing-link suggestions, outline.
+- ◐ **E. LLM last-mile** (opt-in) — cluster names ✅ (shipped as distill *themes*;
+  vault-map cluster names still open), missing-link suggestions, outline.
 - **F. Derived outline → `.map.md`** — tree projection + save.
 
 **B + C deliver the automagic feel with no new dependencies and no AI**; D + E are

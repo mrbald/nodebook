@@ -30,6 +30,20 @@ store) index in the main process.
   leaves your machine and no API key is needed. Off by default; once enabled, the
   search box fuses keyword + meaning automatically (✨ marks meaning-matched hits).
   See [docs/talk-to-docs.md](docs/talk-to-docs.md).
+- **Distill a document** — turn a **PDF, EPUB, .docx, HTML, Markdown or text** file
+  into small, linked notes (**File ▸ Distill a Document…**; needs a chat provider).
+  Nodebook reads the **whole** document in order, one model call per window sized
+  to the model's context, each call carrying the concepts already named — so one
+  idea keeps one name and links reach across the book. Every point carries a
+  **citation**: a verbatim quote, accepted only where it occurs **uniquely** in the
+  document, with the **page or section** beside it; unbacked points are dropped,
+  not guessed. Notes are grouped under named **themes**, so the map reads
+  book → themes → notes. The run stages in `<vault>/.distill/` behind its own
+  index — readable, but invisible to search and the vault graph — until **Merge**
+  copies it in; merge plans the write, never overwrites a note of yours, and
+  **Undo** trashes (not deletes) anything you edited. The book itself lands once in
+  `Sources/`, with **Open original** back to the real file.
+  See [docs/distill-documents.md](docs/distill-documents.md).
 - **Knowledge index** — `[[links]]` and `key:: value` fields are harvested into a
   triple store (`subject, relation, object`).
 - **Knowledge map** — a force-directed graph (the **⊹ Map** button): local or global,
