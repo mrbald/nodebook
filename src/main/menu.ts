@@ -92,7 +92,12 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
         { type: 'separator' },
         { label: 'Find Note…', accelerator: 'CmdOrCtrl+K', enabled: state.hasVault, click: () => send('find-note') },
         { type: 'separator' },
-        { label: 'Distill a Document…', enabled: state.hasVault, click: () => send('distill') },
+        // One run at a time: main refuses a second one, so don't offer it.
+        {
+          label: 'Distill a Document…',
+          enabled: state.hasVault && !state.distilling,
+          click: () => send('distill')
+        },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', enabled: state.canSave, click: () => send('save') },
         { type: 'separator' },

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { join } from 'path'
 import { distill, probeChat, DistillAborted, type DistillProgress } from './run'
+import { planRunFiles } from './artifact'
 import type { Embedder, ChatModel } from '../rag/provider'
 
 // A small two-topic corpus: three "faction" sections, three "power" sections.
@@ -192,6 +194,55 @@ describe('distill', () => {
     const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: broken }, opts)
     expect(res.stats.failedClusters).toBe(2)
     expect(res.stats.notes).toBe(0)
+  })
+
+  it('a cancel during embedding reaches the embedder and surfaces as DistillAborted', async () => {
+    // The bridge (main's rendererEmbedder) rejects on abort; the orchestrator
+    // must report that as a cancellation, not as an embedding failure.
+    const hanging = {
+      embed: (_texts: string[], signal?: AbortSignal): Promise<Float32Array[]> =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('bridge closed')))
+        })
+    }
+    const ctrl = new AbortController()
+    const p = distill(
+      { file: 'Book.md', text: SRC },
+      { embedder: hanging, chat: quotingChat() },
+      { ...opts, signal: ctrl.signal }
+    )
+    setTimeout(() => ctrl.abort(), 5)
+    await expect(p).rejects.toBeInstanceOf(DistillAborted)
+  })
+
+  it('keeps the book note: a concept titled like the source gets a suffixed name', async () => {
+    // A chat stub that titles its one concept exactly like the book, which is
+    // written as a note of the run under that same name.
+    const titleThief: ChatModel = {
+      id: 'thief',
+      async *chat(req) {
+        const user = req.messages.map((m) => m.content).join('\n')
+        const m = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)
+        if (!m) {
+          yield '{"items":[]}'
+          return
+        }
+        const quote = m[2].split(/\s+/).slice(0, 4).join(' ')
+        yield JSON.stringify({
+          items: [
+            { kind: 'concept', title: 'Book', summary: 's', evidence: [{ chunkId: Number(m[1]), quote }], links: [] }
+          ]
+        })
+      }
+    }
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: titleThief }, opts)
+    expect(res.notes.length).toBeGreaterThan(0)
+    // Not one emitted note may claim the source note's file name.
+    expect(res.notes.map((n) => n.fileName)).not.toContain('Book.md')
+    expect(res.notes[0].name).toBe('Book 2')
+    // …so the run's files can actually be planned (the source note survives).
+    const planned = planRunFiles({ file: 'Book.md', text: SRC }, res.notes)
+    expect(planned.map((f) => f.relPath)).toContain(join('notes', 'Book.md'))
   })
 
   it('aborts mid-run and rejects with DistillAborted', async () => {

@@ -129,6 +129,8 @@ export interface MenuState {
   canSave: boolean
   /** An "Ask" chat provider is configured (drives Ask Your Notes). */
   canAsk: boolean
+  /** A distill run is in flight — only one at a time, so the menu item is off. */
+  distilling: boolean
 }
 
 /** A semantically-similar note (cosine over per-note embedding centroids). */
@@ -250,6 +252,14 @@ export interface DistillStats {
   coverage: number
 }
 
+/** A document the user picked to distill. `id` is an opaque handle main maps
+ *  back to the absolute path, so the renderer never names a path to run. */
+export interface DistillDocument {
+  id: string
+  /** The document's file name, for display. */
+  name: string
+}
+
 export interface DistillRunResult {
   runId: string
   stats: DistillStats
@@ -275,6 +285,15 @@ export interface DistillMergeResult {
   /** Vault-relative folder the notes were written into. */
   folder: string
   count: number
+}
+
+/** Outcome of undoing a merge. Notes you edited after merging are moved to the
+ *  Trash rather than deleted, so an undo can never destroy your work. */
+export interface DistillUnmergeResult {
+  /** Untouched notes, deleted outright. */
+  removed: number
+  /** Edited (or unverifiable) notes, moved to the system Trash. */
+  trashed: number
 }
 
 /** Whether a run has been merged into the vault, for the UI's Merge/Undo state. */

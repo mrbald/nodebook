@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync } from 'fs'
+import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -85,6 +85,18 @@ describe('planRunFiles', () => {
     expect(JSON.parse(files.at(-1)!.content)).toMatchObject({ notes: 2, stats })
   })
 
+  it('BACKSTOP: refuses to write an emitted note over the source note', () => {
+    // emitNotes reserves the source name; if a caller forgets, planRunFiles must
+    // not silently plan two files at the same path (the book would be lost).
+    const collide = emitNotes([{ ...grounded()[0], title: 'Federalist' }])
+    expect(() => planRunFiles({ file: 'Federalist.md', text: 'x' }, collide)).toThrow(
+      /would overwrite the source note/
+    )
+    // With the reservation in place the concept is simply suffixed.
+    const ok = emitNotes([{ ...grounded()[0], title: 'Federalist' }], { reserved: ['Federalist'] })
+    expect(() => planRunFiles({ file: 'Federalist.md', text: 'x' }, ok)).not.toThrow()
+  })
+
   it('names the book file by the short title (matching the source:: target); meta.source keeps the raw identifier', () => {
     const dump = "Options, Futures, and Other Derivatives__ Solutions Manual -- Hull J_ -- Anna's Archive.pdf"
     const shortName = 'Options, Futures, and Other Derivatives Solutions Manual — Hull J'
@@ -153,6 +165,19 @@ describe('mergeRun / unmergeRun (reversible promote)', () => {
   const run = (v: string): void => {
     writeRunArtifact(v, 'sapiens', { file: 'Sapiens.md', text: 'x' }, emitNotes(grounded()))
   }
+  /** Undo with a trash that just records what it was asked to move. */
+  const recordingTrash = (): { calls: string[]; trash: (p: string) => Promise<void> } => {
+    const calls: string[] = []
+    return {
+      calls,
+      trash: async (p) => {
+        calls.push(p)
+        rmSync(p, { force: true }) // stand-in for the system Trash
+      }
+    }
+  }
+  const manifestFile = (v: string): string =>
+    join(v, '.nodebook', 'distill', 'sapiens', 'merge.json')
 
   it('copies the run notes into a namespaced vault folder + records a manifest', () => {
     const v = tmpVault()
@@ -160,21 +185,97 @@ describe('mergeRun / unmergeRun (reversible promote)', () => {
     expect(canonicalMarkdown(v)).toEqual([]) // staged run is hidden (the firewall)
     const { manifest, written } = mergeRun(v, 'sapiens')
     expect(manifest.folder).toBe(join('Distilled', 'sapiens'))
+    expect(manifest.complete).toBe(true)
     // Now the notes live in the vault proper — a canonical scan sees them.
     expect(canonicalMarkdown(v).length).toBe(manifest.files.length)
     expect(existsSync(join(v, 'Distilled', 'sapiens', 'Faction.md'))).toBe(true)
     expect(written).toHaveLength(manifest.files.length)
     expect(readMergeManifest(v, 'sapiens')).toEqual(manifest)
+    // Every entry carries the hash of the bytes actually on disk.
+    for (const f of manifest.files) {
+      expect(f.hash).toMatch(/^[0-9a-f]{40}$/)
+      expect(f.path.startsWith(join('Distilled', 'sapiens'))).toBe(true)
+    }
   })
 
-  it('undo deletes exactly what it wrote, the empty folder, and the manifest', () => {
+  it('MANIFEST FIRST: a merge that dies before copying still leaves an undoable record', () => {
+    const v = tmpVault()
+    run(v)
+    // A file where the target folder should be: mkdir fails, so no note is copied.
+    mkdirSync(join(v, 'Distilled'), { recursive: true })
+    writeFileSync(join(v, 'Distilled', 'sapiens'), 'in the way')
+    expect(() => mergeRun(v, 'sapiens')).toThrow()
+    const m = readMergeManifest(v, 'sapiens')
+    expect(m).not.toBeNull()
+    expect(m!.complete).toBe(false) // "merged" is false until the copy finishes
+    expect(m!.files.length).toBeGreaterThan(0) // …but it names everything to undo
+  })
+
+  it('undo deletes exactly what it wrote, the empty folder, and the manifest', async () => {
     const v = tmpVault()
     run(v)
     const { written } = mergeRun(v, 'sapiens')
-    const removed = unmergeRun(v, 'sapiens')
+    const t = recordingTrash()
+    const { removed, trashed } = await unmergeRun(v, 'sapiens', t.trash)
     expect(removed.sort()).toEqual([...written].sort())
+    expect(trashed).toEqual([]) // nothing was edited — nothing needs saving
+    expect(t.calls).toEqual([])
     expect(canonicalMarkdown(v)).toEqual([]) // fully reversed
     expect(existsSync(join(v, 'Distilled', 'sapiens'))).toBe(false)
+    expect(readMergeManifest(v, 'sapiens')).toBeNull()
+  })
+
+  it('undo TRASHES a note you edited after merging, and skips one already gone', async () => {
+    const v = tmpVault()
+    run(v)
+    mergeRun(v, 'sapiens')
+    const edited = join(v, 'Distilled', 'sapiens', 'Faction.md')
+    writeFileSync(edited, readFileSync(edited, 'utf8') + '\n\nMy own note.\n')
+    rmSync(join(v, 'Distilled', 'sapiens', 'Union.md'), { force: true }) // vanished
+    const t = recordingTrash()
+    const { removed, trashed } = await unmergeRun(v, 'sapiens', t.trash)
+    expect(trashed).toEqual([edited])
+    expect(t.calls).toEqual([edited])
+    expect(removed).not.toContain(edited)
+    expect(removed.some((p) => p.endsWith('Union.md'))).toBe(false) // skipped, not "removed"
+  })
+
+  it('undo trashes a legacy (hash-less) entry rather than deleting it', async () => {
+    const v = tmpVault()
+    run(v)
+    const { manifest } = mergeRun(v, 'sapiens')
+    // Rewrite the manifest in the pre-hash shape (files: string[]).
+    writeFileSync(
+      manifestFile(v),
+      JSON.stringify({ folder: manifest.folder, files: manifest.files.map((f) => f.path) })
+    )
+    const legacy = readMergeManifest(v, 'sapiens')!
+    expect(legacy.complete).toBe(true) // legacy manifests are complete by definition
+    expect(legacy.files.every((f) => f.hash === undefined)).toBe(true)
+    const t = recordingTrash()
+    const { removed, trashed } = await unmergeRun(v, 'sapiens', t.trash)
+    expect(removed).toEqual([])
+    expect(trashed).toHaveLength(legacy.files.length) // unverifiable → recoverable
+  })
+
+  it('REJECTS a manifest that escapes the merge folder or names another folder', async () => {
+    const v = tmpVault()
+    run(v)
+    const { manifest } = mergeRun(v, 'sapiens')
+    const escaping = {
+      ...manifest,
+      files: [...manifest.files, { path: join('..', '..', 'etc', 'passwd'), hash: 'x' }]
+    }
+    writeFileSync(manifestFile(v), JSON.stringify(escaping))
+    expect(readMergeManifest(v, 'sapiens')).toBeNull()
+    // …so undo does nothing at all rather than deleting the listed paths.
+    const t = recordingTrash()
+    expect(await unmergeRun(v, 'sapiens', t.trash)).toEqual({ removed: [], trashed: [] })
+    expect(existsSync(join(v, 'Distilled', 'sapiens', 'Faction.md'))).toBe(true)
+
+    writeFileSync(manifestFile(v), JSON.stringify({ ...manifest, folder: join('Distilled', 'other') }))
+    expect(readMergeManifest(v, 'sapiens')).toBeNull()
+    writeFileSync(manifestFile(v), JSON.stringify({ ...manifest, files: [{ hash: 'x' }] }))
     expect(readMergeManifest(v, 'sapiens')).toBeNull()
   })
 

@@ -82,8 +82,9 @@ export default function App() {
   const [mergeInfo, setMergeInfo] = useState<{ runId: string; folder: string; count: number } | null>(
     null
   )
-  // Completion summary for the last distill run: how many notes were staged
-  // (and why zero, when zero), plus the sampling-coverage honesty note.
+  // What just happened to the last distill run: how many notes were staged (and
+  // why zero, when zero) plus the sampling-coverage honesty note — or that the
+  // run was cancelled, or its merge undone.
   const [distillDoneNote, setDistillDoneNote] = useState<string | null>(null)
   // Staged (unmerged or merged) distill runs, listed in the sidebar so a run
   // is never lost once its map is closed.
@@ -207,6 +208,9 @@ export default function App() {
   // coalesced changes: any model change in the batch means a full re-index.
   const pendingEmbedSwap = useRef<{ modelChanged: boolean } | null>(null)
   const distillingRef = useRef(false)
+  // Set by the toast's Cancel button so the run's rejection is reported as a
+  // cancellation rather than an error banner.
+  const distillCancelled = useRef(false)
   const runPendingEmbedSwap = (): void => {
     const swap = pendingEmbedSwap.current
     if (!swap) return
@@ -731,9 +735,10 @@ export default function App() {
       hasVault: vault !== null,
       hasNote: active !== null,
       canSave: active !== null || settingsOpen,
-      canAsk: talk.canAsk
+      canAsk: talk.canAsk,
+      distilling: distilling !== null
     })
-  }, [vault, active, settingsOpen, talk.canAsk])
+  }, [vault, active, settingsOpen, talk.canAsk, distilling])
 
   // Application-menu commands (also drive the ⌘E/⌘P/⌘S/⌘O/⌘N/⌘G/⌘, accelerators).
   // Defined after the handlers it dispatches to so their identities are in scope.
@@ -745,19 +750,21 @@ export default function App() {
   }, [])
 
   const runDistill = useCallback(async () => {
-    const path = await window.nodebook.distillPick()
-    if (!path) return
+    // main hands back an opaque id for the picked document, never a path.
+    const doc = await window.nodebook.distillPick()
+    if (!doc) return
     // Sync the ref before the state commits: a settings save landing in this
     // same tick must already see the run as active and defer its embed swap
     // (the effect that normally maintains the ref runs a render later).
     distillingRef.current = true
+    distillCancelled.current = false
     setDistilling({ phase: 'starting', done: 0, total: 0 })
     const off = window.nodebook.onDistillProgress((runId, p) =>
       setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })
     )
     setDistillDoneNote(null)
     try {
-      const res = await window.nodebook.distillRun(path)
+      const res = await window.nodebook.distillRun(doc.id)
       setGraphOpen(false)
       setAskOpen(false)
       setDistillOverlay(false) // a fresh run opens standalone
@@ -784,7 +791,10 @@ export default function App() {
         )
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // Cancelling is a choice, not a fault — say what happened, don't alarm.
+      if (distillCancelled.current)
+        setDistillDoneNote('Distilling cancelled — nothing was staged.')
+      else setError(e instanceof Error ? e.message : String(e))
     } finally {
       off()
       setDistilling(null)
@@ -952,7 +962,7 @@ export default function App() {
             onChange={(e) => setQuery(e.target.value)}
           />
         )}
-        {vault && <TalkPanel talk={talk} />}
+        {vault && <TalkPanel talk={talk} distilling={distilling !== null} />}
         {vault &&
           (talk.canAsk ? (
             <button className="ask-open-btn" onClick={openAsk}>
@@ -1324,7 +1334,10 @@ export default function App() {
           {distilling.runId && (
             <button
               className="distill-cancel"
-              onClick={() => void window.nodebook.distillCancel(distilling.runId!)}
+              onClick={() => {
+                distillCancelled.current = true
+                void window.nodebook.distillCancel(distilling.runId!)
+              }}
             >
               Cancel
             </button>
@@ -1341,8 +1354,14 @@ export default function App() {
             className="distill-undo"
             onClick={() => {
               const runId = mergeInfo.runId
-              void window.nodebook.distillUnmerge(runId).then(() => {
+              void window.nodebook.distillUnmerge(runId).then((r) => {
                 setMergeInfo(null)
+                setDistillDoneNote(
+                  `Undone — ${r.removed} note${r.removed === 1 ? '' : 's'} removed` +
+                    (r.trashed > 0
+                      ? `, ${r.trashed} edited note${r.trashed === 1 ? '' : 's'} moved to the Trash.`
+                      : '.')
+                )
                 void refreshRuns() // the run's "merged" tag changed
               })
             }}

@@ -46,7 +46,9 @@ store) index in the main process.
   CPU/RAM. "Measure everything"; aims to never land a sample in the slowest bucket.
 - **Export to PDF** / Print; **explicit-save** model (⌘S) with optional autosave.
 - Plain-files first: atomic writes, the index lives in `<vault>/.nodebook/` and
-  is safe to delete.
+  is safe to delete — except that a distilled run you haven't merged yet is kept
+  in `<vault>/.nodebook/distill/` and is lost with it (a later release moves
+  staged runs to durable storage).
 
 ## Prerequisites
 
@@ -117,7 +119,9 @@ document once and reads content back out via an update listener. Saves are atomi
 (write temp file, `fsync`, rename). On save — and on external edits caught by a
 file watcher — the changed file is re-parsed and its rows in the index are
 replaced (delete-then-insert). The index lives in `<vault>/.nodebook/` and is
-safe to delete; it rebuilds on next open.
+safe to delete; it rebuilds on next open — the one exception is
+`<vault>/.nodebook/distill/`, which holds distilled runs that have not been
+merged into the vault yet and cannot be rebuilt (a later release relocates them).
 
 ## Contributing & license
 

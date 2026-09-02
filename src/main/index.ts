@@ -13,6 +13,7 @@ import {
   writeFileSync,
   readFileSync
 } from 'fs'
+import { randomUUID } from 'crypto'
 import { withinRoot, ignoredInVault } from './paths'
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
@@ -43,8 +44,10 @@ import type {
   TalkStatus,
   DistillRunResult,
   DistillRunInfo,
+  DistillDocument,
   DistillMergeResult,
-  DistillMergeStatus
+  DistillMergeStatus,
+  DistillUnmergeResult
 } from '../shared/types'
 
 // Expose SharedArrayBuffer to the renderer so onnxruntime-web can run its WASM
@@ -205,6 +208,13 @@ let watcher: FSWatcher | null = null
 let vaultRoot: string | null = null
 let distillRuns: StagedRunStore | null = null
 const distillAbort = new Map<string, AbortController>()
+// Exactly one distill run at a time: a second would race the first on the same
+// run directory and clobber its AbortController. Claimed synchronously at the
+// top of `distill:run`, released in its finally.
+let activeRunId: string | null = null
+// Documents the user picked to distill: an opaque id → the absolute path. The
+// renderer only ever holds the id, so it cannot name a path of its own to run.
+const pickedDocs = new Map<string, string>()
 const telemetry = new Telemetry()
 
 // Pending distill embed round-trips (the renderer WASM embedder answers main's
@@ -241,6 +251,7 @@ async function closeVault(): Promise<void> {
   // forever if the renderer never replies (e.g. it reloaded mid-run).
   for (const fail of [...pendingEmbeds.values()]) fail(new Error('Vault closed while waiting to embed.'))
   pendingEmbeds.clear()
+  pickedDocs.clear()
   distillRuns?.close()
   distillRuns = null
   index?.close()
@@ -396,7 +407,7 @@ async function openVault(root: string): Promise<VaultListing> {
 function rendererEmbedder(token: string): DistillEmbedder {
   let seq = 0
   return {
-    embed(texts: string[]): Promise<Float32Array[]> {
+    embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]> {
       const id = ++seq
       const channel = `distill:embed:res:${token}:${id}`
       return new Promise((resolve, reject) => {
@@ -404,10 +415,22 @@ function rendererEmbedder(token: string): DistillEmbedder {
           reject(new Error('No window available to embed with'))
           return
         }
+        if (signal?.aborted) {
+          reject(new Error('Distill cancelled while embedding.'))
+          return
+        }
         const cleanup = (): void => {
           clearTimeout(timer)
           ipcMain.removeListener(channel, onReply)
           pendingEmbeds.delete(channel)
+          signal?.removeEventListener('abort', onAbort)
+        }
+        // Cancel must not wait out an in-flight batch: drop the pending promise
+        // now (same cleanup as the timeout) — a late renderer reply finds no
+        // listener and is ignored.
+        const onAbort = (): void => {
+          cleanup()
+          reject(new Error('Distill cancelled while embedding.'))
         }
         const onReply = (_e: unknown, vectors: number[][], err?: string): void => {
           cleanup()
@@ -425,6 +448,7 @@ function rendererEmbedder(token: string): DistillEmbedder {
           cleanup()
           reject(err)
         })
+        signal?.addEventListener('abort', onAbort)
         ipcMain.once(channel, onReply)
         mainWindow.webContents.send('distill:embed:req', token, id, texts)
       })
@@ -478,7 +502,8 @@ function registerIpc(): void {
       s.hasVault === menuState.hasVault &&
       s.hasNote === menuState.hasNote &&
       s.canSave === menuState.canSave &&
-      s.canAsk === menuState.canAsk
+      s.canAsk === menuState.canAsk &&
+      s.distilling === menuState.distilling
     )
       return
     menuState = s
@@ -781,8 +806,10 @@ function registerIpc(): void {
   )
 
   // --- Distill a document -------------------------------------------------
-  // Pick a markdown/text book to distill (a file dialog; any readable file).
-  ipcMain.handle('distill:pick', async (): Promise<string | null> => {
+  // Pick a document to distill. The renderer gets an OPAQUE id, never the path:
+  // main keeps the path→id map, so `distill:run` can only ever run a document
+  // the user actually picked in the dialog.
+  ipcMain.handle('distill:pick', async (): Promise<DistillDocument | null> => {
     const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
       title: 'Distill a document',
       properties: ['openFile'],
@@ -794,36 +821,57 @@ function registerIpc(): void {
       ]
     })
     if (res.canceled || res.filePaths.length === 0) return null
-    return res.filePaths[0]
+    const file = res.filePaths[0]
+    const id = randomUUID()
+    pickedDocs.set(id, file)
+    return { id, name: basename(file) }
+  })
+
+  // e2e only: the native dialog can't be driven from a spec, so tests register
+  // a path directly. Guarded by NODEBOOK_E2E so a shipped build has no such door.
+  ipcMain.handle('distill:registerPath', (_e, absPath: string): string => {
+    if (!process.env.NODEBOOK_E2E) throw new Error('Not available.')
+    const id = randomUUID()
+    pickedDocs.set(id, absPath)
+    return id
   })
 
   // Run the distill pipeline on a document → a staged, cited run-artifact. The
   // chunks are embedded via the renderer bridge; extraction uses the chat model;
   // output lands in the run's own db (never the canonical index).
-  ipcMain.handle('distill:run', async (_e, filePath: string): Promise<DistillRunResult> => {
+  ipcMain.handle('distill:run', async (_e, docId: string): Promise<DistillRunResult> => {
     if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
+    if (activeRunId !== null)
+      throw new Error('A document is already being distilled — wait for it to finish or cancel it.')
+    const filePath = pickedDocs.get(docId)
+    if (!filePath) throw new Error('Unknown document — pick it again.')
     const cfg = chatProviderConfig()
     if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
-    const chat = makeChatModel(cfg)
-    // Fail fast: confirm the model actually responds (key valid, local server up)
-    // BEFORE the expensive embedding, not half-way through the run. CLI backends
-    // have multi-second cold starts (measured ~6.5s for a trivial codex round-trip).
-    try {
-      await probeChat(chat, AbortSignal.timeout(30_000))
-    } catch (err) {
-      throw new Error(
-        `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login, claude auth login). ${err instanceof Error ? err.message : ''}`.trim(),
-        { cause: err }
-      )
-    }
-    // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
-    // rest of the pipeline is format-agnostic.
-    const text = await convertDocument(filePath)
-    const source = { file: basename(filePath), text }
+    // Claim the single run slot and the id BEFORE the first await, so two
+    // clicks in the same tick can't both get past the guard. One document, one
+    // run: the id is consumed here.
+    pickedDocs.delete(docId)
     const runId = uniqueRunId(distillRunId(filePath), new Set(distillRuns.list()))
+    activeRunId = runId
     const ctrl = new AbortController()
     distillAbort.set(runId, ctrl)
     try {
+      const chat = makeChatModel(cfg)
+      // Fail fast: confirm the model actually responds (key valid, local server up)
+      // BEFORE the expensive embedding, not half-way through the run. CLI backends
+      // have multi-second cold starts (measured ~6.5s for a trivial codex round-trip).
+      try {
+        await probeChat(chat, AbortSignal.timeout(30_000))
+      } catch (err) {
+        throw new Error(
+          `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login, claude auth login). ${err instanceof Error ? err.message : ''}`.trim(),
+          { cause: err }
+        )
+      }
+      // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
+      // rest of the pipeline is format-agnostic.
+      const text = await convertDocument(filePath)
+      const source = { file: basename(filePath), text }
       const result = await distill(
         source,
         { embedder: rendererEmbedder(runId), chat },
@@ -836,6 +884,7 @@ function registerIpc(): void {
       return { runId, stats: result.stats }
     } finally {
       distillAbort.delete(runId)
+      activeRunId = null
     }
   })
 
@@ -892,7 +941,7 @@ function registerIpc(): void {
     return distillRuns.list().map((id) => ({
       id,
       notes: readRunMeta(root, id)?.notes ?? 0,
-      merged: readMergeManifest(root, id) !== null
+      merged: readMergeManifest(root, id)?.complete === true
     }))
   })
 
@@ -916,19 +965,25 @@ function registerIpc(): void {
     return { folder: manifest.folder, count: manifest.files.length }
   })
 
-  // Undo a merge: delete exactly what it wrote and de-index it.
-  ipcMain.handle('distill:unmerge', (_e, runId: string): boolean => {
-    if (!vaultRoot || !index) return false
-    for (const p of unmergeRun(vaultRoot, runId)) index.removeFile(p)
+  // Undo a merge: take back exactly what it wrote and de-index it. Notes the
+  // user edited since merging go to the Trash instead of being deleted.
+  ipcMain.handle('distill:unmerge', async (_e, runId: string): Promise<DistillUnmergeResult> => {
+    if (!vaultRoot || !index) return { removed: 0, trashed: 0 }
+    const { removed, trashed } = await unmergeRun(vaultRoot, runId, (p) => shell.trashItem(p))
+    for (const p of [...removed, ...trashed]) {
+      index.removeFile(p)
+      knownMtime.delete(p)
+    }
     notifyVaultChanged()
     notifyIndexChanged()
-    return true
+    return { removed: removed.length, trashed: trashed.length }
   })
 
   ipcMain.handle('distill:mergeStatus', (_e, runId: string): DistillMergeStatus => {
     if (!vaultRoot) return { merged: false }
     const m = readMergeManifest(vaultRoot, runId)
-    return m ? { merged: true, folder: m.folder, count: m.files.length } : { merged: false }
+    // A half-written merge (crash between manifest and copy) is not "merged".
+    return m?.complete ? { merged: true, folder: m.folder, count: m.files.length } : { merged: false }
   })
 
   // --- Telemetry (measure everything) -------------------------------------
@@ -987,7 +1042,13 @@ function registerIpc(): void {
 
 // Which menu actions currently apply. The renderer reports this (it owns the UI
 // state); main greys out the rest. Conservative until the renderer first reports.
-let menuState: MenuState = { hasVault: false, hasNote: false, canSave: false, canAsk: false }
+let menuState: MenuState = {
+  hasVault: false,
+  hasNote: false,
+  canSave: false,
+  canAsk: false,
+  distilling: false
+}
 
 /** Rebuild + install the application menu (after recents or enabled-state change). */
 function refreshAppMenu(): void {

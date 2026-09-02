@@ -127,4 +127,16 @@ describe('emitNotes', () => {
     const out = emitNotes([note({ title: 'Faction' }), note({ title: 'Faction' })])
     expect(out.map((n) => n.fileName)).toEqual(['Faction.md', 'Faction 2.md'])
   })
+
+  it('never takes a reserved name — the source note keeps it (case-insensitively)', () => {
+    const out = emitNotes([note({ title: 'federalist papers' }), note({ title: 'Faction' })], {
+      reserved: ['Federalist Papers']
+    })
+    expect(out.map((n) => n.fileName)).toEqual(['federalist papers 2.md', 'Faction.md'])
+  })
+
+  it('de-collides a second emitted note against a reserved name too', () => {
+    const out = emitNotes([note({ title: 'Book' }), note({ title: 'Book' })], { reserved: ['Book'] })
+    expect(out.map((n) => n.name)).toEqual(['Book 2', 'Book 3'])
+  })
 })

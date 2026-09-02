@@ -2,11 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AskResult,
   Backlink,
+  DistillDocument,
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
   DistillRunInfo,
   DistillRunResult,
+  DistillUnmergeResult,
   GraphData,
   MenuState,
   Outbound,
@@ -137,9 +139,13 @@ const api = {
     return () => ipcRenderer.removeListener('file:changed', listener)
   },
   // Distill a document → a staged, cited run of notes + its own map.
-  distillPick: (): Promise<string | null> => ipcRenderer.invoke('distill:pick'),
-  distillRun: (filePath: string): Promise<DistillRunResult> =>
-    ipcRenderer.invoke('distill:run', filePath),
+  /** Pick a document; main returns an opaque id (never the path) + a name to show. */
+  distillPick: (): Promise<DistillDocument | null> => ipcRenderer.invoke('distill:pick'),
+  /** e2e only (main refuses unless NODEBOOK_E2E): register a path, get its id. */
+  distillRegisterPath: (absPath: string): Promise<string> =>
+    ipcRenderer.invoke('distill:registerPath', absPath),
+  distillRun: (docId: string): Promise<DistillRunResult> =>
+    ipcRenderer.invoke('distill:run', docId),
   distillCancel: (runId: string): Promise<void> => ipcRenderer.invoke('distill:cancel', runId),
   distillGraph: (
     runId: string,
@@ -159,7 +165,8 @@ const api = {
   distillMerge: (runId: string): Promise<DistillMergeResult> =>
     ipcRenderer.invoke('distill:merge', runId),
   /** Undo a run's merge. */
-  distillUnmerge: (runId: string): Promise<boolean> => ipcRenderer.invoke('distill:unmerge', runId),
+  distillUnmerge: (runId: string): Promise<DistillUnmergeResult> =>
+    ipcRenderer.invoke('distill:unmerge', runId),
   /** Whether a run has been merged into the vault. */
   distillMergeStatus: (runId: string): Promise<DistillMergeStatus> =>
     ipcRenderer.invoke('distill:mergeStatus', runId),

@@ -1,6 +1,14 @@
 import { test, expect, _electron as electron } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { cpSync, mkdtempSync, writeFileSync } from 'fs'
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, sep } from 'path'
 import { zipSync, strToU8 } from 'fflate'
@@ -78,8 +86,17 @@ test.afterAll(async () => {
   await app?.close()
 })
 
+/** Distill a document by path. The renderer never names a path to `distillRun`
+ *  — main hands out an opaque id per picked document — so a spec, which cannot
+ *  drive the native dialog, registers the path through the NODEBOOK_E2E door. */
+const distillPath = (p: string): Promise<{ runId: string; stats: { chunks: number; notes: number; dropped: number } }> =>
+  page.evaluate(async (path) => {
+    const id = await window.nodebook.distillRegisterPath(path)
+    return window.nodebook.distillRun(id)
+  }, p)
+
 test('distills a document into a staged, cited run of notes', async () => {
-  const result = await page.evaluate((p) => window.nodebook.distillRun(p), bookPath)
+  const result = await distillPath(bookPath)
   expect(result.runId).toBeTruthy()
   expect(result.stats.chunks).toBeGreaterThan(0)
   expect(result.stats.notes).toBeGreaterThan(0)
@@ -163,7 +180,7 @@ test('same-source re-distill gets its own run id; discarding removes only that r
   // Distill the same book again: the id must NOT silently replace the first
   // run (a "-2" suffix de-collides). Then discard the copy.
   const before = await page.evaluate(() => window.nodebook.distillListRuns())
-  await page.evaluate((p) => window.nodebook.distillRun(p), bookPath)
+  await distillPath(bookPath)
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
   expect(runs.length).toBe(before.length + 1)
 
@@ -176,7 +193,7 @@ test('same-source re-distill gets its own run id; discarding removes only that r
 
 test('distills a PDF via pdf.js text extraction → cited notes', async () => {
   const pdfPath = join(__dirname, 'fixtures', 'sample.pdf')
-  const res = await page.evaluate((p) => window.nodebook.distillRun(p), pdfPath)
+  const res = await distillPath(pdfPath)
   expect(res.stats.chunks).toBeGreaterThan(0)
   expect(res.stats.notes).toBeGreaterThan(0) // extracted text flowed through the pipeline
 })
@@ -196,7 +213,7 @@ test('distills an EPUB (unzip + HTML→markdown) → cited notes', async () => {
   })
   const epubPath = join(mkdtempSync(join(tmpdir(), 'nodebook-epub-')), 'sample.epub')
   writeFileSync(epubPath, epub)
-  const res = await page.evaluate((p) => window.nodebook.distillRun(p), epubPath)
+  const res = await distillPath(epubPath)
   expect(res.stats.chunks).toBeGreaterThan(0)
   expect(res.stats.notes).toBeGreaterThan(0)
 })
@@ -232,6 +249,38 @@ test('Merge button → confirm → Undo banner → reverses', async () => {
   await expect.poll(() => page.evaluate(() => window.nodebook.noteNames())).toContain('on-government')
   await page.locator('.distill-undo').click()
   await expect(page.locator('.distill-merged-banner')).toBeHidden()
+  await expect
+    .poll(() => page.evaluate(() => window.nodebook.noteNames()))
+    .not.toContain('on-government')
+})
+
+test('UNDO never destroys your edits: an edited merged note goes to the Trash', async () => {
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  const id = runs[0].id
+  await page.locator('.distill-merge-btn').click()
+  await page.locator('.modal-btn-danger').click() // confirm the merge
+  await expect(page.locator('.distill-merged-banner')).toBeVisible()
+
+  // Edit one merged note through the app's own save path, as a user would.
+  // (realpath: main canonicalizes the vault at open — /var → /private/var on
+  // macOS — and refuses to save a path that doesn't resolve inside it.)
+  const folder = join(realpathSync(vaultDir), 'Distilled', id)
+  const merged = readdirSync(folder).filter((n) => n.endsWith('.md'))
+  expect(merged.length).toBeGreaterThan(1)
+  const edited = join(folder, 'on-government.md')
+  await page.evaluate(
+    (a) => window.nodebook.saveFile(a.path, a.content),
+    { path: edited, content: readFileSync(edited, 'utf8') + '\n\nMy own note.\n' }
+  )
+
+  await page.locator('.distill-undo').click()
+  // The banner says what happened to the edited note…
+  await expect(page.locator('.distill-coverage-banner')).toContainText('Trash')
+  await expect(page.locator('.distill-merged-banner')).toBeHidden()
+  // …it is out of the vault folder (moved, not deleted)…
+  await expect.poll(() => existsSync(edited)).toBe(false)
+  // …and every untouched note was removed, folder and all.
+  await expect.poll(() => existsSync(folder)).toBe(false)
   await expect
     .poll(() => page.evaluate(() => window.nodebook.noteNames()))
     .not.toContain('on-government')

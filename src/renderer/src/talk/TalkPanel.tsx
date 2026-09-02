@@ -6,7 +6,15 @@ import type { UseTalk } from './useTalk'
  * off (no dead toggles), a privacy-first setup card, then live status. See
  * docs/talk-to-docs.md.
  */
-export function TalkPanel({ talk }: { talk: UseTalk }): React.JSX.Element | null {
+export function TalkPanel({
+  talk,
+  distilling = false
+}: {
+  talk: UseTalk
+  /** A distill run is in flight: turning AI off now would dispose the embedder
+   *  the run is using mid-batch, so the button waits. */
+  distilling?: boolean
+}): React.JSX.Element | null {
   const [setupOpen, setSetupOpen] = useState(false)
   const { status, phase, progress, modelProgress } = talk
   if (!status) return null
@@ -85,7 +93,12 @@ export function TalkPanel({ talk }: { talk: UseTalk }): React.JSX.Element | null
   return (
     <div className="talk-status">
       <span className="talk-on">✨ Semantic search on</span>
-      <button className="talk-link" onClick={() => void talk.disable()}>
+      <button
+        className="talk-link"
+        disabled={distilling}
+        title={distilling ? 'Wait for the distill run to finish' : undefined}
+        onClick={() => void talk.disable()}
+      >
         Turn off
       </button>
     </div>

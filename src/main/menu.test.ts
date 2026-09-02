@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
 import { menuTemplate, vaultLabel, type MenuDeps } from './menu'
 
-const ALL_ON = { hasVault: true, hasNote: true, canSave: true, canAsk: true }
+const ALL_ON = { hasVault: true, hasNote: true, canSave: true, canAsk: true, distilling: false }
 
 const deps = (over: Partial<MenuDeps> = {}): MenuDeps => ({
   isMac: true,
@@ -95,6 +95,13 @@ describe('menuTemplate', () => {
     expect(item(off, 'Find Note…')?.enabled).toBe(false)
   })
 
+  it('Distill a Document… is off while a run is in flight (one at a time)', () => {
+    const on = sub(menuTemplate(deps()), 'File')
+    expect(item(on, 'Distill a Document…')?.enabled).toBe(true)
+    const busy = sub(menuTemplate(deps({ state: { ...ALL_ON, distilling: true } })), 'File')
+    expect(item(busy, 'Distill a Document…')?.enabled).toBe(false)
+  })
+
   it('macOS puts Preferences (⌘,) in the app menu; About lives there too', () => {
     const tpl = menuTemplate(deps({ isMac: true }))
     const appMenu = sub(tpl, 'Nodebook')
@@ -112,7 +119,7 @@ describe('menuTemplate', () => {
   })
 
   it('greys out actions that do not apply (states hygiene)', () => {
-    const tpl = menuTemplate(deps({ state: { hasVault: false, hasNote: false, canSave: false, canAsk: false } }))
+    const tpl = menuTemplate(deps({ state: { hasVault: false, hasNote: false, canSave: false, canAsk: false, distilling: false } }))
     const file = sub(tpl, 'File')
     const view = sub(tpl, 'View')
     expect(item(file, 'New Note')?.enabled).toBe(false) // no vault

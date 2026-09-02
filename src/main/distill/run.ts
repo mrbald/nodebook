@@ -22,6 +22,7 @@ import {
 } from './extract'
 import { dedup } from './dedup'
 import { emitNotes, type EmittedNote } from './emit'
+import { sourceNoteName } from './artifact'
 
 /** Thrown when a run is cancelled via its AbortSignal. */
 export class DistillAborted extends Error {
@@ -52,9 +53,11 @@ export interface DistillSource {
 }
 
 /** The orchestrator only needs to turn text into vectors (the renderer's WASM
- *  embedder satisfies this via the main↔renderer bridge; tests pass a stub). */
+ *  embedder satisfies this via the main↔renderer bridge; tests pass a stub).
+ *  The signal is passed on so a cancel reaches the bridge instead of waiting
+ *  out an in-flight round trip. */
 export interface DistillEmbedder {
-  embed(texts: string[]): Promise<Float32Array[]>
+  embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]>
 }
 
 export interface DistillDeps {
@@ -177,7 +180,13 @@ export async function distill(
   for (let i = 0; i < chunks.length; i += embedBatch) {
     throwIfAborted(opts.signal)
     const slice = chunks.slice(i, i + embedBatch)
-    const vecs = await deps.embedder.embed(slice.map(embedText))
+    // The embedder gets the signal so a cancel interrupts the round trip; its
+    // rejection is then reported as a cancellation, not as an embedding fault.
+    const vecs = await deps.embedder.embed(slice.map(embedText), opts.signal).catch((err) => {
+      throwIfAborted(opts.signal)
+      throw err
+    })
+    throwIfAborted(opts.signal)
     if (vecs.length !== slice.length) throw new Error('embedder returned the wrong number of vectors')
     slice.forEach((_, j) => points.push({ id: i + j, vec: vecs[j] }))
     report('embedding', Math.min(i + embedBatch, chunks.length), chunks.length)
@@ -214,7 +223,9 @@ export async function distill(
   report('finalizing', 0, 1)
   const { notes: grounded, droppedTitles } = groundItems(extracted, prov)
   const { notes: deduped, merged } = dedup(grounded)
-  const emitted = emitNotes(deduped)
+  // The book itself is written as a note of the run (artifact.planRunFiles), so
+  // its name is off-limits to the emitted notes — see emitNotes.
+  const emitted = emitNotes(deduped, { reserved: [sourceNoteName(source.file)] })
   report('done', 1, 1)
 
   // Coverage honesty: clusters partition every chunk, and representativeIds is
