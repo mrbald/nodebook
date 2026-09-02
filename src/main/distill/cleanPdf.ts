@@ -13,11 +13,18 @@
  *
  * So: drop the furniture, put the words back together, and put the paragraphs
  * back. Nothing here rewrites a word — every rule either deletes a line that
- * repeats like machinery, or changes whitespace.
+ * repeats like machinery, changes whitespace, or escapes a character that
+ * markdown would otherwise read as structure.
  *
- * The `## Page N` headings are NOT this module's business: it takes and returns
- * one entry per page, so the caller keeps the page provenance around it. That
- * provenance is what a citation's `where:` reports.
+ * Two kinds of line are left exactly as they came. A line indented like a
+ * markdown code block (four spaces or a tab) is a CODE LISTING — the converter
+ * marks the lines it saw set in a fixed-pitch font that way (`convert.ts`), and
+ * markdown reads the same indent as code. A listing is never furniture (an
+ * `Out[3]:` prompt repeats on every page and is not a header), never joined
+ * into a paragraph, and never de-hyphenated. The other is the `## Page N`
+ * heading, which is NOT this module's business: it takes and returns one entry
+ * per page, so the caller keeps the page provenance around it. That provenance
+ * is what a citation's `where:` reports.
  */
 
 /** A line that shows up on at least this share of the pages is furniture. */
@@ -31,6 +38,9 @@ const MIN_PAGES_FOR_REPEATS = 3
  *  paragraph: it is the last line of one, a heading, or a caption. */
 const SHORT_LINE_SHARE = 0.6
 
+/** A code listing's line, by markdown's own rule for an indented code block. */
+const CODE_LINE = /^(?: {4}|\t)/
+
 /** A running header differs page to page only in its numbers ("Chapter 3",
  *  "- 12 -"), so digits are folded to `#` before lines are compared. */
 function normalizeLine(line: string): string {
@@ -42,11 +52,28 @@ function normalizeLine(line: string): string {
 const BARE_NUMBER = /^[\s\-–—_.,:;()[\]|]*\d{1,4}[\s\-–—_.,:;()[\]|]*$/
 const PAGE_LABEL = /^page\s+\d{1,4}$/i
 
+/** A number standing at the very start or the very end of a line, behind
+ *  nothing but decoration — where a header or footer prints the page number
+ *  next to a chapter or section title: `102 | Chapter 4: NumPy Basics`,
+ *  `4.2 Pseudorandom Numbers | 103`, `Chapter 3   12`. */
+const EDGE_NUMBER_START = /^[\s\-–—_.,:;()[\]|]*(\d{1,4})(?![\p{L}\p{N}])/u
+const EDGE_NUMBER_END = /(?<![\p{L}\p{N}.,])(\d{1,4})[\s\-–—_.,:;()[\]|]*$/u
+
 /** A line that starts a block of its own: a list item, a quote, a heading. */
 const BLOCK_START = /^(?:[-*+•]\s|>|#{1,6}\s|\d{1,3}[.)]\s)/
 
-/** The word before a line-ending hyphen, and the word starting the next line. */
-const HYPHEN_END = /([\p{L}\p{N}]+)-$/u
+/** A paragraph opening with one of these would be read by markdown as a
+ *  heading or a code fence — and by the chunker, which takes its heading path
+ *  (the citation's `where:`) from `#` lines and stops reading headings inside a
+ *  fence. PDF text has no markdown in it; an index entry for `#` or a line of
+ *  backticks is just characters, so the marker is escaped. */
+const MARKDOWN_OPENER = /^(#|```)/
+
+/** The word before a line-ending hyphen, and the word starting the next line.
+ *  The hyphen is whatever the typesetter used: ASCII, the Unicode hyphen
+ *  (U+2010 — what InDesign-style layout writes at a line break) or a soft
+ *  hyphen. */
+const HYPHEN_END = /([\p{L}\p{N}]+)[-\u2010\u00ad]$/u
 const WORD_START = /^([\p{L}\p{N}]+)/u
 
 /** Words and hyphenated compounds, lowercased — the evidence de-hyphenation
@@ -83,19 +110,74 @@ function joinsIntoWord(left: string, right: string, vocab: Set<string>): boolean
   return /^\p{Ll}/u.test(left) && /^\p{Ll}/u.test(right)
 }
 
-/** Put one page's surviving lines back into paragraphs. */
+/** The numbers a header or footer line could be printing as the page number. */
+function edgeNumbers(line: string): number[] {
+  const out: number[] = []
+  const s = EDGE_NUMBER_START.exec(line)
+  const e = EDGE_NUMBER_END.exec(line)
+  if (s) out.push(Number(s[1]))
+  if (e && (!s || e.index !== s.index)) out.push(Number(e[1]))
+  return out
+}
+
+/** Index of the first and last non-blank prose line of a page — the only
+ *  places a header or footer is printed. */
+function edgeLines(lines: string[]): number[] {
+  const inked = lines.map((l, i) => (l.trim() && !CODE_LINE.test(l) ? i : -1)).filter((i) => i >= 0)
+  return inked.length ? [...new Set([inked[0], inked[inked.length - 1]])] : []
+}
+
+/**
+ * The offset between the printed page number and the page's position in the
+ * file, when the document has one — a book's front matter means page 118 of
+ * the file prints "100". A running header that carries the chapter's or the
+ * section's title changes every chapter, so it never repeats on 30 % of the
+ * pages; what does repeat, on every page, is the arithmetic. The number at
+ * the edge of the first or last line is read on every page, its offset from
+ * the page index counted, and the most common offset wins if enough pages
+ * agree. Null when they don't (no numbered furniture).
+ */
+function printedPageOffset(pages: string[][], repeatsOn: number): number | null {
+  const votes = new Map<number, number>()
+  pages.forEach((lines, i) => {
+    const seen = new Set<number>()
+    for (const j of edgeLines(lines)) for (const n of edgeNumbers(lines[j])) seen.add(n - (i + 1))
+    for (const off of seen) votes.set(off, (votes.get(off) ?? 0) + 1)
+  })
+  let best: number | null = null
+  let count = 0
+  for (const [off, n] of votes) if (n > count) [best, count] = [off, n]
+  return count >= repeatsOn ? best : null
+}
+
+/** Put one page's surviving lines back into paragraphs. A code listing's
+ *  lines (see `CODE_LINE`) pass through verbatim, consecutive ones as one
+ *  block; a prose paragraph that would open like markdown structure is
+ *  escaped. */
 function rebuildParagraphs(lines: string[], vocab: Set<string>): string {
   const shortAt =
-    SHORT_LINE_SHARE * median(lines.map((l) => l.trim().length).filter((n) => n > 0))
+    SHORT_LINE_SHARE *
+    median(lines.filter((l) => !CODE_LINE.test(l)).map((l) => l.trim().length).filter((n) => n > 0))
   const paragraphs: string[] = []
   let current = ''
+  let code: string[] = []
   const flush = (): void => {
-    if (current.trim()) paragraphs.push(current.trim())
+    if (current.trim()) paragraphs.push(current.trim().replace(MARKDOWN_OPENER, '\\$1'))
     current = ''
+  }
+  const flushCode = (): void => {
+    if (code.length) paragraphs.push(code.join('\n'))
+    code = []
   }
 
   for (const raw of lines) {
-    const line = raw.trim()
+    if (CODE_LINE.test(raw)) {
+      flush()
+      code.push(raw.replace(/\s+$/, ''))
+      continue
+    }
+    flushCode()
+    const line = raw.trim().replace(/\s+/g, ' ')
     // A blank line, an indent, or a list/quote/heading marker all say "this is
     // a new block" as plainly as the layout ever will.
     if (!line) {
@@ -117,6 +199,7 @@ function rebuildParagraphs(lines: string[], vocab: Set<string>): string {
     if (line.length < shortAt) flush()
   }
   flush()
+  flushCode()
   return paragraphs.join('\n\n')
 }
 
@@ -128,24 +211,32 @@ function rebuildParagraphs(lines: string[], vocab: Set<string>): string {
 export function cleanPdf(pages: string[]): string[] {
   const lined = pages.map((p) => p.split('\n').map((l) => l.replace(/[ \t]+$/, '')))
 
-  // 1. Furniture: lines that repeat across pages like machinery, and anything
-  //    that is only a page number.
+  // 1. Furniture: lines that repeat across pages like machinery, anything
+  //    that is only a page number, and the header or footer that prints the
+  //    page number beside a title that changes with the chapter.
   const pageCount = new Map<string, number>()
   if (lined.length >= MIN_PAGES_FOR_REPEATS) {
     for (const lines of lined) {
       // A set per page: a line printed twice on ONE page is still one page.
-      for (const norm of new Set(lines.map(normalizeLine)))
+      for (const norm of new Set(lines.filter((l) => !CODE_LINE.test(l)).map(normalizeLine)))
         if (norm) pageCount.set(norm, (pageCount.get(norm) ?? 0) + 1)
     }
   }
   const repeatsOn = Math.max(2, Math.ceil(lined.length * REPEAT_SHARE))
+  const offset = lined.length >= MIN_PAGES_FOR_REPEATS ? printedPageOffset(lined, repeatsOn) : null
   const isFurniture = (line: string): boolean => {
     const trimmed = line.trim()
-    if (!trimmed) return false
+    if (!trimmed || CODE_LINE.test(line)) return false
     if (BARE_NUMBER.test(trimmed) || PAGE_LABEL.test(trimmed)) return true
     return (pageCount.get(normalizeLine(line)) ?? 0) >= repeatsOn
   }
-  const kept = lined.map((lines) => lines.filter((l) => !isFurniture(l)))
+  const kept = lined.map((lines, i) => {
+    const printed = offset === null ? null : i + 1 + offset
+    const edges = printed === null ? new Set<number>() : new Set(edgeLines(lines))
+    return lines.filter(
+      (l, j) => !isFurniture(l) && !(edges.has(j) && edgeNumbers(l).includes(printed as number))
+    )
+  })
 
   // 2. The document's own vocabulary, read once, decides every hyphen (below).
   const vocab = vocabulary(kept.map((lines) => lines.join('\n')).join('\n'))

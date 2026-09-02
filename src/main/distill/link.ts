@@ -34,13 +34,34 @@ export const MENTION_CAP = 8
 /** The relation this module writes for a name found in a note's own text. */
 export const MENTION_RELATION = 'mentions'
 
+/** Longest note name, in UTF-8 bytes. A name is a file name, and every common
+ *  filesystem stops at 255 bytes — a model's sentence-long "claim" title in
+ *  Cyrillic or CJK gets there in far fewer characters than it looks, and the
+ *  write that fails is the one at the very end of a paid run. Well under the
+ *  limit, so the `Name 2` de-collision suffix always still fits. */
+export const NAME_MAX_BYTES = 120
+
+/** Cut `s` back to the last word boundary that fits in `max` UTF-8 bytes (or
+ *  to a plain character cut when there is no space to break at). */
+function capBytes(s: string, max: number): string {
+  if (Buffer.byteLength(s, 'utf8') <= max) return s
+  let cut = ''
+  for (const ch of s) {
+    if (Buffer.byteLength(cut + ch, 'utf8') > max) break
+    cut += ch
+  }
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim()
+}
+
 /**
  * Normalize a title into a safe note name: strip path- and wikilink-hostile
- * characters and collapse whitespace. Applied identically to note names and to
- * link targets, so a `[[target]]` can resolve to the note emitted for it.
+ * characters, collapse whitespace, and cap the length a file name can carry
+ * (`NAME_MAX_BYTES`). Applied identically to note names and to link targets,
+ * so a `[[target]]` can resolve to the note emitted for it.
  */
 export function noteName(title: string): string {
-  const n = title.replace(/[\\/:*?"<>|#[\]]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const n = capBytes(title.replace(/[\\/:*?"<>|#[\]]+/g, ' ').replace(/\s+/g, ' ').trim(), NAME_MAX_BYTES)
   return n || 'untitled'
 }
 

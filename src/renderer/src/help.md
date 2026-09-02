@@ -277,15 +277,19 @@ first.
   isn't counted as “related” to your notes. It's the thing your notes are about,
   not one of them.
 - **PDF text is cleaned up first** — the header and page number printed on every
-  page are dropped, words split across a line break (“consid-erations”) are put
-  back together, and the printed line breaks become real paragraphs. The page
-  numbers stay as headings, so a citation can still say which page it came from.
+  page are dropped (a running header that names the chapter counts too — it is
+  recognised by the page number it carries), words split across a line break
+  (“consid-erations”) are put back together, and the printed line breaks become
+  real paragraphs. Code listings are the exception: text set in a typewriter font
+  is kept line by line, indentation and all, as a code block. The page numbers
+  stay as headings, so a citation can still say which page it came from.
 - **Very long documents** — a run reads everything up to a budget of **120 model
   calls** (`[distill] maxCalls` in Settings). Past that it reads evenly spaced steps
   instead of stopping, and the banner says what share of the text that was. Two more
   settings shape the steps: `[talk.chat] contextTokens` says how much your model
-  accepts in one go (bigger = fewer, longer steps), and `[distill] windowSize` forces
-  a step size instead of working one out. If your model refuses a step for being too
+  accepts in one go (bigger = fewer, longer steps — but also fewer notes per page,
+  because a model writes about as many items per step whatever the step's length),
+  and `[distill] windowSize` forces a step size instead of working one out. If your model refuses a step for being too
   long, Nodebook splits it in two and reads both halves — nothing is skipped.
 - **The document's node** — every distilled note links back to the document it came
   from. The run's own map shows that node (it's what the run is about), but once

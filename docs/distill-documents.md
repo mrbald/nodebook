@@ -64,12 +64,25 @@ stubs.
 
 1. **Convert → markdown** (`convert.ts`). One switch on the file extension: PDF
    via pdf.js (`## Page N` per page), EPUB via fflate + turndown, DOCX via
-   mammoth + turndown, HTML via turndown, markdown/text as-is. A PDF's text is
-   cleaned first (`cleanPdf.ts`): lines that repeat on 30 % of pages (the running
-   header) and bare page numbers are dropped, a word cut across a line break is
-   rejoined when the joined word occurs elsewhere in the text, and printed line
-   breaks become real paragraphs. The `## Page N` headings stay — that heading is
-   the page provenance.
+   mammoth + turndown, HTML via turndown, markdown/text as-is. A PDF's text
+   layer is read with its geometry: items on a line are joined by the gap
+   between them (pdf.js already inserts the spaces it saw; joining every item
+   with another space doubled them), a duplicate item pdf.js emits for a list
+   bullet is dropped, and a line set entirely in a fixed-pitch font is a **code
+   listing** — re-laid on a character grid from its x positions and marked
+   with markdown's four-space indent, unless the whole document is monospace
+   (then it is prose in a typewriter face). The text is then cleaned
+   (`cleanPdf.ts`): lines that repeat on 30 % of pages (the running header) and
+   bare page numbers are dropped; so is a header or footer that prints the page
+   number beside a title that changes every chapter (`102 | Chapter 4: …`),
+   found by the one thing that does repeat — the number counting up with the
+   pages; a word cut across a line break (ASCII hyphen or the U+2010 hyphen
+   InDesign-style layout uses) is rejoined when the joined word occurs
+   elsewhere in the text; printed line breaks become real paragraphs; a code
+   listing passes through verbatim (never furniture, never joined); and a
+   paragraph that would open like a markdown heading or fence is escaped, so a
+   `#` in the index never becomes a heading in the chunker's path. The `## Page
+   N` headings stay — that heading is the page provenance.
 2. **Store the source** (`sources.ts`). The converted text is content-addressed:
    `.distill/sources/<sha1>.md`, plus `.distill/sources.json` mapping the hash to
    the original path, title, format, and the original's size and mtime. The same
@@ -87,7 +100,14 @@ stubs.
    document is read** — nothing is sampled — unless it needs more windows than
    `[distill] maxCalls` (default 120). Only then are windows kept at an even
    stride, and `coverage` reports the share of the text, **by weight**, that the
-   model was actually shown.
+   model was actually shown. The family default budget (16 000 weight, ≈5k tokens)
+   is deliberately small for a big-context model: measured on 26 pages of a
+   pandas book through `claude-cli`, four-times-larger windows halved the yield
+   (Haiku 50 → 24 items, Sonnet 30 at the larger size) — a model writes about as
+   many items per call whatever the call's length, so a bigger window buys
+   fewer calls at the price of fewer notes per page. A document that needs more
+   windows than `maxCalls` is better served by raising `maxCalls` than
+   `contextTokens`.
 5. **Extract, one call per window, sequentially** (`extract.ts`). Each call carries
    the **concept registry** (`registry.ts`): every title grounded so far, most
    recent first, cut to a weight budget. Without it a model meeting the same idea
@@ -101,8 +121,11 @@ stubs.
    whole document — and a match is accepted **only when it is unique**: a quote
    that occurs twice is dropped as ambiguous rather than guessed at, and a quote
    found in a different chunk re-attributes the citation instead of being thrown
-   away. Matching folds whitespace, curly quotes, dashes, ellipses, soft hyphens,
-   ligatures and NBSP, but never weakens to a partial match. Drops are counted by
+   away. Matching ignores whitespace entirely, folds every quotation mark to
+   one, drops a hyphen or dash standing between two letters (a word cut at a
+   line end, a compound the model spelt closed), folds ellipses, ligatures and
+   the converter's markdown escapes, but never weakens to a partial match — and
+   the citation always shows the source span, not the model's copy. Drops are counted by
    reason (`noEvidence`, `notFound`, `ambiguous`, plus recoveries) and the banner
    says so. *No evidence, no item.*
 7. **Dedup and link** (`dedup.ts`, `link.ts`). Near-duplicate titles absorb into

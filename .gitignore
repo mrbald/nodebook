@@ -26,3 +26,11 @@ scripts/out/
 
 # Local Claude Code state (skills live in ~/.claude, not this repo)
 .claude/
+
+# Local-only files that must never ride along in a commit: the hats mirror
+# (a copy of the CLAUDE.md stanza) and documents dropped in the root to test
+# distill against.
+AGENTS.md
+/*.pdf
+/*.epub
+/*.docx

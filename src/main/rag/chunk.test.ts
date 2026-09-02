@@ -87,6 +87,16 @@ describe('chunkMarkdown', () => {
     expect(chunks[0].text).toContain('after.')
   })
 
+  it('does not read an indented line of backticks as a fence (it is an indented code block)', () => {
+    // A PDF's code listing arrives four spaces in (distill/cleanPdf.ts); a line
+    // of backticks inside it must not open a fence that swallows every heading
+    // after it — and the `#` inside it is code, not a heading, by the indent.
+    const doc = ['# Title', '', '    ```', '    # not a heading', '', '## Section', '', 'Body.'].join('\n')
+    const chunks = chunkMarkdown(doc)
+    expect(chunks.map((c) => c.heading)).toContain('Title > Section')
+    expect(chunks.map((c) => c.heading)).not.toContain('not a heading')
+  })
+
   it('resumes heading detection once the fence closes', () => {
     const doc = ['# Title', '', '```', 'code', '```', '', '## Section', '', 'Body.'].join('\n')
     const chunks = chunkMarkdown(doc)

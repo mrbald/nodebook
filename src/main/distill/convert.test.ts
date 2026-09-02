@@ -5,6 +5,9 @@ import { tmpdir } from 'os'
 import { zipSync, strToU8 } from 'fflate'
 import {
   pdfToMarkdown,
+  proseText,
+  codeText,
+  type TextItem,
   epubToMarkdown,
   epubNavTitles,
   htmlToMarkdown,
@@ -122,6 +125,117 @@ describe('pdfToMarkdown', () => {
       // A paragraph is one line: the printed line breaks are gone.
       for (const paragraph of paragraphs) expect(paragraph).not.toContain('\n')
     }
+  })
+})
+
+// --- Fonts and geometry: code listings, word gaps, duplicate items ------------
+
+type Op = { font: 'F1' | 'F2'; size: number; x: number; y: number; text: string }
+
+/** A raw multi-page PDF with two standard fonts — F1 Helvetica (prose), F2
+ *  Courier (fixed pitch) — one text-showing operation per `Op`, so pdf.js sees
+ *  exactly the items, fonts and positions the test lays out. WinAnsi, so a
+ *  `\x95` byte is the bullet. */
+function rawPdf(pages: Op[][]): Uint8Array {
+  const esc = (t: string): string => t.replace(/[\\()]/g, (c) => `\\${c}`)
+  let out = '%PDF-1.4\n'
+  const obj = (num: number, body: string): void => {
+    out += `${num} 0 obj\n${body}\nendobj\n`
+  }
+  obj(1, '<</Type/Catalog/Pages 2 0 R>>')
+  obj(2, `<</Type/Pages/Kids[${pages.map((_, i) => `${5 + 2 * i} 0 R`).join(' ')}]/Count ${pages.length}>>`)
+  obj(3, '<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>')
+  obj(4, '<</Type/Font/Subtype/Type1/BaseFont/Courier/Encoding/WinAnsiEncoding>>')
+  pages.forEach((ops, i) => {
+    const stream = ops
+      .map((o) => `BT /${o.font} ${o.size} Tf ${o.x} ${o.y} Td (${esc(o.text)}) Tj ET`)
+      .join('\n')
+    obj(
+      5 + 2 * i,
+      `<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents ${6 + 2 * i} 0 R/Resources<</Font<</F1 3 0 R/F2 4 0 R>>>>>>`
+    )
+    obj(6 + 2 * i, `<</Length ${Buffer.byteLength(stream, 'latin1')}>>\nstream\n${stream}\nendstream`)
+  })
+  out += `trailer\n<</Root 1 0 R/Size ${5 + 2 * pages.length}>>\n%%EOF\n`
+  return new Uint8Array(Buffer.from(out, 'latin1'))
+}
+
+const prose = (y: number, text: string, x = 72): Op => ({ font: 'F1', size: 10, x, y, text })
+const code = (y: number, text: string, x = 89): Op => ({ font: 'F2', size: 9, x, y, text })
+
+describe('pdfToMarkdown — code listings and geometry', () => {
+  it('keeps lines set in a fixed-pitch font as an indented code block, layout and all', async () => {
+    const md = await pdfToMarkdown(
+      rawPdf([
+        [
+          prose(700, 'Arrays have the transpose method:'),
+          code(680, 'In [1]: arr = np.zeros((8, 4))'),
+          code(668, 'Out[1]:'),
+          code(656, 'array([[0., 0.],'),
+          code(644, '[1., 1.]])', 89 + 5 * 5.4), // five characters in: Courier is 0.6 em wide
+          code(632, '# a comment, not a heading'),
+          prose(610, 'Then prose again.')
+        ]
+      ])
+    )
+    expect(md).toContain('Arrays have the transpose method:')
+    expect(md).toContain('    In [1]: arr = np.zeros((8, 4))\n    Out[1]:\n    array([[0., 0.],\n         [1., 1.]])')
+    expect(md).toContain('    # a comment, not a heading')
+    expect(md).not.toMatch(/^# a comment/m)
+    expect(md).toContain('Then prose again.')
+    // The listing sits in a block of its own, not inside the prose paragraph.
+    expect(md).toMatch(/method:\n\n {4}In \[1\]/)
+  })
+
+  it('reads a document set entirely in a fixed-pitch font as prose', async () => {
+    const md = await pdfToMarkdown(
+      rawPdf([[code(700, 'A report typed in Courier, every line of it, wraps'), code(688, 'like any other prose would.')]])
+    )
+    expect(md).not.toMatch(/^ {4}/m)
+    expect(md).toContain('A report typed in Courier, every line of it, wraps like any other prose would.')
+  })
+})
+
+describe('proseText / codeText', () => {
+  const item = (str: string, x: number, width: number, extra: Partial<TextItem> = {}): TextItem => ({
+    str,
+    hasEOL: false,
+    fontName: 'g_d0_f1',
+    transform: [10, 0, 0, 10, x, 500],
+    width,
+    height: 10,
+    ...extra
+  })
+
+  it('puts one space at a word gap and none inside a word split by a font change', () => {
+    // pdf.js splits `Fancy indexing` at the italic and inserts its own space
+    // item; joining every item with a space on top of that doubled the gap.
+    expect(proseText([item('Fancy', 72, 27.2), item(' ', 99.2, 2.5, { width: 2.5 }), item('indexing', 101.7, 40)])).toBe(
+      'Fancy indexing'
+    )
+    expect(proseText([item('Fancy', 72, 27.2), item('indexing', 102.2, 40)])).toBe('Fancy indexing')
+    expect(proseText([item('un', 72, 11.1), item('happy', 83.1, 30)])).toBe('unhappy')
+  })
+
+  it('drops the duplicate item pdf.js emits for a list bullet', () => {
+    // The bullet arrives inside the line's string AND as an item of its own at
+    // the very same position, carrying the line break.
+    expect(
+      proseText([item('• ndarray, an efficient array', 80.7, 200), item('•', 80.7, 4.1, { hasEOL: true })])
+    ).toBe('• ndarray, an efficient array')
+    // The line may have been split into several items before the duplicate.
+    expect(
+      proseText([item('• (ax.xlim([0, 10])', 80.7, 90), item('sets the', 173, 40), item('•', 80.7, 4.1, { hasEOL: true })])
+    ).toBe('• (ax.xlim([0, 10]) sets the')
+  })
+
+  it('re-lays a code line on a character grid from the item positions', () => {
+    expect(codeText([item('In [1]:', 89, 38.3), item(' ', 127.3, 4.3), item('for', 131.5, 12.8), item('i', 148.5, 4.3)], 89, 4.25)).toBe(
+      'In [1]:   for i'
+    )
+    expect(codeText([item('.....:', 101.7, 25.5), item('arr[i] = i', 148.5, 42.5)], 89, 4.25)).toBe(
+      '   .....:     arr[i] = i'
+    )
   })
 })
 

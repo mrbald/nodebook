@@ -13,6 +13,134 @@ import { readFileSync } from 'fs'
 import { extname } from 'path'
 import { cleanPdf } from './cleanPdf'
 
+/** One text item as pdf.js hands it back: the string, whether a line ends
+ *  after it, its font, and where it sits on the page. */
+export interface TextItem {
+  str: string
+  hasEOL: boolean
+  fontName: string
+  /** `[a, b, c, d, x, y]` — x/y is the item's origin on the page, in points. */
+  transform: number[]
+  width: number
+  /** The font size, for unrotated text. */
+  height: number
+}
+
+/** The generic family pdf.js assigns a font from its descriptor flags. */
+type FontStyles = Record<string, { fontFamily?: string } | undefined>
+
+/** A printed line: its items in reading order, and whether every one of them
+ *  is set in a fixed-pitch font. */
+interface PdfLine {
+  items: TextItem[]
+  mono: boolean
+}
+
+/**
+ * Above this share of the document's characters in a fixed-pitch font, the
+ * monospace font IS the body text (a typewriter-style report, a LaTeX document
+ * set in Courier) and says nothing about code — so code detection is switched
+ * off and the whole document is read as prose.
+ */
+const MONO_BODY_SHARE = 0.8
+
+/** Gap between two items on a line, as a share of the font size, above which
+ *  they were separated by a space. A space is a quarter to a third of an em;
+ *  kerning and hinting jitter are well under a tenth. */
+const WORD_GAP = 0.15
+
+/** Group a page's items into printed lines: an item's `hasEOL` closes its line. */
+function groupLines(items: TextItem[], styles: FontStyles): PdfLine[] {
+  const lines: PdfLine[] = []
+  let current: TextItem[] = []
+  const close = (): void => {
+    const inked = current.filter((it) => it.str.trim())
+    lines.push({
+      items: current,
+      mono: inked.length > 0 && inked.every((it) => styles[it.fontName]?.fontFamily === 'monospace')
+    })
+    current = []
+  }
+  for (const it of items) {
+    current.push(it)
+    if (it.hasEOL) close()
+  }
+  if (current.length) close()
+  return lines
+}
+
+/**
+ * A prose line's text. pdf.js splits a line into items at every font change
+ * and inserts an item holding a space where it saw a word gap; joining every
+ * item with a space on top of that (as this once did) doubled every gap it
+ * had already found. Now the geometry decides: two items on one baseline are
+ * separated by a space only when there is a visible gap between them (or one
+ * of them already carries the whitespace), so a word split by a font change
+ * (`un` + *happy*) stays one word. Whitespace runs collapse to one space.
+ */
+export function proseText(items: TextItem[]): string {
+  let out = ''
+  let prev: TextItem | null = null
+  let first: TextItem | null = null
+  for (const it of items) {
+    if (!it.str) continue
+    const sameLine = prev !== null && Math.abs(it.transform[5] - prev.transform[5]) < 1
+    // An item printed exactly where the line started, spelling its opening
+    // again, is the same ink twice — pdf.js hands a list bullet back both
+    // inside the line's string and as an item of its own (usually last, with
+    // the line break on it), and joining both puts a `•` in the middle of the
+    // next word.
+    if (first && sameLine && Math.abs(it.transform[4] - first.transform[4]) < 1 && first.str.startsWith(it.str))
+      continue
+    if (!first || !sameLine) first = it
+    if (prev && out && !/\s$/.test(out) && !/^\s/.test(it.str)) {
+      const gap = it.transform[4] - (prev.transform[4] + prev.width)
+      const size = Math.max(it.height, prev.height)
+      // Without geometry to go on (rotated text, a zero-width item) err
+      // towards the space: a stray space costs less than two glued words.
+      if (!sameLine || prev.width <= 0 || size <= 0 || gap > WORD_GAP * size) out += ' '
+    }
+    out += it.str
+    prev = it
+  }
+  return out.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * A code line's text, re-laid on a character grid from the items' x positions:
+ * the column of each item is its distance from the listing's left margin in
+ * character widths, and a fixed-pitch font has exactly one. That restores the
+ * indentation a listing's meaning depends on (a Python block, a continuation
+ * prompt) and the alignment of its output, both of which the string items
+ * alone have lost. `left` is the margin; `charWidth` the font's advance.
+ */
+export function codeText(items: TextItem[], left: number, charWidth: number): string {
+  let out = ''
+  for (const it of items) {
+    if (!it.str.trim()) continue // gaps come back from the positions
+    const col = Math.max(out.length, Math.round((it.transform[4] - left) / charWidth))
+    out += ' '.repeat(col - out.length) + it.str
+  }
+  return out.replace(/\s+$/, '')
+}
+
+/** The advance width of the page's fixed-pitch font: each inked item's width
+ *  per character, taken as the median so a stray item cannot skew it. */
+function monoCharWidth(lines: PdfLine[]): number {
+  const widths = lines
+    .filter((l) => l.mono)
+    .flatMap((l) => l.items.filter((it) => it.str.trim() && it.width > 0))
+    .map((it) => it.width / it.str.length)
+    .sort((a, b) => a - b)
+  return widths.length ? widths[widths.length >> 1] : 0
+}
+
+/** Strip blank lines at either end of a page, keeping the indentation of the
+ *  first real line — a page that opens with a code listing must keep its marker. */
+function trimBlankLines(text: string): string {
+  return text.replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '')
+}
+
 /**
  * Extract a PDF's text as markdown — one `## Page N` section per page, so the
  * existing chunker carries the page in each chunk's heading path (that's the
@@ -23,6 +151,16 @@ import { cleanPdf } from './cleanPdf'
  * break, one hard newline per printed line. `cleanPdf` puts the text back
  * together before the pipeline ever sees it — see that module for why each of
  * those defeats the model, the embedder and the quote matcher alike.
+ *
+ * One thing is decided here, because only the text layer knows it: which lines
+ * are CODE. pdf.js tags every item with a generic font family from the font's
+ * own flags, and a line set entirely in a fixed-pitch font is a listing. Those
+ * lines are re-laid on a character grid from their positions and marked with a
+ * four-space indent — markdown's own code-block syntax — so that `cleanPdf`
+ * keeps them verbatim instead of reflowing them into a paragraph, the chunker
+ * never mistakes a `# comment` in them for a heading, and the note renders them
+ * as code. A document that is mostly monospace is prose set in a typewriter
+ * face, not a listing; there the marking is switched off (`MONO_BODY_SHARE`).
  */
 export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
   // Lazy + the *legacy* build (node-friendly, no DOM globals); loaded only when
@@ -31,29 +169,49 @@ export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
   // verbosity 0 = errors only: silences pdf.js's noisy per-font warnings (e.g.
   // "TT: undefined function") that are irrelevant to text extraction.
   const doc = await pdfjs.getDocument({ data, verbosity: 0 }).promise
-  const raw: string[] = []
+  const pages: PdfLine[][] = []
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
     const tc = await page.getTextContent()
-    let text = ''
-    for (const item of tc.items as Array<{ str?: string; hasEOL?: boolean }>) {
-      if (typeof item.str !== 'string') continue
-      text += item.str + (item.hasEOL ? '\n' : ' ')
-    }
-    raw.push(
-      text
-        .replace(/[ \t]+\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim()
+    const items = (tc.items as Partial<TextItem>[]).filter(
+      (it): it is TextItem => typeof it.str === 'string'
     )
+    pages.push(groupLines(items, tc.styles as FontStyles))
   }
   await doc.cleanup()
+
+  let monoChars = 0
+  let allChars = 0
+  for (const lines of pages)
+    for (const l of lines) {
+      const n = l.items.reduce((s, it) => s + it.str.trim().length, 0)
+      allChars += n
+      if (l.mono) monoChars += n
+    }
+  const markCode = allChars > 0 && monoChars / allChars < MONO_BODY_SHARE
+
+  const raw = pages.map((lines) => {
+    const charWidth = markCode ? monoCharWidth(lines) : 0
+    const left = Math.min(
+      ...lines
+        .filter((l) => l.mono)
+        .map((l) => l.items.find((it) => it.str.trim())?.transform[4] ?? Infinity)
+    )
+    const text = lines
+      .map((l) =>
+        markCode && l.mono && charWidth > 0
+          ? `    ${codeText(l.items, left, charWidth)}`
+          : proseText(l.items)
+      )
+      .join('\n')
+    return trimBlankLines(text.replace(/\n{3,}/g, '\n\n'))
+  })
   // One entry per page in and out, so the heading keeps the REAL page number
   // even when a page cleans down to nothing.
-  const pages = cleanPdf(raw)
+  const cleaned = cleanPdf(raw)
     .map((text, i) => (text.trim() ? `## Page ${i + 1}\n\n${text}` : ''))
     .filter(Boolean)
-  const md = pages.join('\n\n')
+  const md = cleaned.join('\n\n')
   if (!md.trim()) {
     throw new Error('No extractable text — this PDF looks scanned. Re-digitize (OCR) it first.')
   }
