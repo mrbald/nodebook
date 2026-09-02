@@ -363,6 +363,24 @@ describe.skipIf(process.platform === 'win32')('claudeCliChat (fake claude script
     expect(out).toBe('ping')
   })
 
+  it('switches extended thinking off for the child, unless the environment already says', async () => {
+    const thinks = script(
+      'claude-thinks',
+      [
+        'cat > /dev/null',
+        `printf '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"%s"}}}\\n' "$MAX_THINKING_TOKENS"`
+      ].join('\n')
+    )
+    const model = claudeCliChat({ kind: 'claude-cli', command: thinks })
+    expect(await collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).toBe('0')
+    process.env.MAX_THINKING_TOKENS = '4096'
+    try {
+      expect(await collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).toBe('4096')
+    } finally {
+      delete process.env.MAX_THINKING_TOKENS
+    }
+  })
+
   it('falls back to the result event when the CLI emits no partial messages', async () => {
     const model = claudeCliChat({ kind: 'claude-cli', command: noDeltas })
     expect(await collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).toBe('whole answer')

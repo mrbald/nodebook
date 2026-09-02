@@ -165,7 +165,7 @@ interface RunResult {
 function runCli(
   file: string,
   args: string[],
-  opts: { input?: string; signal?: AbortSignal; cwd?: string } = {}
+  opts: { input?: string; signal?: AbortSignal; cwd?: string; env?: NodeJS.ProcessEnv } = {}
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) return reject(abortError())
@@ -173,7 +173,7 @@ function runCli(
     // a shell. Args here are flag tokens from our own code/settings (the prompt
     // travels on stdin), so shell quoting is not a concern.
     const shell = /\.(cmd|bat)$/i.test(file)
-    const child = spawn(file, args, { cwd: opts.cwd, env: process.env, shell })
+    const child = spawn(file, args, { cwd: opts.cwd, env: opts.env ?? process.env, shell })
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -209,11 +209,11 @@ async function* runCliLines(
   file: string,
   args: string[],
   label: string,
-  opts: { input?: string; signal?: AbortSignal; cwd?: string } = {}
+  opts: { input?: string; signal?: AbortSignal; cwd?: string; env?: NodeJS.ProcessEnv } = {}
 ): AsyncIterable<string> {
   if (opts.signal?.aborted) throw abortError()
   const shell = /\.(cmd|bat)$/i.test(file)
-  const child = spawn(file, args, { cwd: opts.cwd, env: process.env, shell })
+  const child = spawn(file, args, { cwd: opts.cwd, env: opts.env ?? process.env, shell })
   const onAbort = (): void => {
     child.kill('SIGTERM')
     // Killing the child does not reap a grandchild that inherited this pipe (a
@@ -370,14 +370,27 @@ export function parseClaudeLine(
  *  agent persona would both skew the answer and cost tokens on every call. */
 const CLAUDE_SYSTEM_PROMPT = 'You are a helpful assistant. Answer the request directly and completely.'
 
+/** Environment for the `claude` child. Claude Code's own default is to let the
+ *  model think at length before every answer — right for a coding agent, and
+ *  the biggest cost of a chat call by far: on one distill window of ~8k
+ *  characters, Haiku spent 11k thinking tokens to write a 1.3k-token answer,
+ *  74 s and 7× the price of the same call with thinking off (measured against
+ *  claude-code 2.1.258; see docs/cli-providers.md). The HTTP adapters send no
+ *  thinking either, so this is parity, not a downgrade. A value already in the
+ *  environment is the user's own choice and wins. */
+function claudeEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, MAX_THINKING_TOKENS: process.env.MAX_THINKING_TOKENS ?? '0' }
+}
+
 /** The user's own Claude Code CLI (`claude -p`) under their Claude sign-in.
  *
  *  The flags make it a pure chat backend rather than a coding agent: no tools
  *  (it cannot read files or reach the web), no MCP servers, no slash commands,
- *  and its own system prompt replaced. That is also what makes it cheap —
- *  measured against claude-code 2.1.233, the per-call overhead drops from
- *  ~51k input tokens to ~540, cached to near-nothing on the calls after the
- *  first. A distill run makes one call per cluster, so this matters. */
+ *  its own system prompt replaced, and no extended thinking (`claudeEnv`).
+ *  That is also what makes it cheap — measured against claude-code 2.1.233,
+ *  the per-call overhead drops from ~51k input tokens to ~540, cached to
+ *  near-nothing on the calls after the first. A distill run makes one call per
+ *  window, so this matters. */
 export function claudeCliChat(cfg: ProviderConfig): ChatModel {
   const cmd = cfg.command || 'claude'
   const resolve = (): string => {
@@ -416,7 +429,8 @@ export function claudeCliChat(cfg: ProviderConfig): ChatModel {
       for await (const line of runCliLines(file, args, 'Claude CLI', {
         input: flattenChatRequest(req),
         signal: req.signal,
-        cwd: scratchCwd()
+        cwd: scratchCwd(),
+        env: claudeEnv()
       })) {
         const ev = parseClaudeLine(line)
         if (!ev) continue
