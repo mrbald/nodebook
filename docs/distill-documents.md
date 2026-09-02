@@ -115,7 +115,13 @@ stubs.
    — a note cannot link to a title it has never seen. The prompt offers a fixed
    relation vocabulary (`defines`, `part_of`, `example_of`, `causes`,
    `depends_on`, `supports`, `contrasts_with`, `about`); anything else the model
-   writes is kept as an edge but typed `related_to`.
+   writes is kept as an edge but typed `related_to`. The reply is read
+   leniently (`lenientJson.ts`): a quote the model forgot to escape inside a
+   string — Python's `df["data1"]` in a summary — is mended before parsing,
+   because a quote only closes a string where the grammar allows one to. Over
+   the 171-window book that was 4 replies (2 %), each of which had cost a
+   second, repair call that recovered fewer items than the first reply held.
+   Text a machine cannot mend still gets that one repair call.
 6. **Ground every item** (`extract.ts`). A quote must be found in the source text.
    The search widens — the cited chunk, then the window's other chunks, then the
    whole document — and a match is accepted **only when it is unique**: a quote
