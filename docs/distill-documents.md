@@ -191,7 +191,12 @@ in the vault). A collision is written beside the existing note under a
 disambiguated name — `Options (Sapiens)` — because *a name clash is not evidence
 of identity*; the dialog offers a per-item "same as the existing note" tick, and
 only a tick writes `same_as:: [[Options]]`, which is what `buildGraph` collapses
-into one dot. Merge writes its manifest first and copies via temp + rename, so a
+into one dot. The same idea under *another* name never clashes, so with talk on
+the plan also proposes a twin for a `new` note (`sameAs.ts`): the staged notes
+are embedded as the index embeds a note and a vault note is proposed only when
+the two are each other's closest match — mutual nearest neighbour, floored by
+the vault's own "related" threshold, no cutoff to tune. Shown unticked; a tick
+writes the same `same_as::` line. Merge writes its manifest first and copies via temp + rename, so a
 crash never leaves un-undoable files; **Undo** hashes each file and sends anything
 you edited to the Trash instead of deleting it.
 

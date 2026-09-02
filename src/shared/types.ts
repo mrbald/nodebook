@@ -386,6 +386,10 @@ export interface DistillMergePlanEntry {
   action: 'new' | 'identical' | 'collides'
   /** The name it will be written under (`name` unless it collides). */
   targetName: string
+  /** On a `new` entry: a note you already have that looks like the same idea
+   *  under another name (found by meaning; only when Talk to docs is on).
+   *  Tick it and the merge writes `same_as::`, as for a name clash. */
+  sameAsCandidate?: string
 }
 
 /** What merging a run would do, worked out before anything is written. */

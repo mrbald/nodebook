@@ -509,6 +509,24 @@ describe('mergeRun with a plan (converging merge)', () => {
     expect(lines[src + 1]).toBe('same_as:: [[Union]]')
   })
 
+  it('a confirmed twin on a NEW entry writes same_as:: to the proposed note, under its own name', () => {
+    const v = tmpVault()
+    staged(v)
+    const plan = planFor(v, {}).map((e) =>
+      e.name === 'Union' ? { ...e, sameAsCandidate: 'Federal union' } : e
+    )
+    mergeRun(v, 'sapiens', plan, { sameAs: ['Union'] })
+    const merged = readFileSync(join(v, 'Distilled', 'sapiens', 'Union.md'), 'utf8')
+    const lines = merged.split('\n')
+    const src = lines.findIndex((l) => l.startsWith('source::'))
+    expect(lines[src + 1]).toBe('same_as:: [[Federal union]]')
+    // Unconfirmed, the proposal writes nothing.
+    const v2 = tmpVault()
+    staged(v2)
+    mergeRun(v2, 'sapiens', plan)
+    expect(readFileSync(join(v2, 'Distilled', 'sapiens', 'Union.md'), 'utf8')).not.toContain('same_as::')
+  })
+
   it('without a confirmation no same_as is written — a name clash is not identity', () => {
     const v = tmpVault()
     staged(v)

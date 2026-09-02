@@ -262,6 +262,10 @@ first.
   necessarily about the same thing. If they *are*, tick **same as the existing note**
   next to it and the map will show them as a single note from then on, with the other
   name listed beside it.
+- **The same idea under another name** — with Talk to docs on, Merge also points out a
+  new note that looks like the same idea as a note you already have under a different
+  name (the two are each other's closest match by meaning). It is a suggestion, shown
+  unticked; tick it and the two are linked as one, exactly as for a shared name.
 - **Click a citation** — a distilled note lists its **Sources** in the right-hand
   panel — each one shows **where the passage is** (“Page 42”, or the chapter's
   name) and the quote itself. Clicking one opens **Nodebook's own copy** of the
