@@ -326,6 +326,32 @@ Themes named: Federalist 84 Bill of Rights · Press Liberty Debate · Government
 Expense Objection · Impeachment and Treason Provisions · Answering the Distance
 Objection · Expanding National Powers · Cited Legal Authorities.
 
+### Real provider — claude-cli, Sonnet, thinking off (2026-09-03)
+
+`DISTILL_EVAL_PROVIDER=claude-cli DISTILL_EVAL_MODEL=sonnet npm run eval:distill`
+— the first run of the harness against a real model. The embedder stays the
+hash stub (a headless run has no renderer). 24 minutes for the three fixtures.
+
+| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgeRecall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| book-en | 21.79 | 1.00 | 1.00 | 0.00 | 2.00 | 2.86 | 0.00 | 1.00 | 0.00 | 0.45 | 0.01 | 0.27 |
+| paper.pdf | 21.13 | 1.00 | 0.00 | 0.00 | 6.00 | 2.68 | 0.00 | 1.00 | 0.00 | 0.43 | 0.01 | 0.18 |
+| chapter-ru.md | 22.17 | 1.00 | 0.00 | 0.00 | 0.00 | 2.95 | 0.01 | 1.00 | 0.00 | 0.32 | 0.03 | 0.19 |
+
+Read against the stub tables below. **Yield** is about one note per 460
+characters on all three fixtures, twice the stub's on the English ones; the
+stub's higher figure on the Russian story came from its short lines, not from
+reading it. **Merges** fall from hundreds to 2 / 6 / 0: a model names a concept
+once and reuses the name through the registry, so dedup has little left to do.
+**Edges per note** settle near 3, and every fixture is one component with no
+duplicate titles and at most one dropped quote. **`conceptRecall`** rises by
+0.06–0.14 against the same hand-curated golden, **`edgeRecall`** three- to
+fivefold. **`edgePrecision`** stays near 0.01, and that is a fact about the
+golden, not the model: it lists a few dozen edges per fixture while a model
+writes about three per note, so nearly every edge written is one the golden
+never listed. It is the metric to redefine (or the golden to grow) before it
+is read as a quality signal.
+
 ### Baseline — Phase 1 (2026-09-02, cluster-sampling pipeline)
 
 The starting point, kept for comparison: chunks were embedded, clustered, and only
