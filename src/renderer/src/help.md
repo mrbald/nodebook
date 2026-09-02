@@ -109,10 +109,12 @@ it by hand, and nothing here changes your notes.
   the note as a `key:: value` field, so the map and your notes never disagree — and the
   link is redrawn in its new colour.
 - **Layout** — the **layout** dropdown chooses an **organic web** (force), a tidy
-  **hierarchical tree** that reads like a mind map, a **radial** view that rings notes
-  around the one in focus, **groups**, which gathers each cluster of related notes
-  into its own area, or **blocks**, which keeps tightly-linked notes together by
-  repeatedly splitting the map into halves with the fewest links crossing the divide.
+  **hierarchical tree** that reads like a mind map, **elk** — another layered layout,
+  from the Eclipse Layout Kernel, that sometimes untangles a dense map better than
+  tree, so try both — a **radial** view that rings notes around the one in focus,
+  **groups**, which gathers each cluster of related notes into its own area, or
+  **blocks**, which keeps tightly-linked notes together by repeatedly splitting the
+  map into halves with the fewest links crossing the divide.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);
   **line colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a
   **dashed outline** is a note you've linked to but haven't created yet.
