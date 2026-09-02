@@ -287,12 +287,15 @@ first.
   stay as headings, so a citation can still say which page it came from.
 - **Very long documents** — a run reads everything up to a budget of **120 model
   calls** (`[distill] maxCalls` in Settings). Past that it reads evenly spaced steps
-  instead of stopping, and the banner says what share of the text that was. Two more
-  settings shape the steps: `[talk.chat] contextTokens` says how much your model
-  accepts in one go (bigger = fewer, longer steps — but also fewer notes per page,
-  because a model writes about as many items per step whatever the step's length),
-  and `[distill] windowSize` forces a step size instead of working one out. If your model refuses a step for being too
-  long, Nodebook splits it in two and reads both halves — nothing is skipped.
+  instead of stopping, and the banner says what share of the text that was. When a
+  book runs over, **raise `maxCalls`** — that is the setting that reads more of it.
+  Two more settings shape the steps, but neither is the fix for a long book:
+  `[talk.chat] contextTokens` says how much your model accepts in one go (bigger =
+  fewer, longer steps — but also fewer notes per page, because a model writes about
+  as many items per step whatever the step's length), and `[distill] windowSize`
+  forces a step size instead of working one out. If your model refuses a step for
+  being too long, Nodebook splits it in two and reads both halves — nothing is
+  skipped.
 - **The document's node** — every distilled note links back to the document it came
   from. The run's own map shows that node (it's what the run is about), but once
   merged, your vault's knowledge map hides it — otherwise it sits in the middle of a
