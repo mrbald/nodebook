@@ -1,14 +1,24 @@
 /**
- * Merge near-duplicate notes within a distill run. Two clusters often surface the
- * same concept (e.g. one says "Faction", another "Factions"; or both extract the
- * same passage), and an unmerged map shows the same idea twice. Pure and
- * deterministic — golden-tested.
+ * Merge near-duplicate notes within a distill run. Two windows often surface the
+ * same concept under two spellings ("Faction" / "Factions", "8.1 Hierarchical
+ * Indexing" / "hierarchical indexing"), and an unmerged map shows the same idea
+ * twice. Pure and deterministic — golden-tested.
  *
- * Two signals fire a merge, either alone: near-identical TITLES (character-
- * trigram Jaccard) or heavily OVERLAPPING citation spans (the same source text).
+ * One signal fires a merge: near-identical TITLES (character-trigram Jaccard).
  * The embedding-cosine signal the council favours needs vectors from the impure
  * layer, so it's an optional `similarity` hook the orchestrator can supply; the
  * pure core works (and tests) without it.
+ *
+ * A shared citation span is NOT a signal, and used to be. It made sense when
+ * the model saw clusters of sampled passages — two clusters quoting one passage
+ * had extracted the same thing twice. Reading the whole document in order, one
+ * window deliberately takes several items from one passage: the person and the
+ * term they coined, the keyword and the construct it builds, `shape` and
+ * `dtype` from the sentence that introduces both. On a 582-page book the span
+ * rule made 85 of 132 merges, and every one below 0.82 title similarity was
+ * wrong — "Hadley Wickham" absorbed into "split-apply-combine", "tz_localize"
+ * into "tz_convert". A shared passage is relatedness; the link graph already
+ * carries that.
  */
 
 import type { GroundedNote, Citation, Link } from './extract'
@@ -32,26 +42,9 @@ export function trigramSimilarity(a: string, b: string): number {
   return union === 0 ? 0 : inter / union
 }
 
-/** Overlap of two citation spans as a fraction of the shorter span (0..1). */
-function spanOverlapFrac(a: Citation, b: Citation): number {
-  if (a.file !== b.file) return 0
-  const ov = Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start))
-  const minLen = Math.min(a.end - a.start, b.end - b.start)
-  return minLen > 0 ? ov / minLen : 0
-}
-
-/** Best span overlap across any pair of citations between two notes. */
-function maxSpanOverlap(a: GroundedNote, b: GroundedNote): number {
-  let m = 0
-  for (const ca of a.citations) for (const cb of b.citations) m = Math.max(m, spanOverlapFrac(ca, cb))
-  return m
-}
-
 export interface DedupOptions {
   /** Trigram-title similarity at/above which two notes merge. Default 0.82. */
   titleSim?: number
-  /** Citation-span overlap at/above which two notes merge. Default 0.6. */
-  spanOverlap?: number
   /** Optional extra signal (e.g. embedding cosine of title+summary). */
   similarity?: (a: GroundedNote, b: GroundedNote) => number
   /** Threshold for the optional `similarity` hook. Default 0.88. */
@@ -115,12 +108,10 @@ export function dedup(
   opts: DedupOptions = {}
 ): { notes: GroundedNote[]; merged: number; aliases: Map<string, string> } {
   const titleSim = opts.titleSim ?? 0.82
-  const spanOverlap = opts.spanOverlap ?? 0.6
   const simThreshold = opts.similarityThreshold ?? 0.88
 
   const similar = (a: GroundedNote, b: GroundedNote): boolean =>
     trigramSimilarity(a.title, b.title) >= titleSim ||
-    maxSpanOverlap(a, b) >= spanOverlap ||
     (opts.similarity ? opts.similarity(a, b) >= simThreshold : false)
 
   const result: GroundedNote[] = []

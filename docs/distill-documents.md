@@ -129,7 +129,13 @@ stubs.
    reason (`noEvidence`, `notFound`, `ambiguous`, plus recoveries) and the banner
    says so. *No evidence, no item.*
 7. **Dedup and link** (`dedup.ts`, `link.ts`). Near-duplicate titles absorb into
-   one surviving note. Every `[[target]]` is then remapped through dedup's aliases
+   one surviving note — titles only: a shared citation span used to count as
+   identity too, from the days when two sampled clusters quoting one passage
+   had extracted the same thing twice, but a window that reads a passage whole
+   takes several items from it on purpose (the person and the term they
+   coined, `shape` and `dtype` from one sentence). On the pandas book that rule
+   made 85 of 132 merges and every one of them was wrong; a shared passage is
+   relatedness, which the links already carry. Every `[[target]]` is then remapped through dedup's aliases
    and the final (de-collided) note names, so a rename never leaves a dead link; a
    target that still matches nothing snaps to the nearest name only above a high
    similarity, and otherwise stays a **counted ghost** rather than becoming a
@@ -138,7 +144,14 @@ stubs.
    to write down.
 8. **Theme** (`themes.ts`). The emitted notes are embedded, grouped (about √n
    groups, 3–16), and **all** groups are named in one model call — naming is
-   presentation and should not cost a call per group. A group whose name never
+   presentation and should not cost a call per group. Both this prompt and the
+   extraction prompt make the model **state the source's language first**
+   (the schema's first field) before writing anything in it: asked only to
+   "write in the same language as the notes", Sonnet without extended thinking
+   named an English book's groups in Russian, Polish and Turkish on identical
+   prompts (2 of 3 tries); made to state the language, 3 of 3 came back in
+   English. The rule names no language of its own — an example language in
+   the rule became the output language once. A group whose name never
    arrives falls back to its medoid note's title, so a failed naming call costs
    names, not notes. Each note gets a primary `part_of:: [[Theme]]`.
 9. **Emit editable notes** (`emit.ts`). Body `key:: value` edges — `source::`, each
@@ -304,9 +317,13 @@ replaced clusters as the unit of reading.
 
 | fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgeRecall |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| book-en | 10.19 | 1.00 | 0.00 | 0.00 | 341.00 | 7.44 | 0.00 | 1.00 | 0.00 | 0.32 | 0.00 | 0.05 |
-| paper.pdf | 13.35 | 1.00 | 0.00 | 0.00 | 230.00 | 6.46 | 0.00 | 1.00 | 0.02 | 0.29 | 0.00 | 0.00 |
+| book-en | 10.34 | 1.00 | 0.00 | 0.00 | 339.00 | 7.47 | 0.00 | 1.00 | 0.00 | 0.32 | 0.00 | 0.05 |
+| paper.pdf | 14.00 | 1.00 | 0.00 | 0.00 | 225.00 | 6.82 | 0.00 | 1.00 | 0.02 | 0.29 | 0.00 | 0.00 |
 | chapter-ru.md | 25.20 | 1.00 | 0.00 | 0.00 | 38.00 | 3.20 | 0.00 | 1.00 | 0.00 | 0.26 | 0.02 | 0.14 |
+
+(Re-taken after the real-book fixes below: dedup no longer merges on a shared
+span — a few fewer merges, a few more notes and edges; the stub's regex
+extraction is otherwise untouched by them.)
 
 What changed, and why:
 
