@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { noteName, sourceTitle, renderNote, emitNotes } from './emit'
+import { noteName, sourceTitle, renderNote, emitNotes, emitRun } from './emit'
 import { harvest } from '../harvest'
 import type { GroundedNote } from './extract'
 
@@ -138,5 +138,55 @@ describe('emitNotes', () => {
   it('de-collides a second emitted note against a reserved name too', () => {
     const out = emitNotes([note({ title: 'Book' }), note({ title: 'Book' })], { reserved: ['Book'] })
     expect(out.map((n) => n.name)).toEqual(['Book 2', 'Book 3'])
+  })
+})
+
+describe('emitRun — links resolved against the final names', () => {
+  const plain = (title: string, over: Partial<GroundedNote> = {}): GroundedNote => ({
+    kind: 'concept',
+    title,
+    summary: '',
+    links: [],
+    citations: [{ file: 'Book.md', chunkId: 1, start: 0, end: 5, quote: 'q' }],
+    ...over
+  })
+
+  it('follows a note through the de-collision that renamed it', () => {
+    const out = emitRun([plain('Book'), plain('Faction', { links: [{ relation: 'about', target: 'Book' }] })], {
+      reserved: ['Book']
+    })
+    expect(out.notes[0].name).toBe('Book 2')
+    expect(out.notes[1].content).toContain('about:: [[Book 2]]')
+    expect(out.ghostLinks).toBe(0)
+  })
+
+  it('follows dedup’s alias map to the surviving note', () => {
+    const out = emitRun([plain('Faction'), plain('Liberty', { links: [{ relation: 'about', target: 'Factions' }] })], {
+      aliases: new Map([['Factions', 'Faction']])
+    })
+    expect(out.notes[1].content).toContain('about:: [[Faction]]')
+    expect(out.ghostLinks).toBe(0)
+  })
+
+  it('writes an unresolvable target as the ghost it is, and counts it', () => {
+    const out = emitRun([plain('Faction', { links: [{ relation: 'about', target: 'Monarchy' }] })])
+    expect(out.notes[0].content).toContain('about:: [[Monarchy]]')
+    expect(out).toMatchObject({ edges: 1, ghostLinks: 1, mentions: 0, components: 1 })
+  })
+
+  it('adds a mention link when one note’s text names another, and harvest reads it', () => {
+    const out = emitRun([
+      plain('Liberty', { summary: 'Curbed by the extended republic.' }),
+      plain('Extended republic')
+    ])
+    expect(out.notes[0].content).toContain('mentions:: [[Extended republic]]')
+    expect(out).toMatchObject({ mentions: 1, components: 1 })
+    const rels = harvest('d/Liberty.md', out.notes[0].content).triples.map((t) => `${t.relation} ${t.object}`)
+    expect(rels).toContain('mentions Extended republic')
+  })
+
+  it('counts the islands the run came out as', () => {
+    const out = emitRun([plain('A', { links: [{ relation: 'about', target: 'B' }] }), plain('B'), plain('C')])
+    expect(out.components).toBe(2)
   })
 })

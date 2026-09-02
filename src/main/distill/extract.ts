@@ -71,6 +71,40 @@ export interface ClusterChunk {
 
 const KINDS = new Set<ItemKind>(['concept', 'claim', 'entity'])
 
+/**
+ * The controlled relation vocabulary. A model left free to invent relation
+ * names produces a long tail of one-off phrasings ("is a kind of", "relates
+ * to", "isPartOf") that read as different edge types but mean the same thing,
+ * so the map cannot be filtered or coloured by relation. These eight are
+ * offered in the prompt; `relationOf` folds anything else to `related_to`
+ * rather than dropping the edge — the model still saw a connection.
+ *
+ * `mentions` is deliberately absent: that relation is written by `link.ts`
+ * from a name found in a note's own text, not asserted by the model.
+ */
+export const RELATIONS = [
+  'defines',
+  'part_of',
+  'example_of',
+  'causes',
+  'depends_on',
+  'supports',
+  'contrasts_with',
+  'about'
+] as const
+
+/** Where a relation outside `RELATIONS` lands. */
+export const FALLBACK_RELATION = 'related_to'
+
+const RELATION_SET: ReadonlySet<string> = new Set<string>(RELATIONS)
+
+/** Normalize a model's relation onto the vocabulary: case and separators are
+ *  forgiven (`"Part Of"`, `"part-of"` → `part_of`), meaning is not. */
+export function relationOf(raw: string): string {
+  const n = raw.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return RELATION_SET.has(n) ? n : FALLBACK_RELATION
+}
+
 const SCHEMA_HINT = `{
   "items": [
     {
@@ -78,7 +112,7 @@ const SCHEMA_HINT = `{
       "title": "short noun phrase — becomes the note name",
       "summary": "1-3 sentences, only what the quotes support",
       "evidence": [ { "chunkId": <number>, "quote": "text copied verbatim from that chunk" } ],
-      "links": [ { "relation": "about" | "supports" | "contrasts_with" | "part_of", "target": "another item's title" } ]
+      "links": [ { "relation": ${RELATIONS.map((r) => `"${r}"`).join(' | ')}, "target": "another item's title" } ]
     }
   ]
 }`
@@ -97,7 +131,8 @@ export function buildExtractionPrompt(chunks: ClusterChunk[]): { system: string;
     'evidence, no item. Write every title, summary, and link target in the SAME ' +
     'LANGUAGE as the source chunks — a Russian text yields Russian notes; never ' +
     'translate into English. (JSON keys and "kind"/"relation" values stay exactly ' +
-    'as the schema spells them.) Return ONLY JSON in this exact shape:\n' +
+    'as the schema spells them; use ONLY the listed relation values.) Return ONLY ' +
+    'JSON in this exact shape:\n' +
     SCHEMA_HINT
   const body = chunks
     .map((c) => `[chunk ${c.chunkId}${c.heading ? ` — ${c.heading}` : ''}]\n${c.text}`)
@@ -138,9 +173,10 @@ function coerceItem(raw: unknown): ExtractedItem | null {
     for (const l of o.links) {
       if (!l || typeof l !== 'object') continue
       const lo = l as Record<string, unknown>
-      const relation = asString(lo.relation)
       const target = asString(lo.target)
-      if (relation && target) links.push({ relation, target })
+      // A target with no usable relation is still a connection the model saw —
+      // keep the edge, type it `related_to`.
+      if (target) links.push({ relation: relationOf(asString(lo.relation)), target })
     }
   }
 

@@ -4,6 +4,9 @@ import {
   parseExtraction,
   locateQuote,
   groundItems,
+  relationOf,
+  RELATIONS,
+  FALLBACK_RELATION,
   type ChunkProvenance,
   type ExtractedItem
 } from './extract'
@@ -141,6 +144,56 @@ describe('parseExtraction', () => {
     expect(r.ok).toBe(true)
     expect(r.items.map((i) => i.title)).toEqual(['Keep'])
     expect(r.items[0].evidence[0].chunkId).toBe(7) // coerced from string
+  })
+
+  it('folds every link onto the controlled relation vocabulary', () => {
+    const raw = JSON.stringify({
+      items: [
+        {
+          title: 'Faction',
+          links: [
+            { relation: 'Part Of', target: 'A' },
+            { relation: 'contrasts-with', target: 'B' },
+            { relation: 'is a kind of', target: 'C' },
+            { target: 'D' }
+          ]
+        }
+      ]
+    })
+    expect(parseExtraction(raw).items[0].links).toEqual([
+      { relation: 'part_of', target: 'A' },
+      { relation: 'contrasts_with', target: 'B' },
+      { relation: 'related_to', target: 'C' },
+      { relation: 'related_to', target: 'D' }
+    ])
+  })
+
+  it('still drops a link with no target at all', () => {
+    const raw = '{"items":[{"title":"Faction","links":[{"relation":"about"}]}]}'
+    expect(parseExtraction(raw).items[0].links).toEqual([])
+  })
+})
+
+describe('relationOf', () => {
+  it('keeps a vocabulary relation, forgiving case and separators', () => {
+    for (const r of RELATIONS) expect(relationOf(r)).toBe(r)
+    expect(relationOf('  DEPENDS ON ')).toBe('depends_on')
+    expect(relationOf('example-of')).toBe('example_of')
+  })
+
+  it('folds anything else to the one honest fallback', () => {
+    expect(relationOf('is a kind of')).toBe(FALLBACK_RELATION)
+    expect(relationOf('')).toBe(FALLBACK_RELATION)
+    expect(relationOf('mentions')).toBe(FALLBACK_RELATION) // link.ts writes those, not the model
+  })
+})
+
+describe('buildExtractionPrompt vocabulary', () => {
+  it('offers exactly the controlled relations, and says to use only those', () => {
+    const { system } = buildExtractionPrompt([{ chunkId: 1, heading: '', text: 't' }])
+    for (const r of RELATIONS) expect(system).toContain(`"${r}"`)
+    expect(system).toMatch(/only the listed relation values/i)
+    expect(system).not.toContain(`"${FALLBACK_RELATION}"`)
   })
 })
 

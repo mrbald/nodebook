@@ -19,11 +19,18 @@
  * a real note. Raw machine identity lives in the run's `meta.json` and the cite
  * chunk/span provenance, not here.
  *
- * Link targets are normalized the same way as note names, so `[[target]]` always
- * resolves to the note emitted for that title.
+ * Emitting is two passes, because a link target can only be resolved once every
+ * final name is known: first every note gets its name (de-collided), then
+ * `link.ts` remaps every `[[target]]` onto those names and adds mention links,
+ * then the markdown is rendered. `emitRun` reports what that cost — how many
+ * links were written, how many still point nowhere, and how connected the
+ * result is.
  */
 
-import type { GroundedNote } from './extract'
+import type { GroundedNote, Link } from './extract'
+import { linkNotes, noteName } from './link'
+
+export { noteName }
 
 export interface EmittedNote {
   /** Basename without extension; also how `[[links]]` reference this note. */
@@ -63,17 +70,10 @@ export function sourceTitle(file: string): string {
   return cleaned || base.trim() || 'source'
 }
 
-/**
- * Normalize a title into a safe note name: strip path- and wikilink-hostile
- * characters and collapse whitespace. Applied identically to link targets, so a
- * `[[target]]` resolves to the note emitted for that target's title.
- */
-export function noteName(title: string): string {
-  const n = title.replace(/[\\/:*?"<>|#[\]]+/g, ' ').replace(/\s+/g, ' ').trim()
-  return n || 'untitled'
-}
-
-/** A harvest-valid relation name (`[A-Za-z][\w -]*`), or '' to skip the link. */
+/** A harvest-valid relation name (`[A-Za-z][\w -]*`), or '' to skip the link.
+ *  The relations that reach here are the extractor's controlled vocabulary
+ *  (see `extract.ts`), `related_to`, and link.ts's `mentions`; this stays a
+ *  sanitizer so a hand-built note can never emit a field harvest won't parse. */
 function relationName(relation: string): string {
   const clean = relation.trim().replace(/[^A-Za-z0-9_ -]/g, '_')
   return /^[A-Za-z]/.test(clean) ? clean : ''
@@ -97,22 +97,33 @@ function frontmatter(note: GroundedNote, sources: string[]): string {
   return lines.join('\n')
 }
 
+/** A note's quotes as they are rendered: whitespace-collapsed, de-duplicated,
+ *  in citation order. Also what mention linking reads (see `link.ts`). */
+export function quotesOf(note: GroundedNote): string[] {
+  return [...new Set(note.citations.map((c) => c.quote.replace(/\s+/g, ' ').trim()))]
+}
+
 /** Render one note's markdown. `name` overrides the title-derived note name
- *  (used when a run de-collides duplicate names). */
-export function renderNote(note: GroundedNote, name = noteName(note.title)): string {
+ *  (used when a run de-collides duplicate names); `links` overrides the item's
+ *  own links (used after `link.ts` has remapped them). */
+export function renderNote(
+  note: GroundedNote,
+  name = noteName(note.title),
+  links: Link[] = note.links
+): string {
   // One name for the source everywhere — frontmatter, body link, book note
   // file — so it always resolves (see the module header).
   const sources = [...new Set(note.citations.map((c) => noteName(sourceTitle(c.file))))]
 
   const fields: string[] = []
   for (const s of sources) fields.push(`source:: [[${s}]]`)
-  for (const l of note.links) {
+  for (const l of links) {
     const rel = relationName(l.relation)
     const target = noteName(l.target)
     if (rel && target) fields.push(`${rel}:: [[${target}]]`)
   }
 
-  const quotes = [...new Set(note.citations.map((c) => c.quote.replace(/\s+/g, ' ').trim()))]
+  const quotes = quotesOf(note)
 
   const parts = [frontmatter(note, sources), '', `# ${name}`, '']
   if (fields.length) parts.push(fields.join('\n'), '')
@@ -122,10 +133,33 @@ export function renderNote(note: GroundedNote, name = noteName(note.title)): str
   return parts.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
 }
 
+export interface EmitOptions {
+  /** Names no emitted note may take (see `emitRun`). */
+  reserved?: string[]
+  /** dedup's {absorbed title → surviving title} map, so a link written before
+   *  the merge still finds its note (see `link.ts`). */
+  aliases?: Map<string, string>
+  /** Add mention links (default true; see `link.ts`). */
+  mentions?: boolean
+}
+
+/** A run's rendered notes, plus what its link graph came out as. */
+export interface EmitResult {
+  notes: EmittedNote[]
+  /** Links written across all notes, `source::` excluded, ghosts included. */
+  edges: number
+  /** Of those, how many point at no emitted note. */
+  ghostLinks: number
+  /** Of those, how many came from a name found in a note's own text. */
+  mentions: number
+  /** Connected components over the emitted notes (links read as undirected). */
+  components: number
+}
+
 /**
- * Render a run's notes, assigning each a unique filename. Names should already
- * be unique after dedup; the numeric suffix is a backstop so two notes can never
- * clobber the same file on disk.
+ * Assign each note a unique filename. Names should already be unique after
+ * dedup; the numeric suffix is a backstop so two notes can never clobber the
+ * same file on disk.
  *
  * `reserved` names are taken before the first note is placed — the run writes
  * the source book as a note of its own (`artifact.sourceNoteName`), and an
@@ -134,17 +168,48 @@ export function renderNote(note: GroundedNote, name = noteName(note.title)): str
  * concept. De-collision is case-insensitive, matching the collision it guards
  * against on case-insensitive filesystems.
  */
-export function emitNotes(
-  notes: GroundedNote[],
-  opts: { reserved?: string[] } = {}
-): EmittedNote[] {
+function assignNames(notes: GroundedNote[], reserved: string[] = []): string[] {
   const used = new Map<string, number>()
-  for (const r of opts.reserved ?? []) used.set(noteName(r).toLowerCase(), 1)
+  for (const r of reserved) used.set(noteName(r).toLowerCase(), 1)
   return notes.map((note) => {
     const base = noteName(note.title)
     const seen = used.get(base.toLowerCase()) ?? 0
     used.set(base.toLowerCase(), seen + 1)
-    const name = seen === 0 ? base : `${base} ${seen + 1}`
-    return { name, fileName: `${name}.md`, content: renderNote(note, name) }
+    return seen === 0 ? base : `${base} ${seen + 1}`
   })
+}
+
+/**
+ * Render a run's notes: name them, resolve their links against those names
+ * (`link.ts`), then write the markdown. Two passes, because a `[[target]]` can
+ * only be checked once every final name exists.
+ */
+export function emitRun(notes: GroundedNote[], opts: EmitOptions = {}): EmitResult {
+  const names = assignNames(notes, opts.reserved)
+  const linked = linkNotes(
+    notes.map((note, i) => ({
+      title: note.title,
+      name: names[i],
+      summary: note.summary,
+      quotes: quotesOf(note),
+      links: note.links
+    })),
+    { aliases: opts.aliases, mentions: opts.mentions }
+  )
+  return {
+    notes: notes.map((note, i) => ({
+      name: names[i],
+      fileName: `${names[i]}.md`,
+      content: renderNote(note, names[i], linked.links[i])
+    })),
+    edges: linked.edges,
+    ghostLinks: linked.ghostLinks,
+    mentions: linked.mentions,
+    components: linked.components
+  }
+}
+
+/** `emitRun`'s notes alone, for callers that don't need the link counts. */
+export function emitNotes(notes: GroundedNote[], opts: EmitOptions = {}): EmittedNote[] {
+  return emitRun(notes, opts).notes
 }

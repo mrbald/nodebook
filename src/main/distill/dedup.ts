@@ -102,12 +102,18 @@ function mergeInto(a: GroundedNote, b: GroundedNote): void {
 /**
  * Merge near-duplicate notes. Greedy single pass: each note folds into the first
  * earlier note it matches, else stands on its own. Inputs are not mutated.
- * Returns the merged notes and how many merges happened.
+ *
+ * Returns the merged notes, how many merges happened, and `aliases`: every
+ * title that stopped existing here mapped to the title that survived in its
+ * place. A merge silently invalidates links — another note may already point at
+ * "Factions" when only "Faction" is left — so `emit.ts` threads this map
+ * through `link.ts` and remaps those targets. Chains resolve themselves: the
+ * map is built at the end, from each surviving note's FINAL title.
  */
 export function dedup(
   notes: GroundedNote[],
   opts: DedupOptions = {}
-): { notes: GroundedNote[]; merged: number } {
+): { notes: GroundedNote[]; merged: number; aliases: Map<string, string> } {
   const titleSim = opts.titleSim ?? 0.82
   const spanOverlap = opts.spanOverlap ?? 0.6
   const simThreshold = opts.similarityThreshold ?? 0.88
@@ -118,16 +124,29 @@ export function dedup(
     (opts.similarity ? opts.similarity(a, b) >= simThreshold : false)
 
   const result: GroundedNote[] = []
+  /** Every input title folded into result[i], parallel to `result`. */
+  const foldedTitles: string[][] = []
   let merged = 0
   for (const note of notes) {
     const clone = cloneNote(note)
-    const target = result.find((r) => similar(r, clone))
-    if (target) {
-      mergeInto(target, clone)
+    const at = result.findIndex((r) => similar(r, clone))
+    if (at >= 0) {
+      mergeInto(result[at], clone)
+      foldedTitles[at].push(note.title)
       merged++
     } else {
       result.push(clone)
+      foldedTitles.push([note.title])
     }
   }
-  return { notes: result, merged }
+
+  // A title that a surviving note still carries belongs to that note — never
+  // alias it away, or a link would be redirected to the wrong one.
+  const survivors = new Set(result.map((r) => r.title))
+  const aliases = new Map<string, string>()
+  result.forEach((r, i) => {
+    for (const title of foldedTitles[i])
+      if (!survivors.has(title) && !aliases.has(title)) aliases.set(title, r.title)
+  })
+  return { notes: result, merged, aliases }
 }
