@@ -90,6 +90,7 @@ export interface NodebookApi {
   distillMerge: (runId: string, opts?: { sameAs?: string[] }) => Promise<DistillMergeResult>
   distillUnmerge: (runId: string) => Promise<DistillUnmergeResult>
   distillMergeStatus: (runId: string) => Promise<DistillMergeStatus>
+  distillOpenOriginal: (hash: string) => Promise<string | null>
   onDistillProgress: (cb: (runId: string, p: DistillProgress) => void) => () => void
   onDistillEmbedRequest: (handler: (texts: string[]) => Promise<number[][]>) => () => void
   setMenuState: (s: MenuState) => void

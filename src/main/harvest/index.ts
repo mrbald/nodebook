@@ -1,6 +1,9 @@
 import { basename } from 'path'
 import { parser as markdownParser } from '@lezer/markdown'
 import { WikilinkExtension } from '../../shared/markdown/wikilink'
+import type { NoteKind } from '../../shared/types'
+
+export type { NoteKind }
 
 /**
  * The harvest parser — a pure function that turns one markdown file into the
@@ -25,6 +28,32 @@ export interface Harvested {
   /** Full-text payload for FTS (raw content for now — FTS5 tokenizes it). */
   text: string
   triples: Triple[]
+  /** What this file IS, from its frontmatter `kind:` — see `frontmatterKind`. */
+  kind: NoteKind
+}
+
+const KINDS = new Set<string>(['document', 'theme', 'concept', 'claim', 'entity'])
+
+/**
+ * The `kind:` a file declares in its frontmatter, or `note`.
+ *
+ * Pure and deliberately narrow: only a leading `---` block counts, only a
+ * single-word value, and only a value from the known set — anything else is an
+ * ordinary note. So a note that merely *mentions* `kind: document` in its body,
+ * or writes `kind: my own thing`, is never mistaken for a distilled document.
+ */
+export function frontmatterKind(content: string): NoteKind {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content)
+  if (!fm) return 'note'
+  const m = /^kind:[ \t]*([A-Za-z]+)[ \t]*\r?$/m.exec(fm[1])
+  const kind = m?.[1].toLowerCase()
+  return kind && KINDS.has(kind) ? (kind as NoteKind) : 'note'
+}
+
+/** First `# ` heading, or the file's base name — the cheap title, for a file
+ *  big enough that a full markdown parse is not worth its cost. */
+function fastTitle(content: string, fallback: string): string {
+  return /^#[ \t]+(.+?)[ \t]*$/m.exec(content)?.[1] || fallback
 }
 
 /** A line-level Dataview-style typed field: `key:: value` (also under `>` quotes). */
@@ -38,6 +67,17 @@ function cleanTarget(inner: string): string {
 
 export function harvest(path: string, content: string): Harvested {
   const noteName = basename(path).replace(/\.md$/i, '')
+
+  // A `kind: document` note is a whole converted book — up to megabytes of
+  // prose the user never wrote. Parsing it costs main-thread time for nothing:
+  // a book has no `key:: value` fields, and any `[[link]]` in it is the
+  // author's prose, not a knowledge edge. So it gets the cheap path — a title
+  // and the full text for search — and contributes no triples.
+  const kind = frontmatterKind(content)
+  if (kind === 'document') {
+    return { title: fastTitle(content, noteName), text: content, triples: [], kind }
+  }
+
   const tree = parser.parse(content)
 
   let title = ''
@@ -81,5 +121,5 @@ export function harvest(path: string, content: string): Harvested {
     if (object) triples.push({ subject: noteName, relation, object })
   }
 
-  return { title: title || noteName, text: content, triples }
+  return { title: title || noteName, text: content, triples, kind }
 }

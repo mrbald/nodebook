@@ -1,9 +1,10 @@
 /**
- * The distill orchestrator: source text → cited, de-duplicated markdown notes.
- * It wires the pure core (chunk → plan windows → extract → ground → dedup →
- * emit) and drives the one impure step — chat extraction — through an INJECTED
- * interface. That keeps this logic unit-testable with stubs; the Electron layer
- * (main-process chat model) supplies the real one.
+ * The distill orchestrator: source text → cited, de-duplicated markdown notes,
+ * grouped under a handful of themes. It wires the pure core (chunk → plan
+ * windows → extract → ground → dedup → emit → theme) and drives the two impure
+ * steps — chat and, for the themes, embedding — through INJECTED interfaces.
+ * That keeps this logic unit-testable with stubs; the Electron layer (main-
+ * process chat model, renderer embedding bridge) supplies the real ones.
  *
  * The run READS THE WHOLE DOCUMENT, in order. Consecutive chunks are packed
  * into windows as large as the model's declared prompt budget allows
@@ -22,6 +23,12 @@
  * crashed run resumes from where it stopped instead of starting over. The one
  * thing that DOES stop a run is three failing windows in a row: an expired key
  * should cost three slow calls, not a hundred.
+ *
+ * Last comes the shape of the result: the emitted notes are embedded, grouped
+ * (`themes.ts`) and named in one call, so the map reads book → themes → notes
+ * instead of one flat star. That pass is presentation, so it is the one pass
+ * allowed to fail quietly — a naming call that never answers costs the names,
+ * not the notes.
  */
 
 import {
@@ -41,7 +48,25 @@ import {
   type ExtractedItem
 } from './extract'
 import { dedup } from './dedup'
-import { emitRun, type EmittedNote } from './emit'
+import {
+  attachThemes,
+  dedupeNames,
+  emitRun,
+  renderDocumentNote,
+  renderThemeNote,
+  THEME_RELATION,
+  type EmitResult,
+  type EmittedNote
+} from './emit'
+import { countComponents } from './link'
+import {
+  clusterNotes,
+  parseThemeNames,
+  themeNameOf,
+  themeNamingPrompt,
+  MIN_THEME_NOTES,
+  type NoteCluster
+} from './themes'
 import { sourceNoteName, type CheckpointStore } from './artifact'
 import { withRetry, type RetryOptions } from './retry'
 
@@ -53,7 +78,7 @@ export class DistillAborted extends Error {
   }
 }
 
-export type DistillPhase = 'chunking' | 'extracting' | 'finalizing' | 'done'
+export type DistillPhase = 'chunking' | 'extracting' | 'finalizing' | 'themes' | 'done'
 
 export interface DistillProgress {
   phase: DistillPhase
@@ -65,6 +90,14 @@ export interface DistillProgress {
 export interface DistillSource {
   file: string
   text: string
+  /** sha1 of `text` — the document's identity in the source store
+   *  (`sources.ts`). Absent for a caller that has no store (tests, the eval). */
+  hash?: string
+  /** Absolute path of the file it was converted from. Recorded on the book
+   *  note so "Open original" can find it; never sent to the model. */
+  originalPath?: string
+  /** Short human title. Defaults to `sourceTitle(file)` where it is needed. */
+  title?: string
 }
 
 /** The orchestrator only needs to turn text into vectors (the renderer's WASM
@@ -72,9 +105,10 @@ export interface DistillSource {
  *  The signal is passed on so a cancel reaches the bridge instead of waiting
  *  out an in-flight round trip.
  *
- *  Nothing in THIS phase embeds anything — reading is by document order, not by
- *  similarity — but the dependency stays in the interface for the themes phase,
- *  which embeds the emitted notes. */
+ *  Reading the document uses no vectors at all — it goes by document order, not
+ *  by similarity. The one thing that embeds is the THEMES pass at the end, over
+ *  the emitted notes (title + summary), and only when there are enough of them
+ *  to be worth grouping. */
 export interface DistillEmbedder {
   embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]>
 }
@@ -227,6 +261,10 @@ export function estimateDistill(text: string, opts: DistillOptions = {}): Distil
 
 export interface DistillResult {
   notes: EmittedNote[]
+  /** The run's theme names, in map order (empty when the run was too small to
+   *  group). Recorded in `meta.json` so the runs list can say what a run is
+   *  about without opening it. */
+  themes: string[]
   stats: {
     chunks: number
     /** Windows read — one model call each, before any length-split. */
@@ -246,6 +284,8 @@ export interface DistillResult {
     recovered: number
     merged: number
     notes: number
+    /** Theme notes the run grouped its notes under (0 = not enough notes). */
+    themes: number
     failedWindows: number
     /** Shape of the run's link graph (see shared DistillStats and link.ts). */
     edges: number
@@ -400,6 +440,157 @@ async function readWindow(ctx: ReadContext, ids: number[], depth: number): Promi
   }
 }
 
+// --- Themes: the run's notes, grouped and named ------------------------------
+// The last pass, and the only one that embeds anything. It runs on the EMITTED
+// notes, so the names it groups are the final ones: each note gets a
+// `part_of::` edge up to its theme, and each theme is written as a note of its
+// own. Presentation, deliberately: a naming call that fails costs the names
+// (the medoid titles stand in), never the run.
+
+/** Notes embedded per round trip through the renderer's bridge. */
+const EMBED_BATCH = 32
+
+/** Embed `texts` in batches, honouring cancellation between and inside them. */
+async function embedAll(
+  embedder: DistillEmbedder,
+  texts: string[],
+  signal?: AbortSignal
+): Promise<Float32Array[]> {
+  const out: Float32Array[] = []
+  try {
+    for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+      throwIfAborted(signal)
+      out.push(...(await embedder.embed(texts.slice(i, i + EMBED_BATCH), signal)))
+    }
+  } catch (err) {
+    // A cancelled bridge call rejects with whatever the transport throws; the
+    // run has exactly one word for "cancelled".
+    throwIfAborted(signal)
+    throw err
+  }
+  throwIfAborted(signal)
+  return out
+}
+
+/** Name every theme in ONE call, with the same repair retry an extraction gets.
+ *  A group the model skips comes back null and is named from its medoid. */
+async function nameThemes(
+  chat: ChatModel,
+  clusters: NoteCluster[],
+  notes: { title: string; summary: string }[],
+  opts: { retry?: RetryOptions; signal?: AbortSignal }
+): Promise<(string | null)[]> {
+  const { system, user } = themeNamingPrompt(
+    clusters.map((c) => ({ members: c.members.map((i) => notes[i]) }))
+  )
+  const ask = async (): Promise<(string | null)[]> => {
+    const first = await collect(
+      chat.chat({ system, messages: [{ role: 'user', content: user }], signal: opts.signal }),
+      opts.signal
+    )
+    let parsed = parseThemeNames(first, clusters.length)
+    if (!parsed.ok) {
+      const repair: ChatRequest = {
+        system,
+        messages: [
+          { role: 'user', content: user },
+          { role: 'assistant', content: first.slice(0, 800) },
+          { role: 'user', content: 'That was not valid JSON in the required shape. Reply with ONLY the JSON object, nothing else.' }
+        ],
+        signal: opts.signal
+      }
+      parsed = parseThemeNames(await collect(chat.chat(repair), opts.signal), clusters.length)
+    }
+    return parsed.names
+  }
+  try {
+    return await withRetry(ask, { ...opts.retry, signal: opts.signal })
+  } catch (err) {
+    throwIfAborted(opts.signal)
+    if (err instanceof DistillAborted) throw err
+    return new Array<string | null>(clusters.length).fill(null)
+  }
+}
+
+/** What the themes pass made of a run. */
+interface ThemePass {
+  /** The member notes, each now carrying `part_of::`, then the theme notes. */
+  notes: EmittedNote[]
+  /** Theme names, in map order. */
+  names: string[]
+  /** The run's link counts, re-taken with the theme edges included. */
+  edges: number
+  components: number
+}
+
+/**
+ * Group the emitted notes, name the groups, and write the result: a
+ * `part_of::` field on every note and one theme note per group.
+ */
+async function addThemes(
+  emitted: EmitResult,
+  titles: { title: string; summary: string }[],
+  source: DistillSource,
+  deps: DistillDeps,
+  opts: DistillOptions,
+  saved: string[] | null
+): Promise<ThemePass> {
+  const vectors = await embedAll(
+    deps.embedder,
+    titles.map((n) => `${n.title}\n${n.summary}`),
+    opts.signal
+  )
+  const clusters = clusterNotes(vectors)
+  // A resume that already paid for the naming call replays its answer: the
+  // notes are the same, so the grouping is the same, so the names still fit.
+  const replayed = saved && saved.length === clusters.length ? saved : null
+  const answered = replayed ?? (await nameThemes(deps.chat, clusters, titles, opts))
+  const resolved = clusters.map((c, i) =>
+    themeNameOf(
+      c,
+      titles.map((n) => n.title),
+      answered[i] ?? null
+    )
+  )
+  if (!replayed) opts.checkpoint?.save({ type: 'themes', names: resolved })
+
+  // A theme is a note on disk like any other, so its name is de-collided
+  // against the notes already placed (and the book) before anything links to it.
+  const sourceName = sourceNoteName(source.file)
+  const names = dedupeNames(resolved, [sourceName, ...emitted.notes.map((n) => n.name)])
+  const assignment = new Map<string, string>()
+  clusters.forEach((c, i) => {
+    for (const m of c.members) assignment.set(emitted.notes[m].name, names[i])
+  })
+  const attached = attachThemes(emitted.notes, assignment)
+  const themeNotes: EmittedNote[] = clusters.map((c, i) => ({
+    name: names[i],
+    fileName: `${names[i]}.md`,
+    content: renderThemeNote({
+      name: names[i],
+      members: c.members.map((m) => emitted.notes[m].name),
+      sourceName
+    })
+  }))
+
+  // The map has new nodes and new edges, so its shape is measured again rather
+  // than reported as it was before the themes existed.
+  const allNames = [...emitted.notes.map((n) => n.name), ...names]
+  const allLinks = [
+    ...emitted.links.map((ls, i) => {
+      const theme = assignment.get(emitted.notes[i].name)
+      return theme ? [...ls, { relation: THEME_RELATION, target: theme }] : ls
+    }),
+    ...names.map(() => [])
+  ]
+  return {
+    notes: [...attached.notes, ...themeNotes],
+    names,
+    edges: emitted.edges + attached.added,
+    components: countComponents(allNames, allLinks)
+  }
+}
+
 export async function distill(
   source: DistillSource,
   deps: DistillDeps,
@@ -414,7 +605,11 @@ export async function distill(
   const chunks: Chunk[] = chunkMarkdown(source.text)
   report('chunking', chunks.length, chunks.length)
   const prov = new Map<number, ChunkProvenance>()
-  chunks.forEach((c, id) => prov.set(id, { file: source.file, start: c.start, text: c.text }))
+  // The chunk's heading rides along: it is where a reader would say the quote
+  // is ("Page 42", a chapter name), and that is what the citation reports.
+  chunks.forEach((c, id) =>
+    prov.set(id, { file: source.file, start: c.start, text: c.text, heading: c.heading })
+  )
 
   // 2. Plan the windows (pure). A resume starts from the plan the first attempt
   //    committed to — the windows are already decided, and re-deciding could
@@ -513,11 +708,35 @@ export async function distill(
   const { notes: deduped, merged, aliases } = dedup(grounded)
   // The book itself is written as a note of the run (artifact.planRunFiles), so
   // its name is off-limits to the emitted notes — see emitRun.
-  const emitted = emitRun(deduped, { reserved: [sourceNoteName(source.file)], aliases })
+  // Citation spans are recorded against the BOOK NOTE the run writes (the
+  // converted text behind a `kind: document` header), so they are shifted by
+  // that header's length — see emit.renderDocumentNote.
+  const emitted = emitRun(deduped, {
+    reserved: [sourceNoteName(source.file)],
+    aliases,
+    citeOffset: renderDocumentNote(source).citeOffset
+  })
+
+  // 7. Themes (embeds + one chat call). Below MIN_THEME_NOTES a run stays flat:
+  //    three groups over five notes is filing, not grouping.
+  let notes = emitted.notes
+  let themes: string[] = []
+  let edges = emitted.edges
+  let components = emitted.components
+  if (emitted.notes.length >= MIN_THEME_NOTES) {
+    report('themes', 0, 1)
+    const pass = await addThemes(emitted, deduped, source, deps, opts, saved?.themes ?? null)
+    notes = pass.notes
+    themes = pass.names
+    edges = pass.edges
+    components = pass.components
+    report('themes', 1, 1)
+  }
   report('done', 1, 1)
 
   return {
-    notes: emitted.notes,
+    notes,
+    themes,
     stats: {
       chunks: chunks.length,
       windows: plan.length,
@@ -530,11 +749,12 @@ export async function distill(
       recovered,
       merged,
       notes: emitted.notes.length,
+      themes: themes.length,
       failedWindows,
-      edges: emitted.edges,
+      edges,
       ghostLinks: emitted.ghostLinks,
       mentions: emitted.mentions,
-      components: emitted.components,
+      components,
       coverage
     }
   }

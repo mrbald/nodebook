@@ -146,10 +146,10 @@ export function StagedNoteView({
                 }
               }}
             >
-              📄 {c.source}{' '}
-              <span className="source-span">
-                {c.start}–{c.end}
-              </span>
+              <div>
+                📄 {c.source}{' '}
+                <span className="source-span">{c.where ?? `${c.start}–${c.end}`}</span>
+              </div>
             </div>
           ))}
         </section>

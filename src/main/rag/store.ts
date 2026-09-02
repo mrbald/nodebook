@@ -98,7 +98,18 @@ export class VectorStore {
   private gen = 0
   private centroidCache: { gen: number; map: Map<string, Float32Array> } | null = null
 
-  constructor(private db: Database.Database) {
+  /**
+   * `documentPaths` names the notes that are whole converted books
+   * (`kind: document`). They are chunked and searchable — Ask must still find a
+   * passage in them — but they are left OUT of the per-note centroids, so a
+   * book never shows up as "related" to everything or colours the map by its
+   * own average meaning. The owning index supplies it lazily, so a document
+   * merged after the store opened is excluded from the next centroid rebuild.
+   */
+  constructor(
+    private db: Database.Database,
+    private documentPaths: () => Set<string> = () => new Set()
+  ) {
     sqliteVec.load(this.db)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS chunks (
@@ -285,6 +296,7 @@ export class VectorStore {
     const map = new Map<string, Float32Array>()
     this.centroidCache = { gen: this.gen, map }
     if (!this.dims) return map
+    const documents = this.documentPaths()
     const rows = this.db
       .prepare(
         `SELECT c.file AS file, v.embedding AS emb
@@ -293,6 +305,7 @@ export class VectorStore {
       .all() as { file: string; emb: Buffer }[]
     const counts = new Map<string, number>()
     for (const r of rows) {
+      if (documents.has(r.file)) continue
       const vec = new Float32Array(
         r.emb.buffer.slice(r.emb.byteOffset, r.emb.byteOffset + this.dims * 4)
       )

@@ -1,28 +1,49 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { zipSync, strToU8 } from 'fflate'
-import { pdfToMarkdown, epubToMarkdown, htmlToMarkdown, docxToMarkdown, convertDocument } from './convert'
+import {
+  pdfToMarkdown,
+  epubToMarkdown,
+  epubNavTitles,
+  htmlToMarkdown,
+  docxToMarkdown,
+  convertDocument
+} from './convert'
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
 
-/** A minimal valid EPUB: one chapter, in-memory. */
-function makeEpub(): Uint8Array {
+/** A minimal valid EPUB: two chapters, in-memory. `withNav` adds an EPUB 2
+ *  `toc.ncx` naming the first `namedChapters` of them. */
+function makeEpub({ withNav = false, namedChapters = 2 } = {}): Uint8Array {
   const container =
     '<?xml version="1.0"?><container><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
+  const navItem = withNav
+    ? '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+    : ''
   const opf =
-    '<?xml version="1.0"?><package><manifest><item id="c2" href="chap2.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="chap1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>'
+    '<?xml version="1.0"?><package><manifest>' +
+    navItem +
+    '<item id="c2" href="chap2.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="chap1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>'
+  const points = [
+    '<navPoint><navLabel><text>Of Faction</text></navLabel><content src="chap1.xhtml"/></navPoint>',
+    '<navPoint><navLabel><text>Of the Republic</text></navLabel><content src="chap2.xhtml"/></navPoint>'
+  ].slice(0, namedChapters)
   const chap1 = '<html><body><h1>Faction</h1><p>Faction arises from the unequal distribution of property.</p></body></html>'
   const chap2 = '<html><body><h1>Republic</h1><p>A republic refines public views through representatives.</p></body></html>'
   return zipSync({
     mimetype: strToU8('application/epub+zip'),
     'META-INF/container.xml': strToU8(container),
     'content.opf': strToU8(opf),
+    ...(withNav ? { 'toc.ncx': strToU8(`<ncx><navMap>${points.join('')}</navMap></ncx>`) } : {}),
     'chap1.xhtml': strToU8(chap1),
     'chap2.xhtml': strToU8(chap2)
   })
 }
+
+/** The real multi-page PDF fixture the eval and the golden test share. */
+const PAPER_PDF = join(__dirname, '..', '..', '..', 'e2e', 'fixtures', 'distill', 'paper.pdf')
 
 // A minimal, text-bearing PDF: one page that shows "Hello Faction world".
 const PDF = `%PDF-1.4
@@ -69,6 +90,64 @@ describe('pdfToMarkdown', () => {
   it('throws a friendly error for a scanned PDF (no text layer)', async () => {
     await expect(pdfToMarkdown(enc(PDF_NO_TEXT))).rejects.toThrow(/scanned|OCR/i)
   })
+
+  // The golden case: a real 21-page PDF laid out by scripts/make-paper-pdf.mjs
+  // with exactly the defects a PDF text layer has — a running header on every
+  // page, a page-number footer, words hyphenated across the line break, and one
+  // hard newline per printed line. See cleanPdf.ts.
+  it('cleans a real multi-page PDF: no furniture, whole words, real paragraphs', async () => {
+    const md = await pdfToMarkdown(new Uint8Array(readFileSync(PAPER_PDF)))
+
+    // Page provenance survives, for every page.
+    expect(md).toContain('## Page 1')
+    expect(md).toContain('## Page 21')
+
+    // The running header and the `- N -` footer are gone.
+    expect(md).not.toContain('RELATIVITY: THE SPECIAL AND GENERAL THEORY')
+    expect(md).not.toMatch(/^- \d+ -$/m)
+
+    // No word is left cut in half, and the halves are back together.
+    expect(md).not.toMatch(/\w-\n\w/)
+    for (const word of ['railway', 'revolution', 'considerations', 'intellectual'])
+      expect(md).toContain(word)
+
+    // Prose reads as paragraphs, not as one line per printed line: every page
+    // is a handful of blocks, and each block is far longer than a printed line.
+    const pages = md.split(/^## Page \d+$/m).filter((p) => p.trim())
+    expect(pages).toHaveLength(21)
+    for (const page of pages) {
+      const paragraphs = page.trim().split('\n\n')
+      expect(paragraphs.length).toBeLessThanOrEqual(12)
+      expect(Math.max(...paragraphs.map((p) => p.length))).toBeGreaterThan(400)
+      // A paragraph is one line: the printed line breaks are gone.
+      for (const paragraph of paragraphs) expect(paragraph).not.toContain('\n')
+    }
+  })
+})
+
+describe('epubNavTitles', () => {
+  it('reads an EPUB 2 toc.ncx, dropping the fragment', () => {
+    const ncx = `<ncx><navMap>
+      <navPoint id="n1"><navLabel><text>Chapter One: Faction</text></navLabel><content src="chap1.xhtml"/></navPoint>
+      <navPoint id="n2"><navLabel><text>Chapter Two &amp; Last</text></navLabel><content src="chap2.xhtml#top"/></navPoint>
+    </navMap></ncx>`
+    expect([...epubNavTitles(ncx, '')]).toEqual([
+      ['chap1.xhtml', 'Chapter One: Faction'],
+      ['chap2.xhtml', 'Chapter Two & Last']
+    ])
+  })
+
+  it('reads an EPUB 3 nav.xhtml toc, and ignores other navs', () => {
+    const nav = `<html><body>
+      <nav epub:type="landmarks"><ol><li><a href="chap1.xhtml">Start Reading</a></li></ol></nav>
+      <nav epub:type="toc"><ol><li><a href="chap1.xhtml"><span>The Republic</span></a></li></ol></nav>
+    </body></html>`
+    expect(epubNavTitles('', nav).get('chap1.xhtml')).toBe('The Republic')
+  })
+
+  it('is empty when there is no table of contents', () => {
+    expect(epubNavTitles('', '<html><body><p>no nav</p></body></html>').size).toBe(0)
+  })
 })
 
 describe('epubToMarkdown', () => {
@@ -79,6 +158,19 @@ describe('epubToMarkdown', () => {
     // Spine order (c1 then c2) wins over manifest order (c2 first).
     expect(md.indexOf('Faction')).toBeLessThan(md.indexOf('Republic'))
     expect(md).toContain('## Section 1')
+  })
+
+  it('names each section from the table of contents when the book has one', async () => {
+    const md = await epubToMarkdown(makeEpub({ withNav: true }))
+    expect(md).toContain('## Of Faction')
+    expect(md).toContain('## Of the Republic')
+    expect(md).not.toContain('## Section 1')
+  })
+
+  it('falls back to Section N for a chapter the contents does not name', async () => {
+    const md = await epubToMarkdown(makeEpub({ withNav: true, namedChapters: 1 }))
+    expect(md).toContain('## Of Faction')
+    expect(md).toContain('## Section 2')
   })
 
   it('throws on a non-EPUB zip', async () => {

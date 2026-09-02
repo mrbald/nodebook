@@ -137,7 +137,9 @@ it by hand, and nothing here changes your notes.
   every time you open it.
 - **Distilled documents** — notes distilled from a document all link back to it, and
   those "from the same book" lines would swallow the picture. The map hides the
-  document's own node by default; the **📕 Source** button brings it back.
+  document's own node by default; the **📕 Source** button brings it back. A whole
+  book is never one of the "most connected notes" on a **Global** map either — it
+  is what your notes are about, not one of them.
 - **Two names, one note** — when you told Merge that a distilled note is the same
   thing as one you already had, the map draws them as one dot and lists the other
   name under **also known as** when you click it. That decision is a plain
@@ -216,6 +218,8 @@ first.
   passage, Nodebook finds the right one and corrects it); a quote that isn't there, or
   that could be in two different places, is dropped rather than guessed at. The banner
   after a run says how many were dropped and why.
+- **Themes** — a distilled run groups its notes under a handful of theme notes, so
+  the map reads book → themes → notes; the sidebar lists a run's themes under it.
 - **The notes are linked to each other** — when one note's text names another, Nodebook
   adds a link between them; and when two notes turned out to be the same idea and were
   merged, links written for either name still land on the note that survived.
@@ -257,7 +261,22 @@ first.
   next to it and the map will show them as a single note from then on, with the other
   name listed beside it.
 - **Click a citation** — a distilled note lists its **Sources** in the right-hand
-  panel; clicking one opens the original document at the quoted passage.
+  panel — each one shows **where the passage is** (“Page 42”, or the chapter's
+  name) and the quote itself. Clicking one opens the document at that passage.
+- **Open the original file** — open the document's own note and the panel shows
+  where the file came from, with an **Open original** button that opens it in
+  whatever app your system uses for PDFs, EPUBs and the rest.
+- **The document is saved once** — merging puts the book itself in a **`Sources/`**
+  folder, under its title. Distil the same document again and both runs share that
+  one copy; Undo only removes it once no run still points at it.
+- **A document is searchable, never a hub** — the book's own note is found by
+  search and by Ask, but it isn't drawn as a big dot on your knowledge map and it
+  isn't counted as “related” to your notes. It's the thing your notes are about,
+  not one of them.
+- **PDF text is cleaned up first** — the header and page number printed on every
+  page are dropped, words split across a line break (“consid-erations”) are put
+  back together, and the printed line breaks become real paragraphs. The page
+  numbers stay as headings, so a citation can still say which page it came from.
 - **Very long documents** — a run reads everything up to a budget of **120 model
   calls** (`[distill] maxCalls` in Settings). Past that it reads evenly spaced steps
   instead of stopping, and the banner says what share of the text that was. Two more

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { join } from 'path'
 import { distill, probeChat, estimateDistill, DistillAborted, type DistillProgress } from './run'
 import { planRunFiles } from './artifact'
+import { renderDocumentNote } from './emit'
 import {
   replayCheckpoint,
   type CheckpointRecord,
@@ -36,12 +37,21 @@ const SRC = [
   ''
 ].join('\n')
 
-/** Nothing in this phase embeds anything; the dependency is still in the
- *  interface (the themes phase uses it), so tests pass one that would shout. */
+/** Reading the document embeds nothing — that pass goes by document order. The
+ *  THEMES pass at the end does embed, over the emitted notes, so this stub is a
+ *  tiny deterministic bag-of-words vector: notes sharing words land near each
+ *  other, and the same input always gives the same grouping. */
 const embedder = {
-  embed: async (): Promise<Float32Array[]> => {
-    throw new Error('distill must not embed chunks any more')
-  }
+  embed: async (texts: string[]): Promise<Float32Array[]> =>
+    texts.map((t) => {
+      const v = new Float32Array(3)
+      for (const w of t.toLowerCase().match(/[a-z]+/g) ?? []) {
+        let h = 0
+        for (const ch of w) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+        v[h % 3] += 1
+      }
+      return v
+    })
 }
 
 /** Chat stub: returns a valid item quoting the first chunk shown in the prompt. */
@@ -216,9 +226,11 @@ describe('distill', () => {
     expect(res.stats.dropped).toBe(0)
     expect(res.stats.recovered).toBeGreaterThan(0)
     expect(res.stats.notes).toBeGreaterThan(0)
-    // The citation points at the passage that really holds the quote.
+    // The citation points at the passage that really holds the quote — in the
+    // BOOK NOTE the run writes, which is the text behind a document header.
     const cite = /span:\s*(\d+)\s*-\s*(\d+)/.exec(res.notes[0].content)!
-    expect(SRC.slice(Number(cite[1]), Number(cite[2]))).toBe(
+    const bookNote = renderDocumentNote({ text: SRC }).content
+    expect(bookNote.slice(Number(cite[1]), Number(cite[2]))).toBe(
       'The separation of powers guards public liberty.'
     )
   })
@@ -407,6 +419,12 @@ function budgetedChat(
   }
 }
 
+/** The prompts that read the document — the themes pass at the end sends its
+ *  own naming prompt through the same model. */
+const readingPrompts = (
+  chat: { prompts: { system: string }[] }
+): { system: string }[] => chat.prompts.filter((p) => p.system.includes('extract structured knowledge'))
+
 /** The chunk ids a prompt actually showed the model. */
 function chunkIdsIn(user: string): number[] {
   return [...user.matchAll(/\[chunk (\d+)[^\]]*\]/g)].map((m) => Number(m[1]))
@@ -430,14 +448,14 @@ describe('distill — the declared budget', () => {
     const large = budgetedChat(16_000)
     await distill({ file: 'L.md', text: LONG }, { embedder, chat: small })
     await distill({ file: 'L.md', text: LONG }, { embedder, chat: large })
-    expect(small.prompts.length).toBeGreaterThan(large.prompts.length)
+    expect(readingPrompts(small).length).toBeGreaterThan(readingPrompts(large).length)
   })
 
   it('lets [distill] windowSize override the derived size', async () => {
     const chat = budgetedChat(16_000)
     await distill({ file: 'L.md', text: LONG }, { embedder, chat }, { windowSize: 600 })
-    // One ~535-weight chunk per window: eight calls, not one.
-    expect(chat.prompts).toHaveLength(8)
+    // One ~535-weight chunk per window: eight reading calls, not one.
+    expect(readingPrompts(chat)).toHaveLength(8)
   })
 })
 
@@ -812,5 +830,196 @@ describe('distill — link integrity', () => {
     const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: quotingChat() }, opts)
     // Two unlinked notes: no edges, no ghosts, two islands.
     expect(res.stats).toMatchObject({ edges: 0, ghostLinks: 0, mentions: 0, components: 2 })
+  })
+})
+
+// --- Themes: the run's notes, grouped and named ------------------------------
+// Eight distinct sections, so a run over this text emits enough notes to be
+// worth grouping (below MIN_THEME_NOTES a run stays flat, by design).
+
+const SRC8 = [
+  '# Book',
+  '',
+  '## Faction',
+  'Faction arises from liberty and property.',
+  '',
+  '## Passion',
+  'A faction is a number of citizens united by passion.',
+  '',
+  '## Causes',
+  'The causes of faction cannot be removed only controlled.',
+  '',
+  '## Power',
+  'Power must check power within a government.',
+  '',
+  '## Ambition',
+  'Ambition must be made to counteract ambition by design.',
+  '',
+  '## Separation',
+  'The separation of powers guards public liberty.',
+  '',
+  '## Union',
+  'A firm union is essential to the peace of the states.',
+  '',
+  '## Representation',
+  'Representatives refine the public views before they become law.',
+  ''
+].join('\n')
+
+const opts8 = { windowSize: 80 }
+
+/** quotingChat plus an answer to the theme-naming prompt. `namingCalls` counts
+ *  how many times the run asked for names. */
+function themingChat(naming?: (count: number) => string): ChatModel & { namingCalls: number } {
+  const model = {
+    id: 'theming-stub',
+    namingCalls: 0,
+    async *chat(req: { system?: string; messages: { content: string }[] }) {
+      const user = req.messages[0]?.content ?? ''
+      if ((req.system ?? '').includes('name groups of related notes')) {
+        model.namingCalls++
+        const count = (user.match(/\[theme \d+\]/g) ?? []).length
+        yield naming
+          ? naming(count)
+          : JSON.stringify({
+              themes: Array.from({ length: count }, (_, i) => ({ index: i, name: `Theme ${i + 1}` }))
+            })
+        return
+      }
+      const m = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)
+      if (!m) {
+        yield '{"items":[]}'
+        return
+      }
+      const quote = m[2].split(/\s+/).slice(0, 4).join(' ')
+      yield JSON.stringify({
+        items: [
+          { kind: 'concept', title: quote, summary: 's', evidence: [{ chunkId: Number(m[1]), quote }], links: [] }
+        ]
+      })
+    }
+  }
+  return model as unknown as ChatModel & { namingCalls: number }
+}
+
+/** Every `part_of:: [[target]]` a note's markdown carries. */
+const themesOf = (content: string): string[] =>
+  [...content.matchAll(/^part_of:: \[\[([^\]]+)\]\]$/gm)].map((m) => m[1])
+
+describe('distill — themes', () => {
+  it('groups the notes under theme notes, one primary theme each', async () => {
+    const chat = themingChat()
+    const res = await distill({ file: 'Book.md', text: SRC8 }, { embedder, chat }, opts8)
+
+    expect(res.stats.notes).toBe(8)
+    expect(res.stats.themes).toBe(3) // √8 ≈ 3
+    expect(res.themes).toEqual(['Theme 1', 'Theme 2', 'Theme 3'])
+    expect(chat.namingCalls).toBe(1) // ONE call names every theme
+
+    const themeNotes = res.notes.filter((n) => res.themes.includes(n.name))
+    const conceptNotes = res.notes.filter((n) => !res.themes.includes(n.name))
+    expect(themeNotes).toHaveLength(3)
+    expect(conceptNotes).toHaveLength(8)
+
+    // Every note belongs to exactly one theme, and that theme is a real note.
+    for (const note of conceptNotes) {
+      expect(themesOf(note.content)).toHaveLength(1)
+      expect(res.themes).toContain(themesOf(note.content)[0])
+    }
+    // A theme note says what it is, cites the book, and lists its members.
+    for (const theme of themeNotes) {
+      expect(theme.content).toContain('kind: theme')
+      expect(theme.content).toContain('source:: [[Book]]')
+      const members = [...theme.content.matchAll(/^- \[\[([^\]]+)\]\]$/gm)].map((m) => m[1])
+      expect(members.length).toBeGreaterThan(0)
+      for (const m of members)
+        expect(themesOf(conceptNotes.find((n) => n.name === m)!.content)).toEqual([theme.name])
+    }
+    // The map is now one island per theme instead of eight loose notes.
+    expect(res.stats.components).toBe(3)
+    expect(res.stats.edges).toBe(8) // one part_of per note
+  })
+
+  it('leaves a small run flat — grouping five notes is filing, not grouping', async () => {
+    const res = await distill({ file: 'Book.md', text: SRC }, { embedder, chat: quotingChat() }, opts)
+    expect(res.stats.notes).toBeLessThan(6)
+    expect(res.stats.themes).toBe(0)
+    expect(res.themes).toEqual([])
+    for (const n of res.notes) expect(themesOf(n.content)).toEqual([])
+  })
+
+  it('names a theme from its middle note when the model will not name it', async () => {
+    const chat = themingChat(() => 'I would rather not.')
+    const res = await distill(
+      { file: 'Book.md', text: SRC8 },
+      { embedder, chat },
+      { ...opts8, ...noWait }
+    )
+    expect(res.themes).toHaveLength(3)
+    const names = res.notes.map((n) => n.name)
+    // Each fallback name is a note's title (de-collided against it).
+    for (const theme of res.themes)
+      expect(names.some((n) => theme === n || theme.startsWith(`${n} `))).toBe(true)
+  })
+
+  it('keeps the run when naming fails outright — the names cost, not the notes', async () => {
+    const chat = {
+      id: 'x',
+      async *chat(req: { system?: string; messages: { content: string }[] }) {
+        if ((req.system ?? '').includes('name groups of related notes'))
+          throw tagError(new Error('API 500: naming'), { status: 500 })
+        yield* themingChat().chat(req as never)
+      }
+    } as unknown as ChatModel
+    const res = await distill(
+      { file: 'Book.md', text: SRC8 },
+      { embedder, chat },
+      { ...opts8, ...noWait }
+    )
+    expect(res.stats.notes).toBe(8)
+    expect(res.stats.themes).toBe(3)
+  })
+
+  it('aborts while embedding the notes for themes', async () => {
+    const ctrl = new AbortController()
+    const cancelling = {
+      embed: async (texts: string[]): Promise<Float32Array[]> => {
+        ctrl.abort()
+        return texts.map(() => new Float32Array(3))
+      }
+    }
+    await expect(
+      distill(
+        { file: 'Book.md', text: SRC8 },
+        { embedder: cancelling, chat: themingChat() },
+        { ...opts8, signal: ctrl.signal }
+      )
+    ).rejects.toBeInstanceOf(DistillAborted)
+  })
+
+  it('checkpoints the theme names, so a resume does not pay for naming twice', async () => {
+    const store = fakeCheckpoint()
+    const first = themingChat()
+    const a = await distill(
+      { file: 'Book.md', text: SRC8 },
+      { embedder, chat: first },
+      { ...opts8, checkpoint: store }
+    )
+    expect(first.namingCalls).toBe(1)
+    expect(store.records.filter((r) => r.type === 'themes')).toEqual([
+      { type: 'themes', names: ['Theme 1', 'Theme 2', 'Theme 3'] }
+    ])
+
+    // Same checkpoint, a model that would answer differently: neither the
+    // windows nor the naming call is paid for again.
+    const second = themingChat(() => JSON.stringify({ themes: [{ index: 0, name: 'Different' }] }))
+    const b = await distill(
+      { file: 'Book.md', text: SRC8 },
+      { embedder, chat: second },
+      { ...opts8, checkpoint: store }
+    )
+    expect(second.namingCalls).toBe(0)
+    expect(b.themes).toEqual(a.themes)
+    expect(b.notes).toEqual(a.notes)
   })
 })

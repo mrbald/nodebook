@@ -207,6 +207,38 @@ describe('source hubs (showSources)', () => {
     expect(g.hiddenSources).toBe(0)
   })
 
+  it('keeps a kind: document note out of the global view, but not out of its own', () => {
+    // A book is what the notes are ABOUT, not a hub of your thinking: its
+    // degree is one edge per distilled note, so degree ranking would always
+    // put it first. Here it is linked from a note that is NOT a `source::`
+    // edge, so the hub rule alone would keep it.
+    const docFiles: FileRow[] = [
+      { path: A, title: 'A' },
+      { path: B, title: 'B' },
+      { path: BOOK, title: 'Book', kind: 'document' }
+    ]
+    const docTriples: TripleRow[] = [t(A, 'mentions', 'Book'), t(B, 'mentions', 'Book')]
+    expect(ids(buildGraph(docFiles, docTriples, null))).toEqual(new Set([A, B]))
+    // …unless the user asked for source documents, or opened the book itself.
+    expect(ids(buildGraph(docFiles, docTriples, null, { showSources: true }))).toEqual(
+      new Set([A, B, BOOK])
+    )
+    expect(ids(buildGraph(docFiles, docTriples, BOOK, { depth: 1 }))).toEqual(new Set([A, B, BOOK]))
+  })
+
+  it('reports each note kind on its node, and nothing on an ordinary note', () => {
+    const g = buildGraph(
+      [
+        { path: A, title: 'A', kind: 'concept' },
+        { path: B, title: 'B', kind: 'note' }
+      ],
+      [t(A, 'links_to', 'B')],
+      null
+    )
+    expect(g.nodes.find((n) => n.id === A)!.kind).toBe('concept')
+    expect(g.nodes.find((n) => n.id === B)!.kind).toBeUndefined()
+  })
+
   it('never hides the hub when it is the focus itself — exempted, not just re-shown', () => {
     // Focusing the book is the one case where the user explicitly asked for it.
     const g = buildGraph(withSource, sourceTriples, BOOK, { depth: 1 })

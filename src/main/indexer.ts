@@ -1,11 +1,15 @@
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { basename, dirname } from 'path'
-import { harvest } from './harvest'
+import { harvest, frontmatterKind } from './harvest'
 import { VectorStore, type PendingChunk } from './rag/store'
 import { rrfRank } from './rag/rrf'
 import { buildGraph, noteName, type FileRow, type TripleRow, type GraphRows } from './graph'
 import type { Backlink, GraphData, Outbound, SearchHit } from '../shared/types'
+
+/** Schema revision the one-time `files.kind` backfill is recorded under
+ *  (`PRAGMA user_version`). Bump only if a future backfill needs to rerun. */
+const KIND_BACKFILL_VERSION = 1
 
 /**
  * The per-vault index: FTS5 full text + a triple store, in a single SQLite DB
@@ -31,7 +35,8 @@ export class VaultIndex {
         id INTEGER PRIMARY KEY,
         path TEXT UNIQUE NOT NULL,
         title TEXT,
-        mtime INTEGER
+        mtime INTEGER,
+        kind TEXT NOT NULL DEFAULT 'note'
       );
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, body);
       CREATE TABLE IF NOT EXISTS triples (
@@ -44,18 +49,58 @@ export class VaultIndex {
       CREATE INDEX IF NOT EXISTS idx_triples_source ON triples(source_file);
       CREATE INDEX IF NOT EXISTS idx_triples_relation ON triples(relation);
     `)
+    this.addKindColumn()
+    this.backfillKinds()
+  }
+
+  /**
+   * `files.kind` — what a note IS (`note` by default; `document` for a whole
+   * converted book, `theme`, `concept`, …). Additive, so an index written by an
+   * older build opens unchanged: the column is added once, guarded by a pragma
+   * check rather than a try/catch, and every existing row starts as `note`.
+   */
+  private addKindColumn(): void {
+    const cols = this.db.pragma('table_info(files)') as { name: string }[]
+    if (cols.some((c) => c.name === 'kind')) return
+    this.db.exec(`ALTER TABLE files ADD COLUMN kind TEXT NOT NULL DEFAULT 'note'`)
+  }
+
+  /**
+   * One-time: give existing rows their `kind`.
+   *
+   * The vault-open scan is mtime-gated, so a file that hasn't changed since the
+   * column was added is never re-parsed and would keep `kind = 'note'` forever.
+   * The index already holds every note's text (FTS body), so the kinds can be
+   * read back from there — cheaply, because only rows that literally start with
+   * a frontmatter `kind:` line are fetched. `user_version` marks it done, so
+   * this costs one scan per vault, ever.
+   */
+  private backfillKinds(): void {
+    if ((this.db.pragma('user_version', { simple: true }) as number) >= KIND_BACKFILL_VERSION) return
+    const rows = this.db
+      .prepare(`SELECT rowid AS id, body FROM notes_fts WHERE body LIKE ?`)
+      .all('---\nkind: %') as { id: number; body: string }[]
+    const set = this.db.prepare('UPDATE files SET kind = ? WHERE id = ?')
+    this.db.transaction(() => {
+      for (const r of rows) {
+        const kind = frontmatterKind(r.body)
+        if (kind !== 'note') set.run(kind, r.id)
+      }
+      this.db.pragma(`user_version = ${KIND_BACKFILL_VERSION}`)
+    })()
   }
 
   /** Re-parse one file and replace all of its rows (FTS + triples). */
   indexFile(path: string, content: string, mtime = 0): void {
-    const { title, text, triples } = harvest(path, content)
+    const { title, text, triples, kind } = harvest(path, content)
     this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO files (path, title, mtime) VALUES (?, ?, ?)
-           ON CONFLICT(path) DO UPDATE SET title = excluded.title, mtime = excluded.mtime`
+          `INSERT INTO files (path, title, mtime, kind) VALUES (?, ?, ?, ?)
+           ON CONFLICT(path) DO UPDATE SET title = excluded.title, mtime = excluded.mtime,
+             kind = excluded.kind`
         )
-        .run(path, title, mtime)
+        .run(path, title, mtime, kind)
       const id = (this.db.prepare('SELECT id FROM files WHERE path = ?').get(path) as { id: number })
         .id
 
@@ -134,7 +179,7 @@ export class VaultIndex {
    *  another source. */
   graphRows(): GraphRows {
     const files = this.db
-      .prepare("SELECT path, title FROM files WHERE path NOT LIKE '%.map.md'")
+      .prepare("SELECT path, title, kind FROM files WHERE path NOT LIKE '%.map.md'")
       .all() as FileRow[]
     const triples = this.db
       .prepare(
@@ -179,7 +224,17 @@ export class VaultIndex {
 
   /** Turn on the vector layer (loads sqlite-vec, creates the chunk tables). */
   enableTalk(): void {
-    if (!this.vec) this.vec = new VectorStore(this.db)
+    if (!this.vec) this.vec = new VectorStore(this.db, () => this.documentPaths())
+  }
+
+  /** Notes that are whole converted books (`kind: document`). They stay
+   *  searchable, but the semantic layer leaves them out of "related" and
+   *  colour-by-meaning — see `VectorStore`'s constructor. */
+  private documentPaths(): Set<string> {
+    const rows = this.db.prepare("SELECT path FROM files WHERE kind = 'document'").all() as {
+      path: string
+    }[]
+    return new Set(rows.map((r) => r.path))
   }
 
   get talkOn(): boolean {

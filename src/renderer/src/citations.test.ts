@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseCitations,
+  parseDocumentNote,
   resolveCitationSpan,
   gateAnswerCitations,
   usedCitations,
@@ -57,6 +58,26 @@ describe('parseCitations', () => {
     expect(parseCitations(withQuote)).toEqual([
       { source: 'Book', chunk: 1, start: 10, end: 30, quote: 'He said "no"\nand left.' }
     ])
+  })
+
+  it('reads where the quote is, when the run recorded it', () => {
+    const withWhere =
+      '---\nkind: claim\nsource: Book\ncite:\n  - chunk: 1\n    span: 5-9\n' +
+      '    where: "Page 42"\n    quote: "text"\n---\n# x'
+    expect(parseCitations(withWhere)[0]).toEqual({
+      source: 'Book',
+      chunk: 1,
+      start: 5,
+      end: 9,
+      quote: 'text',
+      where: 'Page 42'
+    })
+  })
+
+  it('still parses a citation with no where (older runs, and unheaded documents)', () => {
+    const noWhere = '---\nsource: Book\ncite:\n  - chunk: 1\n    span: 5-9\n    quote: "text"\n---\n# x'
+    expect(parseCitations(noWhere)[0].where).toBeUndefined()
+    expect(parseCitations(noWhere)[0].quote).toBe('text')
   })
 })
 
@@ -116,5 +137,27 @@ describe('usedCitations', () => {
 
   it('returns an empty set when nothing is cited', () => {
     expect(usedCitations('No citations here.', sources)).toEqual(new Set())
+  })
+})
+
+describe('parseDocumentNote', () => {
+  const book = (fm: string): string => `---\nkind: document\n${fm}\n---\n\n## Page 1\n\ntext`
+
+  it('reads the hash and the original path off a document note', () => {
+    const note = book('document: "/books/A \\"quoted\\": name.pdf"\nhash: ' + 'a'.repeat(40))
+    expect(parseDocumentNote(note)).toEqual({
+      hash: 'a'.repeat(40),
+      path: '/books/A "quoted": name.pdf'
+    })
+  })
+
+  it('is null for anything that is not a document note', () => {
+    expect(parseDocumentNote('# plain note')).toBeNull()
+    expect(parseDocumentNote('---\nkind: claim\nhash: ' + 'a'.repeat(40) + '\n---\n# x')).toBeNull()
+  })
+
+  it('ignores a hash that is not one, and a document note that records neither', () => {
+    expect(parseDocumentNote(book('hash: not-a-hash'))!.hash).toBeUndefined()
+    expect(parseDocumentNote('---\nkind: document\n---\n\ntext')).toEqual({})
   })
 })

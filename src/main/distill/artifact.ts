@@ -27,15 +27,20 @@ import {
 import { createHash } from 'crypto'
 import { basename, dirname, join, sep } from 'path'
 import { withinRoot } from '../paths'
-import { noteName, sourceTitle, type EmittedNote } from './emit'
+import { noteName, renderDocumentNote, sourceTitle, type EmittedNote } from './emit'
 import { rewriteLinks, withSameAs, type MergeAction, type MergePlanEntry } from './mergePlan'
 import type { ExtractedItem } from './extract'
 
 /** A safe run id is one path segment: alphanumeric start, then word/space/.-, no `..`. */
 const RUN_ID_RE = /^[A-Za-z0-9][\w .-]*$/
 
+/** Names under `.distill/` that belong to something other than a run — the
+ *  source store lives there too (`sources.ts`). A run may not take one, and
+ *  `listRuns` never reports one as a run. */
+export const RESERVED_RUN_IDS: ReadonlySet<string> = new Set(['sources'])
+
 export function assertRunId(runId: string): void {
-  if (!RUN_ID_RE.test(runId) || runId.includes('..'))
+  if (!RUN_ID_RE.test(runId) || runId.includes('..') || RESERVED_RUN_IDS.has(runId.toLowerCase()))
     throw new Error(`invalid distill run id: ${JSON.stringify(runId)}`)
 }
 
@@ -102,8 +107,9 @@ export function migrateDistillRuns(vaultRoot: string): string[] {
 }
 
 /** Write bytes so a reader never sees half a file: temp in the same dir, then
- *  rename (atomic on the same filesystem). Every artifact write goes through it. */
-function atomicWrite(path: string, data: string | Buffer): void {
+ *  rename (atomic on the same filesystem). Every write under `.distill/` goes
+ *  through it — the run artifacts here, and the source store in `sources.ts`. */
+export function atomicWrite(path: string, data: string | Buffer): void {
   const tmp = join(dirname(path), `.${basename(path)}.tmp`)
   writeFileSync(tmp, data)
   renameSync(tmp, path)
@@ -128,6 +134,14 @@ export interface RunSource {
    *  derive from it via `sourceNoteName`; `meta.json` keeps it as-is. */
   file: string
   text: string
+  /** sha1 of `text` — the document's identity in the source store
+   *  (`sources.ts`). Recorded in `run.json`, `meta.json` and on the book note,
+   *  so two runs of the same document can be told apart from two runs of two
+   *  documents. Absent for a run made before the store existed. */
+  hash?: string
+  /** Absolute path of the file this was converted from — what "Open original"
+   *  opens. Never sent to the model. */
+  originalPath?: string
 }
 
 // --- A run in flight: start marker, converted text, checkpoint -------------
@@ -149,6 +163,10 @@ export interface RunJson {
   file: string
   /** ISO timestamp of the run's start. */
   createdAt: string
+  /** The source store's identity for the converted text (see `sources.ts`). */
+  hash?: string
+  /** Where the document was read from — for "Open original" and diagnosis. */
+  originalPath?: string
   /** Provider/model the run was started with (free-form, for later diagnosis). */
   settings?: Record<string, string>
 }
@@ -167,6 +185,8 @@ export function beginRun(
   const run: RunJson = {
     file: source.file,
     createdAt: new Date().toISOString(),
+    ...(source.hash ? { hash: source.hash } : {}),
+    ...(source.originalPath ? { originalPath: source.originalPath } : {}),
     ...(settings ? { settings } : {})
   }
   atomicWrite(join(dir, RUN_FILE), JSON.stringify(run, null, 2))
@@ -189,7 +209,12 @@ export function readRunSource(vaultRoot: string, runId: string): RunSource | nul
   const run = readRunJson(vaultRoot, runId)
   if (!run) return null
   try {
-    return { file: run.file, text: readFileSync(join(runDir(vaultRoot, runId), SOURCE_FILE), 'utf8') }
+    return {
+      file: run.file,
+      text: readFileSync(join(runDir(vaultRoot, runId), SOURCE_FILE), 'utf8'),
+      ...(run.hash ? { hash: run.hash } : {}),
+      ...(run.originalPath ? { originalPath: run.originalPath } : {})
+    }
   } catch {
     return null
   }
@@ -204,11 +229,12 @@ export function isUnfinishedRun(vaultRoot: string, runId: string): boolean {
 }
 
 /** One line of the checkpoint log. Append-only: the plan once, then each
- *  window as it completes or fails. */
+ *  window as it completes or fails, then the theme names once they are known. */
 export type CheckpointRecord =
   | { type: 'plan'; windows: number[][] }
   | { type: 'window'; index: number; items: ExtractedItem[] }
   | { type: 'window'; index: number; failed: true }
+  | { type: 'themes'; names: string[] }
 
 /** The log replayed into the state a resume needs. */
 export interface Checkpoint {
@@ -218,6 +244,10 @@ export interface Checkpoint {
   /** Windows already attempted: index → what came back (`failed` windows are
    *  not retried by a resume; they are counted, exactly as in a single run). */
   done: Map<number, { items: ExtractedItem[]; failed: boolean }>
+  /** One name per theme, as the naming call answered — so a resume that got
+   *  past it re-groups the notes (cheap, local) without paying for the call
+   *  again. Null when the run never reached naming. */
+  themes: string[] | null
 }
 
 /** Where the orchestrator reads and writes its progress. Pure interface: the
@@ -230,7 +260,7 @@ export interface CheckpointStore {
 /** Replay checkpoint lines into a Checkpoint. A crash can tear the last line,
  *  and a torn line means "that window never landed" — skip it, don't fail. */
 export function replayCheckpoint(text: string): Checkpoint {
-  const cp: Checkpoint = { plan: null, done: new Map() }
+  const cp: Checkpoint = { plan: null, done: new Map(), themes: null }
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     let rec: CheckpointRecord
@@ -244,6 +274,8 @@ export function replayCheckpoint(text: string): Checkpoint {
       const failed = 'failed' in rec && rec.failed === true
       const items = 'items' in rec && Array.isArray(rec.items) ? rec.items : []
       cp.done.set(rec.index, { items, failed })
+    } else if (rec.type === 'themes' && Array.isArray(rec.names)) {
+      cp.themes = rec.names.filter((n): n is string => typeof n === 'string')
     }
   }
   return cp
@@ -287,10 +319,13 @@ export interface PlannedFile {
 export function planRunFiles(
   source: RunSource,
   notes: EmittedNote[],
-  stats?: Record<string, number>
+  stats?: Record<string, number>,
+  themes?: string[]
 ): PlannedFile[] {
   const sourceFile = `${sourceNoteName(source.file)}.md`
-  const files: PlannedFile[] = [{ relPath: join('notes', sourceFile), content: source.text }]
+  const files: PlannedFile[] = [
+    { relPath: join('notes', sourceFile), content: renderDocumentNote(source).content }
+  ]
   for (const n of notes) {
     // Backstop: emitNotes reserves the source name, so a collision here means
     // the caller forgot to pass it — fail loudly instead of silently writing
@@ -304,7 +339,13 @@ export function planRunFiles(
   files.push({
     relPath: 'meta.json',
     content: JSON.stringify(
-      { source: source.file, notes: notes.length, ...(stats ? { stats } : {}) },
+      {
+        source: source.file,
+        ...(source.hash ? { sourceHash: source.hash } : {}),
+        notes: notes.length,
+        ...(themes?.length ? { themes } : {}),
+        ...(stats ? { stats } : {})
+      },
       null,
       2
     )
@@ -316,7 +357,14 @@ export function planRunFiles(
 export interface RunMeta {
   /** The raw source file identifier, exactly as given to the run. */
   source: string
+  /** The converted text's identity in the source store (see `sources.ts`).
+   *  Absent for a run made before the store existed. */
+  sourceHash?: string
   notes: number
+  /** The run's theme names, in map order — what the runs list shows under a
+   *  run so you can tell one run of a book from another. Absent when the run
+   *  was too small to group (see `themes.ts`). */
+  themes?: string[]
   stats?: Record<string, number>
 }
 
@@ -354,7 +402,8 @@ export function writeRunArtifact(
   runId: string,
   source: RunSource,
   notes: EmittedNote[],
-  stats?: Record<string, number>
+  stats?: Record<string, number>,
+  themes?: string[]
 ): RunArtifact {
   const dir = runDir(vaultRoot, runId)
   if (!existsSync(join(dir, RUN_FILE)) || !existsSync(join(dir, SOURCE_FILE)))
@@ -362,7 +411,7 @@ export function writeRunArtifact(
   rmSync(join(dir, 'notes'), { recursive: true, force: true })
   mkdirSync(join(dir, 'notes'), { recursive: true })
   const notePaths: string[] = []
-  for (const f of planRunFiles(source, notes, stats)) {
+  for (const f of planRunFiles(source, notes, stats, themes)) {
     const abs = join(dir, f.relPath)
     atomicWrite(abs, f.content)
     if (f.relPath.startsWith(`notes${sep}`)) notePaths.push(abs)
@@ -423,7 +472,7 @@ export function listRuns(vaultRoot: string): string[] {
   const base = distillRoot(vaultRoot)
   if (!existsSync(base)) return []
   return readdirSync(base, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && !RESERVED_RUN_IDS.has(e.name.toLowerCase()))
     .map((e) => e.name)
     .sort()
 }
@@ -437,17 +486,30 @@ export function removeRun(vaultRoot: string, runId: string): void {
 // "Merge" copies a run's notes OUT of the staged dir into a namespaced vault
 // subfolder, so they become real notes the canonical index picks up. It records
 // a manifest of exactly what it wrote, so "un-merge" is just deleting those.
+//
+// The BOOK is the exception: it is one document, not this run's opinion of it,
+// so it lands once in `Sources/` and later runs of the same document share it.
+
+/** The vault folder every distilled document lands in, whatever run brought it. */
+export const SOURCES_FOLDER = 'Sources'
+
+/** What a merge did with one file. `shared` is the converted document itself:
+ *  it goes to `Sources/`, outside the run's own folder, and more than one run
+ *  can point at it — so undo treats it with more care than the rest. */
+export type MergeFileAction = MergeAction | 'shared'
 
 /** One file a merge wrote: where it landed, and the bytes it landed with. */
 export interface MergeFile {
-  /** Vault-relative path (always inside the manifest's `folder`). */
+  /** Vault-relative path — inside the manifest's `folder`, or in `Sources/`
+   *  for the document itself. */
   path: string
   /** sha1 hex of the bytes written. Absent in manifests from before hashing —
    *  undo can't tell those apart from edited files, so it trashes them. */
   hash?: string
-  /** What the plan decided about this note: `new` under its own name, or
-   *  `collides` — renamed to sit beside a vault note of the same name. */
-  action?: MergeAction
+  /** What the plan decided about this note: `new` under its own name,
+   *  `collides` — renamed to sit beside a vault note of the same name — or
+   *  `shared`, the document in `Sources/`. */
+  action?: MergeFileAction
 }
 
 /** Record of one merge, so it can be undone cleanly. Stored beside the run. */
@@ -471,6 +533,35 @@ export function mergeFolder(runId: string): string {
   return join('Distilled', runId)
 }
 
+/**
+ * Where this run's converted document should land in `Sources/`, and whether
+ * it is already there.
+ *
+ * The document is content-addressed, so a second run of the same book finds the
+ * file the first run wrote and shares it instead of writing a copy. A DIFFERENT
+ * book that happens to share a title takes the next free name — a title is not
+ * an identity, and nothing of the user's is ever overwritten.
+ */
+export function planSourceNote(
+  vaultRoot: string,
+  bookName: string,
+  hash: string
+): { path: string; exists: boolean } {
+  const dir = join(vaultRoot, SOURCES_FOLDER)
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? `${bookName}.md` : `${bookName} ${n}.md`
+    const rel = join(SOURCES_FOLDER, name)
+    const abs = join(dir, name)
+    let bytes: Buffer
+    try {
+      bytes = readFileSync(abs)
+    } catch {
+      return { path: rel, exists: false } // free — write it here
+    }
+    if (sha1(bytes) === hash) return { path: rel, exists: true } // already ours
+  }
+}
+
 function manifestPath(vaultRoot: string, runId: string): string {
   return join(runDir(vaultRoot, runId), 'merge.json')
 }
@@ -490,10 +581,10 @@ export function contentHash(bytes: Buffer | string): string {
  *
  * Undo deletes what this file names, so it is parsed as UNTRUSTED input: the
  * folder must be the one this run merges into, and every listed path must
- * resolve inside that folder (a `..` entry would otherwise escape the vault).
- * Anything unexpected → null, i.e. "not merged", which is the safe answer.
- * The legacy shape (`files: string[]`, no `complete`) normalises to hash-less,
- * complete entries.
+ * resolve inside that folder — or inside `Sources/`, where the document itself
+ * lands (a `..` entry would otherwise escape the vault). Anything unexpected →
+ * null, i.e. "not merged", which is the safe answer. The legacy shape
+ * (`files: string[]`, no `complete`) normalises to hash-less, complete entries.
  */
 export function readMergeManifest(vaultRoot: string, runId: string): MergeManifest | null {
   const p = manifestPath(vaultRoot, runId)
@@ -515,20 +606,25 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
   if (m.folder !== expectedFolder || !Array.isArray(m.files)) return null
 
   const folderAbs = join(vaultRoot, expectedFolder)
+  const sourcesAbs = join(vaultRoot, SOURCES_FOLDER)
   const legacy = m.files.every((e) => typeof e === 'string')
   const files: MergeFile[] = []
+  const ACTIONS = new Set(['new', 'collides', 'identical', 'shared'])
   for (const e of m.files) {
     const entry =
       typeof e === 'string'
         ? { path: e }
         : (e as { path?: unknown; hash?: unknown; action?: unknown })
     if (typeof entry.path !== 'string') return null
-    if (!withinRoot(folderAbs, join(vaultRoot, entry.path))) return null
+    const abs = join(vaultRoot, entry.path)
+    if (!withinRoot(folderAbs, abs) && !withinRoot(sourcesAbs, abs)) return null
     const action = entry.action
     files.push({
       path: entry.path,
       ...(typeof entry.hash === 'string' ? { hash: entry.hash } : {}),
-      ...(action === 'new' || action === 'collides' || action === 'identical' ? { action } : {})
+      ...(typeof action === 'string' && ACTIONS.has(action)
+        ? { action: action as MergeFileAction }
+        : {})
     })
   }
   const skipped = (m as { skipped?: unknown }).skipped
@@ -540,6 +636,14 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
       ? { skipped: skipped as string[] }
       : {})
   }
+}
+
+/** The name of the staged note that holds the converted document itself — the
+ *  run says which document it is (`run.json`, else `meta.json`) and
+ *  `sourceNoteName` turns that into the one name used everywhere. */
+function sourceNoteNameOf(vaultRoot: string, runId: string): string | null {
+  const raw = readRunJson(vaultRoot, runId)?.file ?? readRunMeta(vaultRoot, runId)?.source
+  return raw ? sourceNoteName(raw) : null
 }
 
 /**
@@ -559,6 +663,13 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
  *
  * With no plan every note merges under its own name (the pre-plan behaviour).
  *
+ * The converted document is not one of those notes. It is the book, not this
+ * run's reading of it, so it goes to `Sources/<Title>.md` — ONCE. A second run
+ * of the same document finds the same bytes already there and shares them
+ * (manifest action `shared`, nothing written); a different book with the same
+ * title takes the next free name, and the run's `source:: [[Title]]` links are
+ * re-pointed at whichever name it actually landed under.
+ *
  * Crash-safe by construction: the manifest is written FIRST (every planned file
  * with the hash it will get, `complete: false`), each note is then written to a
  * dot-prefixed temp name and renamed into place (so a reader never sees half a
@@ -574,6 +685,10 @@ export function mergeRun(
   const folder = mergeFolder(runId)
   const targetAbs = join(vaultRoot, folder)
   const staged = readRunNotes(vaultRoot, runId)
+  const bookName = sourceNoteNameOf(vaultRoot, runId)
+  const book = bookName
+    ? (staged.find((n) => n.name.toLowerCase() === bookName.toLowerCase()) ?? null)
+    : null
 
   const byName = new Map((plan ?? []).map((e) => [e.name.toLowerCase(), e]))
   const entryFor = (name: string): MergePlanEntry =>
@@ -582,14 +697,24 @@ export function mergeRun(
   // Every rename the plan made, so links between the run's own notes follow.
   const renames = new Map<string, string>()
   for (const note of staged) {
+    if (note === book) continue
     const e = entryFor(note.name)
     if (e.action === 'collides' && e.targetName !== note.name) renames.set(note.name, e.targetName)
   }
   const confirmed = new Set((opts.sameAs ?? []).map((n) => n.toLowerCase()))
 
-  const planned: { name: string; bytes: Buffer; action: MergeAction }[] = []
+  // The document goes to `Sources/`, once — and every `source:: [[Title]]` in
+  // this run follows it to the name it actually landed under.
+  const sourceNote = book ? planSourceNote(vaultRoot, book.name, book.hash) : null
+  if (book && sourceNote) {
+    const landed = basename(sourceNote.path).replace(/\.md$/i, '')
+    if (landed !== book.name) renames.set(book.name, landed)
+  }
+
+  const planned: { path: string; bytes: Buffer; action: MergeFileAction }[] = []
   const skipped: string[] = []
   for (const note of staged) {
+    if (note === book) continue
     const e = entryFor(note.name)
     if (e.action === 'identical') {
       skipped.push(note.name)
@@ -598,28 +723,40 @@ export function mergeRun(
     let content = rewriteLinks(note.content, renames)
     if (e.action === 'collides' && confirmed.has(note.name.toLowerCase()))
       content = withSameAs(content, note.name)
-    planned.push({ name: `${e.targetName}.md`, bytes: Buffer.from(content, 'utf8'), action: e.action })
+    planned.push({
+      path: join(folder, `${e.targetName}.md`),
+      bytes: Buffer.from(content, 'utf8'),
+      action: e.action
+    })
   }
 
   const files: MergeFile[] = planned.map((f) => ({
-    path: join(folder, f.name),
+    path: f.path,
     hash: sha1(f.bytes),
     action: f.action
   }))
+  // Recorded whether or not it is written: undo has to know this run points at
+  // that file, so it can leave it alone while another run still does too.
+  if (book && sourceNote)
+    files.push({ path: sourceNote.path, hash: book.hash, action: 'shared' })
 
   const mPath = manifestPath(vaultRoot, runId)
   atomicWrite(mPath, JSON.stringify({ folder, files, complete: false, skipped }, null, 2))
 
   mkdirSync(targetAbs, { recursive: true })
   const written: string[] = []
-  for (const f of planned) {
-    const abs = join(targetAbs, f.name)
+  const writeInto = (rel: string, bytes: Buffer): void => {
+    const abs = join(vaultRoot, rel)
+    mkdirSync(dirname(abs), { recursive: true })
     // Dot-prefixed: if a crash strands one, the vault scan and watcher skip it.
-    const tmp = join(targetAbs, `.${f.name}.merge-tmp`)
-    writeFileSync(tmp, f.bytes)
+    const tmp = join(dirname(abs), `.${basename(abs)}.merge-tmp`)
+    writeFileSync(tmp, bytes)
     renameSync(tmp, abs)
     written.push(abs)
   }
+  for (const f of planned) writeInto(f.path, f.bytes)
+  if (book && sourceNote && !sourceNote.exists)
+    writeInto(sourceNote.path, Buffer.from(book.content, 'utf8'))
 
   const manifest: MergeManifest = { folder, files, complete: true, skipped }
   atomicWrite(mPath, JSON.stringify(manifest, null, 2))
@@ -635,6 +772,10 @@ export function mergeRun(
  * merging), or that a pre-hash manifest can't vouch for, goes to `trash`
  * instead, so an undo can never destroy their work. Missing files are skipped.
  * `trash` is injected (main passes `shell.trashItem`) to keep this unit-testable.
+ *
+ * The document in `Sources/` is shared, so it survives one more test: another
+ * merged run still pointing at the same file keeps it. Undoing one reading of a
+ * book must not take the book away from the other.
  */
 export async function unmergeRun(
   vaultRoot: string,
@@ -643,9 +784,11 @@ export async function unmergeRun(
 ): Promise<{ removed: string[]; trashed: string[] }> {
   const manifest = readMergeManifest(vaultRoot, runId)
   if (!manifest) return { removed: [], trashed: [] }
+  const stillWanted = pathsOtherRunsMerged(vaultRoot, runId)
   const removed: string[] = []
   const trashed: string[] = []
   for (const entry of manifest.files) {
+    if (entry.action === 'shared' && stillWanted.has(entry.path)) continue
     const abs = join(vaultRoot, entry.path)
     let bytes: Buffer
     try {
@@ -662,10 +805,26 @@ export async function unmergeRun(
       trashed.push(abs)
     }
   }
-  const targetAbs = join(vaultRoot, manifest.folder)
-  if (existsSync(targetAbs) && readdirSync(targetAbs).length === 0) {
-    rmSync(targetAbs, { recursive: true, force: true })
+  for (const folder of [manifest.folder, SOURCES_FOLDER]) {
+    const abs = join(vaultRoot, folder)
+    try {
+      if (readdirSync(abs).length === 0) rmSync(abs, { recursive: true, force: true })
+    } catch {
+      /* not there, or not empty — leave it */
+    }
   }
   rmSync(manifestPath(vaultRoot, runId), { force: true })
   return { removed, trashed }
+}
+
+/** Vault-relative paths that OTHER merged runs still list in their manifests —
+ *  what an undo of `runId` must leave alone. */
+function pathsOtherRunsMerged(vaultRoot: string, runId: string): Set<string> {
+  const paths = new Set<string>()
+  for (const id of listRuns(vaultRoot)) {
+    if (id === runId) continue
+    const other = readMergeManifest(vaultRoot, id)
+    if (other) for (const f of other.files) paths.add(f.path)
+  }
+  return paths
 }

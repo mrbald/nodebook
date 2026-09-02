@@ -184,6 +184,11 @@ const api = {
   /** Whether a run has been merged into the vault. */
   distillMergeStatus: (runId: string): Promise<DistillMergeStatus> =>
     ipcRenderer.invoke('distill:mergeStatus', runId),
+  /** Open the file a distilled document came from, in the system reader. The
+   *  hash identifies it; main owns the path (see `distill:openOriginal`).
+   *  Resolves to an error message, or null when it opened. */
+  distillOpenOriginal: (hash: string): Promise<string | null> =>
+    ipcRenderer.invoke('distill:openOriginal', hash),
   /** Subscribe to a distill run's progress. */
   onDistillProgress: (cb: (runId: string, p: DistillProgress) => void): (() => void) => {
     const listener = (_e: unknown, runId: string, p: DistillProgress): void => cb(runId, p)
