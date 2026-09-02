@@ -27,8 +27,14 @@ import {
   readRunJson,
   readRunSource,
   isUnfinishedRun,
-  checkpointStore
+  checkpointStore,
+  readRunNotes,
+  readStagedNote,
+  legacyDistillRoot,
+  migrateDistillRuns
 } from './artifact'
+import { ignoredInVault } from '../paths'
+import { mergePlan } from './mergePlan'
 import { emitNotes } from './emit'
 import type { GroundedNote } from './extract'
 
@@ -69,8 +75,9 @@ describe('assertRunId', () => {
 })
 
 describe('paths', () => {
-  it('places a run under the ignored .nodebook dot-dir', () => {
-    expect(runDir('/vault', 'r1')).toBe(join('/vault', '.nodebook', 'distill', 'r1'))
+  it('places a run under the ignored .distill dot-dir (durable staging, still firewalled)', () => {
+    expect(runDir('/vault', 'r1')).toBe(join('/vault', '.distill', 'r1'))
+    expect(ignoredInVault('/vault')(join('/vault', '.distill', 'r1', 'notes', 'A.md'))).toBe(true)
   })
   it('derives the source note name from a path', () => {
     expect(sourceNoteName('books/Federalist.md')).toBe('Federalist')
@@ -191,7 +198,7 @@ describe('mergeRun / unmergeRun (reversible promote)', () => {
     }
   }
   const manifestFile = (v: string): string =>
-    join(v, '.nodebook', 'distill', 'sapiens', 'merge.json')
+    join(v, '.distill', 'sapiens', 'merge.json')
 
   it('copies the run notes into a namespaced vault folder + records a manifest', () => {
     const v = tmpVault()
@@ -299,6 +306,142 @@ describe('mergeRun / unmergeRun (reversible promote)', () => {
     expect(readMergeManifest(v, 'sapiens')).toBeNull()
     mergeRun(v, 'sapiens')
     expect(readMergeManifest(v, 'sapiens')?.folder).toBe(join('Distilled', 'sapiens'))
+  })
+})
+
+describe('readRunNotes / readStagedNote (readable staging)', () => {
+  it('lists every staged note with its hash, source copy included', () => {
+    const v = tmpVault()
+    writeRunArtifact(v, 'r1', { file: 'Federalist.md', text: 'Faction vs Union.' }, emitNotes(grounded()))
+    const notes = readRunNotes(v, 'r1')
+    expect(notes.map((n) => n.name).sort()).toEqual(['Faction', 'Federalist', 'Union'])
+    for (const n of notes) expect(n.hash).toMatch(/^[0-9a-f]{40}$/)
+    expect(notes.find((n) => n.name === 'Federalist')!.content).toBe('Faction vs Union.')
+  })
+
+  it('reads one note by name, and refuses to escape the run\'s notes dir', () => {
+    const v = tmpVault()
+    writeRunArtifact(v, 'r1', { file: 'Federalist.md', text: 'the book' }, emitNotes(grounded()))
+    expect(readStagedNote(v, 'r1', 'Federalist')).toBe('the book')
+    expect(readStagedNote(v, 'r1', 'Federalist.md')).toBe('the book')
+    expect(readStagedNote(v, 'r1', 'nope')).toBeNull()
+    for (const evil of [join('..', '..', 'secret'), '/etc/passwd', '../../../etc/passwd'])
+      expect(readStagedNote(v, 'r1', evil)).toBeNull()
+  })
+})
+
+describe('mergeRun with a plan (converging merge)', () => {
+  const staged = (v: string): void => {
+    writeRunArtifact(v, 'sapiens', { file: 'Sapiens.md', text: 'x' }, emitNotes(grounded()))
+  }
+  const planFor = (v: string, vaultNames: Record<string, string>) =>
+    mergePlan(
+      readRunNotes(v, 'sapiens'),
+      { names: new Set(Object.keys(vaultNames)), hashByName: new Map(Object.entries(vaultNames)) },
+      'Sapiens'
+    )
+
+  it('a collision lands beside the vault note, never over it, with links re-pointed', () => {
+    const v = tmpVault()
+    staged(v)
+    // Faction links to Union, so renaming Union must drag that link along.
+    const before = readFileSync(join(v, '.distill', 'sapiens', 'notes', 'Faction.md'), 'utf8')
+    expect(before).toContain('[[Union]]')
+
+    const plan = planFor(v, { Union: 'different-bytes' })
+    expect(plan.find((e) => e.name === 'Union')).toEqual({
+      name: 'Union',
+      action: 'collides',
+      targetName: 'Union (Sapiens)'
+    })
+    const { manifest } = mergeRun(v, 'sapiens', plan)
+    const folder = join(v, 'Distilled', 'sapiens')
+    expect(existsSync(join(folder, 'Union (Sapiens).md'))).toBe(true)
+    expect(existsSync(join(folder, 'Union.md'))).toBe(false)
+    expect(readFileSync(join(folder, 'Faction.md'), 'utf8')).toContain(
+      'contrasts_with:: [[Union (Sapiens)]]'
+    )
+    expect(manifest.files.find((f) => f.path.endsWith('Union (Sapiens).md'))?.action).toBe(
+      'collides'
+    )
+  })
+
+  it('an identical note is skipped — nothing written, and undo can never reach it', () => {
+    const v = tmpVault()
+    staged(v)
+    const hash = readRunNotes(v, 'sapiens').find((n) => n.name === 'Faction')!.hash
+    const plan = planFor(v, { Faction: hash })
+    const { manifest, written } = mergeRun(v, 'sapiens', plan)
+    expect(manifest.skipped).toEqual(['Faction'])
+    expect(written.some((p) => p.includes('Faction'))).toBe(false)
+    expect(manifest.files.every((f) => !f.path.endsWith('Faction.md'))).toBe(true)
+  })
+
+  it('a confirmed "same as" writes one same_as:: line after source::', () => {
+    const v = tmpVault()
+    staged(v)
+    const plan = planFor(v, { Union: 'different-bytes' })
+    mergeRun(v, 'sapiens', plan, { sameAs: ['Union'] })
+    const merged = readFileSync(join(v, 'Distilled', 'sapiens', 'Union (Sapiens).md'), 'utf8')
+    const lines = merged.split('\n')
+    const src = lines.findIndex((l) => l.startsWith('source::'))
+    expect(src).toBeGreaterThanOrEqual(0)
+    expect(lines[src + 1]).toBe('same_as:: [[Union]]')
+  })
+
+  it('without a confirmation no same_as is written — a name clash is not identity', () => {
+    const v = tmpVault()
+    staged(v)
+    mergeRun(v, 'sapiens', planFor(v, { Union: 'different-bytes' }))
+    const merged = readFileSync(join(v, 'Distilled', 'sapiens', 'Union (Sapiens).md'), 'utf8')
+    expect(merged).not.toContain('same_as::')
+  })
+
+  it('no plan = every note under its own name (unchanged behaviour)', () => {
+    const v = tmpVault()
+    staged(v)
+    const { manifest } = mergeRun(v, 'sapiens')
+    expect(manifest.files.map((f) => f.path).some((p) => p.endsWith('Faction.md'))).toBe(true)
+  })
+})
+
+describe('migrateDistillRuns (.nodebook/distill → .distill)', () => {
+  const legacyRun = (v: string, id: string): string => {
+    const dir = join(legacyDistillRoot(v), id, 'notes')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'Alpha.md'), '# Alpha\n')
+    writeFileSync(join(legacyDistillRoot(v), id, 'meta.json'), JSON.stringify({ source: 'B.md', notes: 1 }))
+    return dir
+  }
+
+  it('moves every legacy run whole, and listRuns then sees only the new root', () => {
+    const v = tmpVault()
+    legacyRun(v, 'old-a')
+    legacyRun(v, 'old-b')
+    expect(listRuns(v)).toEqual([]) // nothing under .distill yet
+
+    expect(migrateDistillRuns(v)).toEqual(['old-a', 'old-b'])
+    expect(listRuns(v)).toEqual(['old-a', 'old-b'])
+    expect(readRunMeta(v, 'old-a')?.notes).toBe(1)
+    expect(readStagedNote(v, 'old-a', 'Alpha')).toBe('# Alpha\n')
+    expect(existsSync(legacyDistillRoot(v))).toBe(false) // emptied, then removed
+  })
+
+  it('is a no-op the second time, and never clobbers a run already in .distill', () => {
+    const v = tmpVault()
+    legacyRun(v, 'dup')
+    migrateDistillRuns(v)
+    expect(migrateDistillRuns(v)).toEqual([])
+
+    // A legacy run whose id already exists in the new root is left alone.
+    legacyRun(v, 'dup')
+    writeFileSync(join(legacyDistillRoot(v), 'dup', 'notes', 'Alpha.md'), '# Legacy\n')
+    expect(migrateDistillRuns(v)).toEqual([])
+    expect(readStagedNote(v, 'dup', 'Alpha')).toBe('# Alpha\n')
+  })
+
+  it('does nothing when there is no legacy root at all', () => {
+    expect(migrateDistillRuns(tmpVault())).toEqual([])
   })
 })
 

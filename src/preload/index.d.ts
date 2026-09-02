@@ -3,6 +3,7 @@ import type {
   Backlink,
   DistillDocument,
   DistillEstimate,
+  DistillMergePlan,
   DistillMergeResult,
   DistillMergeStatus,
   DistillProgress,
@@ -84,7 +85,9 @@ export interface NodebookApi {
   ) => Promise<GraphData>
   distillListRuns: () => Promise<DistillRunInfo[]>
   distillRemove: (runId: string) => Promise<void>
-  distillMerge: (runId: string) => Promise<DistillMergeResult>
+  distillReadNote: (runId: string, name: string) => Promise<{ content: string } | null>
+  distillMergePlan: (runId: string) => Promise<DistillMergePlan>
+  distillMerge: (runId: string, opts?: { sameAs?: string[] }) => Promise<DistillMergeResult>
   distillUnmerge: (runId: string) => Promise<DistillUnmergeResult>
   distillMergeStatus: (runId: string) => Promise<DistillMergeStatus>
   onDistillProgress: (cb: (runId: string, p: DistillProgress) => void) => () => void

@@ -295,3 +295,93 @@ describe('overlayGraph', () => {
     ])
   })
 })
+
+describe('confirmed same_as collapses two notes into one', () => {
+  // The merge dialog wrote `same_as:: [[Options]]` into the run's copy, so the
+  // two are one thing from here on. Files: the user's Options, the merged copy.
+  const OPT = '/v/Options.md'
+  const COPY = '/v/Distilled/book/Options (Book).md'
+  const REF = '/v/Ref.md'
+  const aliased: FileRow[] = [
+    { path: OPT, title: 'Options' },
+    { path: COPY, title: 'Options (Book)' },
+    { path: REF, title: 'Ref' }
+  ]
+
+  it('folds the copy into the original, re-points its edges and keeps the alias', () => {
+    const g = buildGraph(
+      aliased,
+      [
+        t(COPY, 'same_as', 'Options'),
+        t(COPY, 'about', 'Ref'), // the copy's own edge must survive, re-pointed
+        t(REF, 'links_to', 'Options (Book)') // a link INTO the copy follows it too
+      ],
+      null
+    )
+    expect(ids(g)).toEqual(new Set([OPT, REF]))
+    expect(g.edges).toEqual(
+      expect.arrayContaining([
+        { source: OPT, target: REF, relation: 'about' },
+        { source: REF, target: OPT, relation: 'links_to' }
+      ])
+    )
+    // The alias edge itself is gone — the fold IS the statement.
+    expect(g.edges.some((e) => e.relation === 'same_as')).toBe(false)
+    expect(g.nodes.find((n) => n.id === OPT)!.aliases).toEqual(['Options (Book)'])
+    expect(g.nodes.find((n) => n.id === REF)!.aliases).toBeUndefined()
+  })
+
+  it('a chain A→B→C lands everything on C, whatever order the triples arrive in', () => {
+    const chain: FileRow[] = [
+      { path: A, title: 'A' },
+      { path: B, title: 'B' },
+      { path: C, title: 'C' },
+      { path: '/v/D.md', title: 'D' }
+    ]
+    const links = [t(A, 'about', 'D'), t(B, 'about', 'D'), t(C, 'about', 'D')]
+    const forward = buildGraph(chain, [t(A, 'same_as', 'B'), t(B, 'same_as', 'C'), ...links], null)
+    const reverse = buildGraph(chain, [t(B, 'same_as', 'C'), t(A, 'same_as', 'B'), ...links], null)
+    for (const g of [forward, reverse]) {
+      expect(ids(g)).toEqual(new Set([C, '/v/D.md']))
+      expect(g.nodes.find((n) => n.id === C)!.aliases).toEqual(['A', 'B'])
+      expect(g.edges).toEqual([{ source: C, target: '/v/D.md', relation: 'about' }])
+    }
+  })
+
+  it('an alias naming a note that does not exist stays an ordinary edge to a ghost', () => {
+    const g = buildGraph(files, [t(A, 'same_as', 'Nowhere')], null)
+    expect(g.edges).toEqual([{ source: A, target: 'ghost:Nowhere', relation: 'same_as' }])
+    expect(g.nodes.find((n) => n.id === A)!.aliases).toBeUndefined()
+  })
+
+  it('a self-loop left by the fold is dropped, not drawn', () => {
+    // The copy also links to the original by name — after folding that is A→A.
+    const g = buildGraph(
+      aliased,
+      [t(COPY, 'same_as', 'Options'), t(COPY, 'links_to', 'Options'), t(REF, 'about', 'Options')],
+      null
+    )
+    expect(g.edges).toEqual([{ source: REF, target: OPT, relation: 'about' }])
+  })
+
+  it('focusing the folded note opens the surviving one', () => {
+    const g = buildGraph(
+      aliased,
+      [t(COPY, 'same_as', 'Options'), t(REF, 'about', 'Options')],
+      COPY
+    )
+    expect(g.nodes.find((n) => n.focus)?.id).toBe(OPT)
+    expect(ids(g)).toEqual(new Set([OPT, REF]))
+  })
+
+  it('an unconfirmed name clash is untouched — two notes, two dots', () => {
+    const clash: FileRow[] = [
+      { path: OPT, title: 'Options' },
+      { path: COPY, title: 'Options (Book)' },
+      { path: REF, title: 'Ref' }
+    ]
+    const g = buildGraph(clash, [t(COPY, 'about', 'Ref'), t(REF, 'about', 'Options')], null)
+    expect(ids(g)).toEqual(new Set([OPT, COPY, REF]))
+    expect(g.nodes.every((n) => n.aliases === undefined)).toBe(true)
+  })
+})

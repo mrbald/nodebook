@@ -6,10 +6,12 @@
  * Keeping the layout here means the part that matters most — the firewall — is
  * unit-testable.
  *
- * A run is a self-contained artifact under the vault's `.nodebook/` dir: the
- * dot-dir the canonical scan and file watcher already ignore. That ignore IS the
+ * A run is a self-contained artifact under the vault's `.distill/` dir: a dot-dir
+ * the canonical scan and file watcher already ignore. That ignore IS the
  * firewall — staged notes can't reach the canonical index, search, or graph
- * until an explicit promote moves them into the vault proper.
+ * until an explicit promote moves them into the vault proper. Unlike `.nodebook/`
+ * (a rebuildable cache) this directory holds work that exists nowhere else, so
+ * it is durable staging: written atomically, migrated forward, backed up.
  */
 
 import {
@@ -23,9 +25,10 @@ import {
   renameSync
 } from 'fs'
 import { createHash } from 'crypto'
-import { join, sep } from 'path'
+import { basename, dirname, join, sep } from 'path'
 import { withinRoot } from '../paths'
 import { noteName, sourceTitle, type EmittedNote } from './emit'
+import { rewriteLinks, withSameAs, type MergeAction, type MergePlanEntry } from './mergePlan'
 import type { ExtractedItem } from './extract'
 
 /** A safe run id is one path segment: alphanumeric start, then word/space/.-, no `..`. */
@@ -36,9 +39,74 @@ export function assertRunId(runId: string): void {
     throw new Error(`invalid distill run id: ${JSON.stringify(runId)}`)
 }
 
-/** `<vault>/.nodebook/distill` — the parent of all runs. */
+/**
+ * `<vault>/.distill` — the parent of all runs.
+ *
+ * A DOT-DIR, so the vault scan and the file watcher skip it exactly as they skip
+ * `.nodebook/` (see `paths.ignoredInVault`): the staging firewall is unchanged.
+ * What changed is durability. Runs used to live inside `.nodebook/`, which the
+ * README calls a rebuildable cache you may delete — and deleting it took every
+ * unmerged run with it. `.distill/` holds work that exists nowhere else, so it
+ * is documented as durable staging and `.nodebook/` goes back to being a cache.
+ */
 export function distillRoot(vaultRoot: string): string {
+  return join(vaultRoot, '.distill')
+}
+
+/** Where runs lived before `.distill/` — read once, at vault open, to move them. */
+export function legacyDistillRoot(vaultRoot: string): string {
   return join(vaultRoot, '.nodebook', 'distill')
+}
+
+/**
+ * One-time move of every legacy run into `.distill/`, run at vault open.
+ *
+ * A rename, not a copy: the run (notes, `meta.json`, `merge.json`, `run.db`,
+ * checkpoint) arrives whole, so a merged run stays undoable across the move. A
+ * run whose id already exists in `.distill/` is left where it is rather than
+ * clobbering the newer one; anything that fails to move is simply skipped, and
+ * the caller can try again next open. Returns the ids actually moved.
+ */
+export function migrateDistillRuns(vaultRoot: string): string[] {
+  const from = legacyDistillRoot(vaultRoot)
+  if (!existsSync(from)) return []
+  const to = distillRoot(vaultRoot)
+  const moved: string[] = []
+  let entries: string[]
+  try {
+    entries = readdirSync(from, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort()
+  } catch {
+    return []
+  }
+  for (const id of entries) {
+    try {
+      assertRunId(id)
+      const target = join(to, id)
+      if (existsSync(target)) continue
+      mkdirSync(to, { recursive: true })
+      renameSync(join(from, id), target)
+      moved.push(id)
+    } catch {
+      // Unreadable / unsafe name / cross-device: leave it, report the rest.
+    }
+  }
+  try {
+    if (readdirSync(from).length === 0) rmSync(from, { recursive: true, force: true })
+  } catch {
+    /* not empty, or gone — nothing to tidy */
+  }
+  return moved
+}
+
+/** Write bytes so a reader never sees half a file: temp in the same dir, then
+ *  rename (atomic on the same filesystem). Every artifact write goes through it. */
+function atomicWrite(path: string, data: string | Buffer): void {
+  const tmp = join(dirname(path), `.${basename(path)}.tmp`)
+  writeFileSync(tmp, data)
+  renameSync(tmp, path)
 }
 
 /** A run's own folder. Throws on an unsafe id. */
@@ -101,8 +169,8 @@ export function beginRun(
     createdAt: new Date().toISOString(),
     ...(settings ? { settings } : {})
   }
-  writeFileSync(join(dir, RUN_FILE), JSON.stringify(run, null, 2))
-  writeFileSync(join(dir, SOURCE_FILE), source.text)
+  atomicWrite(join(dir, RUN_FILE), JSON.stringify(run, null, 2))
+  atomicWrite(join(dir, SOURCE_FILE), source.text)
   return dir
 }
 
@@ -296,13 +364,58 @@ export function writeRunArtifact(
   const notePaths: string[] = []
   for (const f of planRunFiles(source, notes, stats)) {
     const abs = join(dir, f.relPath)
-    writeFileSync(abs, f.content)
+    atomicWrite(abs, f.content)
     if (f.relPath.startsWith(`notes${sep}`)) notePaths.push(abs)
   }
   // The run is finished (meta.json exists): its progress log has no more use,
   // and leaving it would make the run look resumable.
   rmSync(join(dir, CHECKPOINT_FILE), { force: true })
   return { dir, notePaths }
+}
+
+/** A run's own `notes/` directory — the only place a staged read may reach. */
+function notesDir(vaultRoot: string, runId: string): string {
+  return join(runDir(vaultRoot, runId), 'notes')
+}
+
+/** One staged note, as the merge planner and the read-only pane see it. */
+export interface StagedNote {
+  /** Note name (basename without `.md`). */
+  name: string
+  content: string
+  /** sha1 of the bytes — what `mergePlan` compares against the vault. */
+  hash: string
+}
+
+/** Every note a run staged, in name order (the source book's copy included). */
+export function readRunNotes(vaultRoot: string, runId: string): StagedNote[] {
+  const dir = notesDir(vaultRoot, runId)
+  if (!existsSync(dir)) return []
+  const out: StagedNote[] = []
+  for (const file of readdirSync(dir).sort()) {
+    if (!file.endsWith('.md')) continue
+    const bytes = readFileSync(join(dir, file))
+    out.push({ name: file.replace(/\.md$/i, ''), content: bytes.toString('utf8'), hash: sha1(bytes) })
+  }
+  return out
+}
+
+/**
+ * One staged note's text, by name — what the read-only staged pane renders.
+ *
+ * The name arrives from the renderer, so it is UNTRUSTED: the resolved path must
+ * land inside this run's own `notes/` dir (`withinRoot`), which rules out both
+ * `..` and an absolute path. Null when there is no such note.
+ */
+export function readStagedNote(vaultRoot: string, runId: string, name: string): string | null {
+  const dir = notesDir(vaultRoot, runId)
+  const abs = join(dir, `${name.replace(/\.md$/i, '')}.md`)
+  if (!withinRoot(dir, abs)) return null
+  try {
+    return readFileSync(abs, 'utf8')
+  } catch {
+    return null
+  }
 }
 
 /** Existing run ids under the vault, sorted. */
@@ -332,6 +445,9 @@ export interface MergeFile {
   /** sha1 hex of the bytes written. Absent in manifests from before hashing —
    *  undo can't tell those apart from edited files, so it trashes them. */
   hash?: string
+  /** What the plan decided about this note: `new` under its own name, or
+   *  `collides` — renamed to sit beside a vault note of the same name. */
+  action?: MergeAction
 }
 
 /** Record of one merge, so it can be undone cleanly. Stored beside the run. */
@@ -343,6 +459,10 @@ export interface MergeManifest {
   /** False while the copy is still in flight: the manifest is written BEFORE
    *  the files so a crash mid-merge is still undoable. */
   complete: boolean
+  /** Staged notes the plan skipped because the vault already held them
+   *  byte-for-byte. Names only, never paths: an `identical` note is the USER'S
+   *  file, outside the merge folder, and undo must never be able to delete it. */
+  skipped?: string[]
 }
 
 /** The namespaced vault folder a run merges into (vault-relative). */
@@ -358,6 +478,11 @@ function manifestPath(vaultRoot: string, runId: string): string {
 /** sha1 hex of some bytes — the identity undo compares a file against. */
 function sha1(bytes: Buffer): string {
   return createHash('sha1').update(bytes).digest('hex')
+}
+
+/** The content hash both sides of a merge plan speak in (see `mergePlan`). */
+export function contentHash(bytes: Buffer | string): string {
+  return sha1(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, 'utf8'))
 }
 
 /**
@@ -393,17 +518,27 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
   const legacy = m.files.every((e) => typeof e === 'string')
   const files: MergeFile[] = []
   for (const e of m.files) {
-    const entry = typeof e === 'string' ? { path: e } : (e as { path?: unknown; hash?: unknown })
+    const entry =
+      typeof e === 'string'
+        ? { path: e }
+        : (e as { path?: unknown; hash?: unknown; action?: unknown })
     if (typeof entry.path !== 'string') return null
     if (!withinRoot(folderAbs, join(vaultRoot, entry.path))) return null
-    files.push(
-      typeof entry.hash === 'string' ? { path: entry.path, hash: entry.hash } : { path: entry.path }
-    )
+    const action = entry.action
+    files.push({
+      path: entry.path,
+      ...(typeof entry.hash === 'string' ? { hash: entry.hash } : {}),
+      ...(action === 'new' || action === 'collides' || action === 'identical' ? { action } : {})
+    })
   }
+  const skipped = (m as { skipped?: unknown }).skipped
   return {
     folder: expectedFolder,
     files,
-    complete: typeof m.complete === 'boolean' ? m.complete : legacy
+    complete: typeof m.complete === 'boolean' ? m.complete : legacy,
+    ...(Array.isArray(skipped) && skipped.every((x) => typeof x === 'string')
+      ? { skipped: skipped as string[] }
+      : {})
   }
 }
 
@@ -411,6 +546,18 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
  * Copy a run's notes into a namespaced vault subfolder and record what it wrote.
  * Filesystem only — the caller indexes the new files into the canonical index
  * (the watcher would too). Returns the manifest plus the absolute paths written.
+ *
+ * `plan` (from `mergePlan`) decides the NAME each note lands under, so a run
+ * never writes over a note of yours that happens to share a title: a collision
+ * is saved beside it as `Faction (Federalist).md`, and every `[[Faction]]` the
+ * run wrote is re-pointed at the new name so the merged notes still link to each
+ * other (`rewriteLinks`). A note the vault already holds byte-for-byte is
+ * skipped. `opts.sameAs` names the staged notes the USER confirmed are the same
+ * thing as their vault twin; each gets one `same_as:: [[Faction]]` body line —
+ * a durable, human-readable, deletable decision the map then collapses. Nothing
+ * of the user's is edited either way.
+ *
+ * With no plan every note merges under its own name (the pre-plan behaviour).
  *
  * Crash-safe by construction: the manifest is written FIRST (every planned file
  * with the hash it will get, `complete: false`), each note is then written to a
@@ -420,24 +567,48 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
  */
 export function mergeRun(
   vaultRoot: string,
-  runId: string
+  runId: string,
+  plan?: MergePlanEntry[],
+  opts: { sameAs?: string[] } = {}
 ): { manifest: MergeManifest; written: string[] } {
-  const notesDir = join(runDir(vaultRoot, runId), 'notes')
   const folder = mergeFolder(runId)
   const targetAbs = join(vaultRoot, folder)
+  const staged = readRunNotes(vaultRoot, runId)
 
-  const planned: { name: string; bytes: Buffer }[] = []
-  for (const name of readdirSync(notesDir).sort()) {
-    if (!name.endsWith('.md')) continue
-    planned.push({ name, bytes: readFileSync(join(notesDir, name)) })
+  const byName = new Map((plan ?? []).map((e) => [e.name.toLowerCase(), e]))
+  const entryFor = (name: string): MergePlanEntry =>
+    byName.get(name.toLowerCase()) ?? { name, action: 'new', targetName: name }
+
+  // Every rename the plan made, so links between the run's own notes follow.
+  const renames = new Map<string, string>()
+  for (const note of staged) {
+    const e = entryFor(note.name)
+    if (e.action === 'collides' && e.targetName !== note.name) renames.set(note.name, e.targetName)
   }
+  const confirmed = new Set((opts.sameAs ?? []).map((n) => n.toLowerCase()))
+
+  const planned: { name: string; bytes: Buffer; action: MergeAction }[] = []
+  const skipped: string[] = []
+  for (const note of staged) {
+    const e = entryFor(note.name)
+    if (e.action === 'identical') {
+      skipped.push(note.name)
+      continue
+    }
+    let content = rewriteLinks(note.content, renames)
+    if (e.action === 'collides' && confirmed.has(note.name.toLowerCase()))
+      content = withSameAs(content, note.name)
+    planned.push({ name: `${e.targetName}.md`, bytes: Buffer.from(content, 'utf8'), action: e.action })
+  }
+
   const files: MergeFile[] = planned.map((f) => ({
     path: join(folder, f.name),
-    hash: sha1(f.bytes)
+    hash: sha1(f.bytes),
+    action: f.action
   }))
 
   const mPath = manifestPath(vaultRoot, runId)
-  writeFileSync(mPath, JSON.stringify({ folder, files, complete: false }, null, 2))
+  atomicWrite(mPath, JSON.stringify({ folder, files, complete: false, skipped }, null, 2))
 
   mkdirSync(targetAbs, { recursive: true })
   const written: string[] = []
@@ -450,8 +621,8 @@ export function mergeRun(
     written.push(abs)
   }
 
-  const manifest: MergeManifest = { folder, files, complete: true }
-  writeFileSync(mPath, JSON.stringify(manifest, null, 2))
+  const manifest: MergeManifest = { folder, files, complete: true, skipped }
+  atomicWrite(mPath, JSON.stringify(manifest, null, 2))
   return { manifest, written }
 }
 

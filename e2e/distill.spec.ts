@@ -3,10 +3,12 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   writeFileSync
 } from 'fs'
 import { tmpdir } from 'os'
@@ -166,7 +168,10 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('.graph-node').first()).toBeVisible()
   expect(await page.locator('.graph-node').count()).toBeGreaterThan(1)
-  await expect(page.locator('.graph-edge').first()).toBeVisible()
+  // Attached, not "visible": a two-node map can lay its nodes out exactly
+  // level, and a horizontal SVG line has a zero-height box Playwright calls
+  // hidden. The edge is drawn either way.
+  await expect(page.locator('.graph-edge').first()).toBeAttached()
 
   // The completion banner says what happened and that nothing is merged yet.
   await expect(page.locator('.distill-coverage-banner')).toContainText(/Staged \d+ notes?/)
@@ -299,4 +304,161 @@ test('UNDO never destroys your edits: an edited merged note goes to the Trash', 
   await expect
     .poll(() => page.evaluate(() => window.nodebook.noteNames()))
     .not.toContain('on-government')
+})
+
+// --- Phase 6: readable staging, a merge that converges, durable `.distill/` ---
+
+/** The run's staged note names, read straight off disk (`.distill/<id>/notes`). */
+const stagedNames = (id: string): string[] =>
+  readdirSync(join(realpathSync(vaultDir), '.distill', id, 'notes'))
+    .filter((n) => n.endsWith('.md'))
+    .map((n) => n.replace(/\.md$/, ''))
+
+test('a staged note opens READ-ONLY before merge, and its citation shows the quote', async () => {
+  // The run map is open from the earlier tests. Pick a concept note (not the book).
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  const id = runs[0].id
+  const concept = stagedNames(id).find((n) => n !== 'on-government')!
+
+  await page.locator('.graph-node', { hasText: concept }).first().click()
+  await page.locator('.graph-ctl', { hasText: 'Open ↗' }).click()
+
+  // A read-only pane — never the editor, so there is no dirty/save state at all.
+  await expect(page.locator('.staged-note')).toBeVisible()
+  await expect(page.locator('.staged-note-title')).toContainText(concept)
+  await expect(page.locator('.staged-note-badge')).toContainText('read-only')
+  await expect(page.locator('.cm-content')).toHaveCount(0)
+
+  // Its citation resolves against the RUN's own copy of the document, and the
+  // quote is highlighted in place — checkable before anything is written.
+  const cite = page.locator('.staged-note-sources .source-cite').first()
+  await expect(cite).toContainText('on-government')
+  await cite.click()
+  await expect(page.locator('.staged-source mark')).toBeVisible()
+  const quoted = (await page.locator('.staged-source mark').innerText()).trim()
+  expect(BOOK).toContain(quoted)
+
+  await page.locator('.staged-note-back').click()
+  await expect(page.locator('.graph-view')).toBeVisible()
+})
+
+test('MERGE beside a note you already have: "Name (Book)", with the links rewritten', async () => {
+  // Your own note, same name as the run's copy of the document.
+  writeFileSync(
+    join(realpathSync(vaultDir), 'on-government.md'),
+    '# On Government\n\nMy own reading notes. [[welcome]]\n'
+  )
+  await expect
+    .poll(() => page.evaluate(() => window.nodebook.noteNames()))
+    .toContain('on-government')
+
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  const id = runs[0].id
+  const plan = await page.evaluate((r) => window.nodebook.distillMergePlan(r), id)
+  const clash = plan.entries.find((e) => e.name === 'on-government')!
+  expect(clash.action).toBe('collides')
+  expect(clash.targetName).toBe('on-government (on-government)')
+
+  // The dialog says what will happen, and defaults to "these are two notes".
+  await page.locator('.distill-merge-btn').click()
+  await expect(page.locator('.merge-dialog')).toBeVisible()
+  await expect(page.locator('.merge-summary')).toContainText(
+    /1 note shares a name with a note you already have/
+  )
+  await expect(page.locator('.merge-summary')).toContainText('on-government (on-government)')
+  await expect(page.locator('.merge-clash input')).not.toBeChecked()
+  await page.locator('.merge-confirm').click()
+  await expect(page.locator('.distill-merged-banner')).toBeVisible()
+
+  const folder = join(realpathSync(vaultDir), 'Distilled', id)
+  expect(existsSync(join(folder, 'on-government (on-government).md'))).toBe(true)
+  expect(existsSync(join(folder, 'on-government.md'))).toBe(false) // your note untouched
+  expect(readFileSync(join(realpathSync(vaultDir), 'on-government.md'), 'utf8')).toContain(
+    'My own reading notes.'
+  )
+  // Every note's `source::` link followed the rename — no dead link in your vault.
+  const concept = readdirSync(folder).find((n) => n.endsWith('.md') && !n.startsWith('on-government'))!
+  expect(readFileSync(join(folder, concept), 'utf8')).toContain(
+    'source:: [[on-government (on-government)]]'
+  )
+
+  // Two notes, two dots: an unconfirmed name clash is never collapsed.
+  const g = await page.evaluate(() => window.nodebook.graph(null, { showSources: true }))
+  const dots = g.nodes.filter((n) => n.label.startsWith('on-government'))
+  expect(dots.map((n) => n.label).sort()).toEqual([
+    'on-government',
+    'on-government (on-government)'
+  ])
+  expect(dots.every((n) => n.aliases === undefined)).toBe(true)
+
+  await page.locator('.distill-undo').click()
+  await expect(page.locator('.distill-merged-banner')).toBeHidden()
+})
+
+test('ticking "same as the existing note" collapses the two into one dot', async () => {
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  const id = runs[0].id
+
+  await page.locator('.distill-merge-btn').click()
+  await expect(page.locator('.merge-dialog')).toBeVisible()
+  await page.locator('.merge-clash', { hasText: 'on-government' }).locator('input').check()
+  await page.locator('.merge-confirm').click()
+  await expect(page.locator('.distill-merged-banner')).toBeVisible()
+
+  const merged = join(realpathSync(vaultDir), 'Distilled', id, 'on-government (on-government).md')
+  await expect.poll(() => existsSync(merged)).toBe(true)
+  expect(readFileSync(merged, 'utf8')).toContain('same_as:: [[on-government]]')
+
+  // One dot now, with the other name recorded on it.
+  await expect
+    .poll(async () => {
+      const g = await page.evaluate(() => window.nodebook.graph(null, { showSources: true }))
+      return g.nodes.filter((n) => n.label.startsWith('on-government')).length
+    })
+    .toBe(1)
+  const g = await page.evaluate(() => window.nodebook.graph(null, { showSources: true }))
+  const one = g.nodes.find((n) => n.label === 'on-government')!
+  expect(one.aliases).toEqual(['on-government (on-government)'])
+
+  // …and the map's inspector says so, in words.
+  await page.locator('.graph-close').click()
+  await page.locator('.tree-file', { hasText: 'on-government' }).first().click()
+  await page.locator('.graph-open-btn', { hasText: 'Map' }).click()
+  await page.locator('.graph-node', { hasText: 'on-government' }).first().click()
+  await expect(page.locator('.graph-insp-aliases')).toContainText('on-government (on-government)')
+  await page.locator('.graph-close').click()
+
+  await page.evaluate((r) => window.nodebook.distillUnmerge(r), id)
+})
+
+test('a legacy .nodebook/distill run migrates to .distill, and a lost run.db rebuilds', async () => {
+  const root = realpathSync(vaultDir)
+  // A run staged by an older release, under the directory documented as a cache.
+  const legacy = join(root, '.nodebook', 'distill', 'legacy-run')
+  mkdirSync(join(legacy, 'notes'), { recursive: true })
+  writeFileSync(join(legacy, 'notes', 'Legacy Book.md'), '# Legacy Book\n')
+  writeFileSync(
+    join(legacy, 'notes', 'Legacy Note.md'),
+    '# Legacy Note\n\nsource:: [[Legacy Book]]\n'
+  )
+  writeFileSync(join(legacy, 'meta.json'), JSON.stringify({ source: 'legacy.md', notes: 1 }))
+
+  // A finished run whose db was deleted — the markdown is the source of truth.
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  const id = runs[0].id
+  for (const f of ['run.db', 'run.db-wal', 'run.db-shm'])
+    rmSync(join(root, '.distill', id, f), { force: true })
+
+  await page.evaluate((dir) => window.nodebook.openVault(dir), root)
+
+  const after = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(after.map((r) => r.id)).toContain('legacy-run')
+  expect(existsSync(join(root, '.distill', 'legacy-run', 'notes', 'Legacy Note.md'))).toBe(true)
+  expect(existsSync(legacy)).toBe(false)
+
+  // Both maps still render: the migrated run, and the one that lost its db.
+  const migrated = await page.evaluate(() => window.nodebook.distillGraph('legacy-run'))
+  expect(migrated.nodes.length).toBeGreaterThan(1)
+  const rebuilt = await page.evaluate((r) => window.nodebook.distillGraph(r), id)
+  expect(rebuilt.nodes.length).toBeGreaterThan(1)
 })
