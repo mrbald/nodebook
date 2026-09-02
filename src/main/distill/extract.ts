@@ -144,6 +144,13 @@ export interface PromptOptions {
  * Build the system+user prompt for one window of source chunks. Extractive-first
  * and explicit about the grounding rule, so the model's own output is checkable
  * against the source. Pure: returns strings, runs no model.
+ *
+ * The language rule names no language. It used to say "a Russian text yields
+ * Russian notes" as its example, and Sonnet — with thinking off, reading the
+ * front matter of an English book — wrote every summary in Russian: the one
+ * example became the instruction, and the concept registry then carried the
+ * Russian titles into every later window. A rule with an example is a rule
+ * with a bias; this one has to hold for any language, so it names none.
  */
 export function buildExtractionPrompt(
   chunks: ClusterChunk[],
@@ -156,9 +163,9 @@ export function buildExtractionPrompt(
     'of the provided chunks, tagged with that chunk id. Do not assert anything the ' +
     'chunks do not state. If you cannot quote support for a claim, omit it — no ' +
     'evidence, no item. Write every title, summary, and link target in the SAME ' +
-    'LANGUAGE as the source chunks — a Russian text yields Russian notes; never ' +
-    'translate into English. (JSON keys and "kind"/"relation" values stay exactly ' +
-    'as the schema spells them; use ONLY the listed relation values.) Return ONLY ' +
+    'LANGUAGE the source chunks are written in, whatever language that is — ' +
+    'never translate. (JSON keys and "kind"/"relation" values stay exactly as ' +
+    'the schema spells them; use ONLY the listed relation values.) Return ONLY ' +
     'JSON in this exact shape:\n' +
     SCHEMA_HINT +
     (registry ? `\n\n${registry}` : '')
