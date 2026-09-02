@@ -14,7 +14,7 @@ function note(name: string, links: { key: string; target: string }[], opts: { so
   return { name, fileName: `${name}.md`, content }
 }
 
-const stats = { coverage: 0.5, dropped: 2, failedClusters: 1, merged: 3 }
+const stats = { coverage: 0.5, dropped: 2, failedWindows: 1, merged: 3 }
 
 function result(notes: EmittedNote[], overrides: Partial<typeof stats> = {}): EvalDistillResult {
   return { notes, stats: { ...stats, ...overrides } }
@@ -35,10 +35,10 @@ describe('computeMetrics — reference-free', () => {
   })
 
   it('passes stats through unchanged', () => {
-    const m = computeMetrics('text', result([], { coverage: 0.75, dropped: 5, failedClusters: 2, merged: 7 }))
+    const m = computeMetrics('text', result([], { coverage: 0.75, dropped: 5, failedWindows: 2, merged: 7 }))
     expect(m.coverage).toBe(0.75)
     expect(m.dropped).toBe(5)
-    expect(m.failedClusters).toBe(2)
+    expect(m.failedWindows).toBe(2)
     expect(m.merged).toBe(7)
   })
 

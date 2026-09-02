@@ -117,12 +117,25 @@ const SCHEMA_HINT = `{
   ]
 }`
 
+export interface PromptOptions {
+  /** Titles already extracted from earlier windows, rendered by
+   *  `ConceptRegistry.render` (`registry.ts`). Appended after the schema so
+   *  the model reuses a name it has used before instead of coining a synonym,
+   *  and can link across windows it can no longer see. Empty/absent = the
+   *  first window, which has nothing to reuse. */
+  registry?: string
+}
+
 /**
- * Build the system+user prompt for one cluster. Extractive-first and explicit
- * about the grounding rule, so the model's own output is checkable against the
- * source. Pure: returns strings, runs no model.
+ * Build the system+user prompt for one window of source chunks. Extractive-first
+ * and explicit about the grounding rule, so the model's own output is checkable
+ * against the source. Pure: returns strings, runs no model.
  */
-export function buildExtractionPrompt(chunks: ClusterChunk[]): { system: string; user: string } {
+export function buildExtractionPrompt(
+  chunks: ClusterChunk[],
+  opts: PromptOptions = {}
+): { system: string; user: string } {
+  const registry = opts.registry?.trim() ?? ''
   const system =
     'You extract structured knowledge from source text into cited notes. Work ' +
     'EXTRACTIVELY: every claim must be backed by a verbatim quote copied from one ' +
@@ -133,7 +146,8 @@ export function buildExtractionPrompt(chunks: ClusterChunk[]): { system: string;
     'translate into English. (JSON keys and "kind"/"relation" values stay exactly ' +
     'as the schema spells them; use ONLY the listed relation values.) Return ONLY ' +
     'JSON in this exact shape:\n' +
-    SCHEMA_HINT
+    SCHEMA_HINT +
+    (registry ? `\n\n${registry}` : '')
   const body = chunks
     .map((c) => `[chunk ${c.chunkId}${c.heading ? ` — ${c.heading}` : ''}]\n${c.text}`)
     .join('\n\n')

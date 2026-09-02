@@ -27,11 +27,18 @@ import {
   unmergeRun,
   readMergeManifest,
   readRunMeta,
+  readRunJson,
+  readRunNotes,
+  readStagedNote,
+  sourceNoteName,
+  contentHash,
+  migrateDistillRuns,
   beginRun,
   readRunSource,
   isUnfinishedRun,
   checkpointStore
 } from './distill/artifact'
+import { mergePlan } from './distill/mergePlan'
 import { Telemetry } from './telemetry'
 import {
   ensureSettingsFile,
@@ -46,6 +53,7 @@ import {
   type ThemeMode
 } from './settings'
 import { makeChatModel } from './rag/chat'
+import { DEFAULT_INPUT_BUDGET, inputBudgetFor } from './rag/provider'
 import { buildAppMenu } from './menu'
 import { addRecent } from './recents'
 import type {
@@ -55,6 +63,7 @@ import type {
   DistillRunResult,
   DistillRunInfo,
   DistillDocument,
+  DistillMergePlan,
   DistillMergeResult,
   DistillMergeStatus,
   DistillUnmergeResult
@@ -336,6 +345,10 @@ async function openVault(root: string): Promise<VaultListing> {
   await closeVault()
   vaultRoot = root
   index = new VaultIndex(join(root, '.nodebook', 'index.db'))
+  // Runs used to live inside `.nodebook/` — a directory documented as a
+  // deletable cache. Carry any left there into `.distill/` (durable staging)
+  // before anything lists runs; it is a rename, so a merged run stays undoable.
+  migrateDistillRuns(root)
   distillRuns = new StagedRunStore(root)
   // If talk-to-docs is on, turn the vector layer on *before* the scan so each
   // indexed file is chunked in the same pass (content-hash gated, so unchanged
@@ -502,6 +515,22 @@ async function convertPicked(docId: string, filePath: string): Promise<string> {
 }
 
 /**
+ * How much a run may read at a time, and how many calls it may spend: the chat
+ * model's declared prompt budget (or the user's `contextTokens`) plus the two
+ * `[distill]` knobs. The estimate and the run ask the same question here, so
+ * the plan the user is shown is the plan the run follows.
+ */
+function distillBudget(): { inputBudget: number; windowSize: number; maxCalls: number } {
+  const s = readSettings()
+  const cfg = chatProviderConfig()
+  return {
+    inputBudget: cfg ? inputBudgetFor(cfg) : DEFAULT_INPUT_BUDGET,
+    windowSize: s.distill.windowSize,
+    maxCalls: s.distill.maxCalls
+  }
+}
+
+/**
  * Drive one distill run — fresh or resumed — from converted text to a staged
  * artifact. Both entry points share this so a resume behaves exactly like a
  * run: same single-run slot, same pre-flight, same progress, same checkpoint.
@@ -543,6 +572,7 @@ async function runDistillPipeline(
       source,
       { embedder: rendererEmbedder(runId), chat },
       {
+        ...distillBudget(),
         signal: ctrl.signal,
         onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p),
         checkpoint: checkpointStore(root, runId)
@@ -932,7 +962,7 @@ function registerIpc(): void {
   ipcMain.handle('distill:estimate', async (_e, docId: string): Promise<DistillEstimate> => {
     const filePath = pickedDocs.get(docId)
     if (!filePath) throw new Error('Unknown document — pick it again.')
-    return estimateDistill(await convertPicked(docId, filePath))
+    return estimateDistill(await convertPicked(docId, filePath), distillBudget())
   })
 
   // Run the distill pipeline on a document → a staged, cited run-artifact. The
@@ -1041,11 +1071,57 @@ function registerIpc(): void {
 
   ipcMain.handle('distill:remove', (_e, runId: string) => distillRuns?.remove(runId))
 
+  // Read ONE staged note, for the read-only pane that lets you check a run
+  // before merging it. `readStagedNote` validates the name against the run's own
+  // `notes/` dir, so the renderer can't read its way out of the run.
+  ipcMain.handle(
+    'distill:readNote',
+    (_e, runId: string, name: string): { content: string } | null => {
+      if (!vaultRoot) return null
+      const content = readStagedNote(vaultRoot, runId, name)
+      return content === null ? null : { content }
+    }
+  )
+
+  // What merging this run would do, decided before a byte is written: which
+  // notes are new, which the vault already holds verbatim, and which share a
+  // name with a DIFFERENT note of yours (and so get saved beside it). Main
+  // recomputes this at merge time too — the renderer only sends confirmations.
+  const planMergeFor = (runId: string): DistillMergePlan => {
+    if (!vaultRoot || !index) throw new Error('Open a vault first.')
+    const staged = readRunNotes(vaultRoot, runId)
+    const raw = readRunMeta(vaultRoot, runId)?.source ?? readRunJson(vaultRoot, runId)?.file ?? runId
+    const title = sourceNoteName(raw)
+    // Every note name anywhere in the vault; hashes only where a name actually
+    // clashes, so planning a merge doesn't read the whole vault off disk.
+    const wanted = new Set(staged.map((n) => n.name.toLowerCase()))
+    const names = new Set<string>()
+    const hashByName = new Map<string, string>()
+    for (const p of index.knownFiles().keys()) {
+      const name = basename(p).replace(/\.md$/i, '')
+      names.add(name)
+      if (!wanted.has(name.toLowerCase()) || hashByName.has(name)) continue
+      try {
+        hashByName.set(name, contentHash(readFileSync(p)))
+      } catch {
+        /* unreadable — treat as a collision, which is the cautious answer */
+      }
+    }
+    return { sourceTitle: title, entries: mergePlan(staged, { names, hashByName }, title) }
+  }
+
+  ipcMain.handle('distill:mergePlan', (_e, runId: string): DistillMergePlan => planMergeFor(runId))
+
   // Merge a run into the vault: copy its notes into a namespaced subfolder so the
   // canonical index picks them up. Reversible — a manifest records what we wrote.
-  ipcMain.handle('distill:merge', (_e, runId: string): DistillMergeResult => {
+  // `sameAs` names the staged notes the user confirmed are the same thing as
+  // their vault twin; each gets a `same_as::` line the map then collapses.
+  ipcMain.handle('distill:merge', (_e, runId: string, opts?: { sameAs?: string[] }): DistillMergeResult => {
     if (!vaultRoot || !index) throw new Error('Open a vault first.')
-    const { manifest, written } = mergeRun(vaultRoot, runId)
+    const plan = planMergeFor(runId)
+    const { manifest, written } = mergeRun(vaultRoot, runId, plan.entries, {
+      sameAs: opts?.sameAs ?? []
+    })
     for (const p of written) {
       try {
         index.indexFile(p, readFileSync(p, 'utf8'), 0)
@@ -1056,7 +1132,11 @@ function registerIpc(): void {
     notifyVaultChanged()
     notifyIndexChanged()
     notifyTalkDirty()
-    return { folder: manifest.folder, count: manifest.files.length }
+    return {
+      folder: manifest.folder,
+      count: manifest.files.length,
+      skipped: manifest.skipped?.length ?? 0
+    }
   })
 
   // Undo a merge: take back exactly what it wrote and de-index it. Notes the

@@ -2,7 +2,13 @@ import { spawn } from 'child_process'
 import { accessSync, constants, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir, tmpdir } from 'os'
-import type { ChatModel, ChatRequest, ProviderConfig } from './provider'
+import {
+  ContextLengthError,
+  isContextLengthMessage,
+  type ChatModel,
+  type ChatRequest,
+  type ProviderConfig
+} from './provider'
 import { tagError, isAuthMessage } from '../distill/retry'
 
 /**
@@ -123,6 +129,14 @@ function abortError(): Error {
 }
 
 const tail = (s: string): string => s.trim().slice(-400)
+
+/** A CLI has no status codes — its verdict is whatever it printed. When that
+ *  text says the prompt was too long, report it as the one error distill can
+ *  actually fix (by sending less) instead of a generic failure. */
+function cliFailure(message: string, evidence: string, tags: Parameters<typeof tagError>[1]): Error {
+  if (isContextLengthMessage(evidence)) return new ContextLengthError(message)
+  return tagError(new Error(message), tags)
+}
 
 // One empty directory reused for every CLI call, so the child never sees the
 // app's (or a vault's) files as "project context".
@@ -248,9 +262,11 @@ async function* runCliLines(
     const code = await closed
     if (code !== 0)
       // Tagged so distill's retry policy can tell "the CLI fell over" (worth
-      // another go) from "you are not signed in" (never worth another go).
-      throw tagError(
-        new Error(`${label} failed (exit ${code}): ${tail(stderr) || 'no error output'}`),
+      // another go) from "you are not signed in" (never worth another go) and
+      // from "that prompt was too long" (worth sending less).
+      throw cliFailure(
+        `${label} failed (exit ${code}): ${tail(stderr) || 'no error output'}`,
+        stderr,
         { exitCode: code, authFailure: isAuthMessage(stderr) }
       )
   } finally {
@@ -290,10 +306,11 @@ export function codexCliChat(cfg: ProviderConfig): ChatModel {
       })
       const { text, error } = parseCodexEvents(stdout)
       if (error)
-        throw tagError(new Error(`Codex: ${error}`), { retryable: !isAuthMessage(error) })
+        throw cliFailure(`Codex: ${error}`, error, { retryable: !isAuthMessage(error) })
       if (code !== 0)
-        throw tagError(
-          new Error(`Codex failed (exit ${code}): ${tail(stderr) || 'no error output'}`),
+        throw cliFailure(
+          `Codex failed (exit ${code}): ${tail(stderr) || 'no error output'}`,
+          stderr,
           { exitCode: code, authFailure: isAuthMessage(stderr) }
         )
       if (!text) throw new Error('Codex returned no answer.')
@@ -410,7 +427,7 @@ export function claudeCliChat(cfg: ProviderConfig): ChatModel {
         } else if (ev.final) final = ev.final
       }
       if (failure)
-        throw tagError(new Error(`Claude: ${failure}`), { retryable: !isAuthMessage(failure) })
+        throw cliFailure(`Claude: ${failure}`, failure, { retryable: !isAuthMessage(failure) })
       if (streamed) return
       if (!final) throw new Error('Claude CLI returned no answer.')
       yield final
@@ -459,8 +476,9 @@ export function genericCliChat(cfg: ProviderConfig): ChatModel {
         cwd: scratchCwd()
       })
       if (code !== 0)
-        throw tagError(
-          new Error(`"${cmd}" failed (exit ${code}): ${tail(stderr) || 'no error output'}`),
+        throw cliFailure(
+          `"${cmd}" failed (exit ${code}): ${tail(stderr) || 'no error output'}`,
+          stderr,
           { exitCode: code, authFailure: isAuthMessage(stderr) }
         )
       const out = stdout.trim()

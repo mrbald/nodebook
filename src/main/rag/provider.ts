@@ -37,6 +37,77 @@ export interface ChatModel {
    *  bill every chat call against the user's subscription quota, so the
    *  pre-flight must not spend it. */
   probe?(signal?: AbortSignal): Promise<void>
+  /** How much prompt this backend will accept, in the chunker's weight units
+   *  (`weightOf`: a Latin character = 1, a CJK code point = 3). The model side
+   *  DECLARES it; distill's window planner sizes its reading windows from it
+   *  (see `distill/windows.ts`) instead of guessing. Absent = the caller's own
+   *  default (`DEFAULT_INPUT_BUDGET`). It is a budget, not a guarantee — a
+   *  backend may still reject a prompt it declared room for, which is what
+   *  `ContextLengthError` and distill's lossless split are for. */
+  inputBudget?: number
+}
+
+/**
+ * The prompt was rejected for being too long — the one failure that is fixed
+ * by sending LESS, not by sending it again. Adapters map their provider's
+ * context-length rejection onto this (see `isContextLengthMessage`); distill
+ * answers it by splitting the window in two and reading both halves, so no
+ * text is lost. Tagged `retryable: false` so `withRetry` never spends a second
+ * attempt on a prompt that cannot fit.
+ */
+export class ContextLengthError extends Error {
+  readonly retryable = false
+  constructor(message: string) {
+    super(message)
+    this.name = 'ContextLengthError'
+  }
+}
+
+/**
+ * Pure: does this provider message mean "your prompt is too long"? Every
+ * backend words it differently — Anthropic returns a 400 whose body says
+ * "prompt is too long", OpenAI-style APIs use the `context_length_exceeded`
+ * code or "maximum context length", Ollama reports the input exceeding the
+ * context, and a CLI prints whatever its own wrapper says. Recognising the
+ * family instead of one vendor's string keeps this one small predicate:
+ * anything that mentions the CONTEXT and says it was exceeded (or too
+ * long/large) counts. Deliberately narrow — "rate limit exceeded" must not
+ * match, or a 429 would be answered by splitting the window instead of waiting.
+ */
+export function isContextLengthMessage(text: string): boolean {
+  const t = text.toLowerCase()
+  if (t.includes('context_length_exceeded')) return true
+  if (t.includes('prompt is too long')) return true
+  if (t.includes('maximum context length')) return true
+  return /\bcontext\b/.test(t) && /(too long|too large|too many tokens|exceed)/.test(t)
+}
+
+/** Prompt budget when nothing declares one (weight units, see `ChatModel`). */
+export const DEFAULT_INPUT_BUDGET = 16_000
+
+/** Per-family prompt budgets, in weight units. Cloud and CLI backends all sit
+ *  on models with ≥100k-token windows, so 16 000 weight (≈5k tokens of Latin
+ *  text) is a conservative slice of what they accept; Ollama's defaults are a
+ *  2k-token window, so a local model gets a smaller one. These are starting
+ *  points a user can override with `[talk.chat] contextTokens`. */
+const FAMILY_INPUT_BUDGET: Record<ProviderKind, number> = {
+  local: DEFAULT_INPUT_BUDGET,
+  ollama: 6_000,
+  'openai-compat': DEFAULT_INPUT_BUDGET,
+  anthropic: DEFAULT_INPUT_BUDGET,
+  'codex-cli': DEFAULT_INPUT_BUDGET,
+  'claude-cli': DEFAULT_INPUT_BUDGET,
+  cli: DEFAULT_INPUT_BUDGET,
+  mcp: DEFAULT_INPUT_BUDGET
+}
+
+/** Pure: the prompt budget for a provider config — `contextTokens` × 3 when
+ *  the user set one (a token is ~3 Latin characters, the unit `weightOf`
+ *  counts), else the family default. */
+export function inputBudgetFor(cfg: Pick<ProviderConfig, 'kind' | 'contextTokens'>): number {
+  const tokens = cfg.contextTokens ?? 0
+  if (Number.isFinite(tokens) && tokens > 0) return Math.round(tokens * 3)
+  return FAMILY_INPUT_BUDGET[cfg.kind] ?? DEFAULT_INPUT_BUDGET
 }
 
 /**
@@ -80,6 +151,10 @@ export interface ProviderConfig {
   command?: string
   /** 'cli' only: arguments placed before the stdin-fed prompt. */
   args?: string[]
+  /** How many tokens of prompt this model accepts. 0/absent = the family
+   *  default (see `inputBudgetFor`). Set it when the family default is wrong
+   *  for your model — a 128k-context local model, or a small one. */
+  contextTokens?: number
 }
 
 /** Produces an embedder and/or chat model from its config (lazy, async). */

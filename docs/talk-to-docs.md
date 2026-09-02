@@ -154,6 +154,16 @@ threads = 0                # embedding CPU threads; 0 = auto (≈half the cores,
 
 [talk.chat]
 provider = "none"          # none (search-only) | openai-compat | anthropic | local
+contextTokens = 0          # prompt tokens this model accepts; 0 = the provider
+                           # family's default (16 000 weight units for cloud and
+                           # CLI backends, 6 000 for ollama; a token ≈ 3 units).
+                           # Distill sizes its reading windows from this.
+
+[distill]
+windowSize = 0             # weight units of source text per reading window;
+                           # 0 = derived from the chat model's context budget
+maxCalls = 120             # ceiling on model calls per run; over it, windows are
+                           # sampled at an even stride and coverage is reported
 ```
 
 ## Build / packaging — as shipped (decisions resolved)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_EMBED_MODEL,
   type DistillEstimate,
+  type DistillMergePlan,
   type DistillRunInfo,
   type DistillRunResult,
   type MarkdownFile,
@@ -18,6 +19,8 @@ import { FileTree, type ContextTarget } from './FileTree'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { Prompt } from './Prompt'
 import { Confirm } from './Confirm'
+import { MergeDialog } from './MergeDialog'
+import { StagedNoteView } from './StagedNoteView'
 import { StatusSelect } from './StatusSelect'
 import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
@@ -84,6 +87,12 @@ export default function App() {
   const [mergeInfo, setMergeInfo] = useState<{ runId: string; folder: string; count: number } | null>(
     null
   )
+  // The merge dialog's plan: what merging this run would do, fetched before the
+  // confirm so the user decides with the collisions in front of them.
+  const [mergePlan, setMergePlan] = useState<{ runId: string; plan: DistillMergePlan } | null>(null)
+  // A staged note being read (by name) instead of the run map — read-only, so
+  // you can check a run's notes and their quotes before merging.
+  const [stagedNote, setStagedNote] = useState<string | null>(null)
   // What just happened to the last distill run: how many notes were staged (and
   // why zero, when zero) plus the sampling-coverage honesty note — or that the
   // run was cancelled, or its merge undone.
@@ -795,17 +804,19 @@ export default function App() {
           why.push(
             `${s.recovered} quote${s.recovered === 1 ? ' was' : 's were'} found under a different passage and kept`
           )
-        if (s.failedClusters > 0)
-          why.push(`${s.failedClusters} of ${s.clusters} sections got an unusable model response`)
+        if (s.failedWindows > 0)
+          why.push(`${s.failedWindows} of ${s.windows} steps got an unusable model response`)
         if (s.notes === 0) {
           setDistillDoneNote(
             `Distilled, but no notes survived verification${why.length ? ` (${why.join('; ')})` : ''} — a stronger chat model in Settings usually fixes this.`
           )
         } else {
-          // A big source is clustered + sampled, not read in full — say so when
-          // that sampling was substantial, so "Distilled" doesn't imply full coverage.
+          // Coverage is the honesty number: the whole document unless it needed
+          // more steps than the call budget allows, in which case say how much.
           const cov =
-            s.coverage < 0.95 ? ` It read ${Math.round(s.coverage * 100)}% of the text, representatively.` : ''
+            s.coverage >= 0.999
+              ? ' It read all of the text.'
+              : ` It read about ${Math.round(s.coverage * 100)}% of the text, in evenly spaced steps.`
           setDistillDoneNote(
             `Staged ${s.notes} note${s.notes === 1 ? '' : 's'} — nothing is in your vault until you press ⤓ Merge on this map.${cov}${why.length ? ` ${why.join('; ')}.` : ''}`
           )
@@ -833,12 +844,26 @@ export default function App() {
     // main hands back an opaque id for the picked document, never a path.
     const doc = await window.nodebook.distillPick()
     if (!doc) return
-    await startDistilling(async () => {
-      // The estimate converts the document; the run reuses that same copy, so
-      // this costs the conversion once and the toast can say what is coming.
-      setDistillEstimate(await window.nodebook.distillEstimate(doc.id).catch(() => null))
-      return window.nodebook.distillRun(doc.id)
-    })
+    // The estimate converts the document; the run reuses that same copy, so
+    // this costs the conversion once and the toast can say what is coming.
+    const est = await window.nodebook.distillEstimate(doc.id).catch(() => null)
+    setDistillEstimate(est)
+    const go = (): Promise<void> => startDistilling(() => window.nodebook.distillRun(doc.id))
+    // Reading a long document in full can cost more calls than the budget
+    // allows. That is the user's money and quota, so ask BEFORE spending it —
+    // and say exactly what the cheaper answer reads.
+    if (est && est.totalWindows > est.maxCalls) {
+      setConfirm({
+        message: `This document needs ${est.totalWindows} steps; your budget is ${est.maxCalls}. Read ${est.maxCalls} evenly spaced steps (about ${Math.round(est.coverage * 100)}% of the text), or raise [distill] maxCalls in Settings.`,
+        confirmLabel: `Read ${est.maxCalls} steps`,
+        onConfirm: () => {
+          setConfirm(null)
+          void go()
+        }
+      })
+      return
+    }
+    await go()
   }, [startDistilling])
 
   // Carry on a run that was cancelled or interrupted, from its own checkpoint.
@@ -899,27 +924,43 @@ export default function App() {
     [distillRun, distillOverlay]
   )
 
-  // Merge a run into the vault (an explicit, confirmed, reversible write).
+  // Open a staged note from the run map, read-only: staged notes are not vault
+  // files, so they never reach the editor (no path to save to, no dirty state).
+  const openStagedNote = useCallback((path: string) => {
+    const name = (path.split(/[/\\]/).pop() ?? path).replace(/\.md$/i, '')
+    if (name) setStagedNote(name)
+  }, [])
+
+  // Merge a run into the vault (an explicit, confirmed, reversible write). The
+  // plan comes first: the dialog says what would happen — and, for a note whose
+  // name you already use, asks whether the two are really the same thing.
   const mergeDistillRun = useCallback(() => {
     if (!distillRun) return
     const runId = distillRun.runId
-    setConfirm({
-      message: `Merge this run's notes into your vault under "Distilled/${runId}"? You can undo it right after.`,
-      onConfirm: () => {
-        setConfirm(null)
-        void window.nodebook
-          .distillMerge(runId)
-          .then((res) => {
-            setMergeInfo({ runId, folder: res.folder, count: res.count })
-            void refreshRuns() // the run's "merged" tag changed
-          })
-          .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      }
-    })
-  }, [distillRun, refreshRuns])
+    void window.nodebook
+      .distillMergePlan(runId)
+      .then((plan) => setMergePlan({ runId, plan }))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+  }, [distillRun])
+
+  const confirmMerge = useCallback(
+    (runId: string, sameAs: string[]) => {
+      setMergePlan(null)
+      void window.nodebook
+        .distillMerge(runId, { sameAs })
+        .then((res) => {
+          setMergeInfo({ runId, folder: res.folder, count: res.count })
+          void refreshRuns() // the run's "merged" tag changed
+        })
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+    },
+    [refreshRuns]
+  )
 
   // Restore the merged/undo state when a run map opens (and clear it on close).
   useEffect(() => {
+    setStagedNote(null) // a different run: back to its map
+    setMergePlan(null)
     if (!distillRun) {
       setMergeInfo(null)
       return
@@ -1221,6 +1262,13 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : distillRun && stagedNote ? (
+          <StagedNoteView
+            key={`staged-${distillRun.runId}-${stagedNote}`}
+            runId={distillRun.runId}
+            name={stagedNote}
+            onBack={() => setStagedNote(null)}
+          />
         ) : distillRun ? (
           <GraphView
             key={`distill-${distillRun.runId}`}
@@ -1231,8 +1279,8 @@ export default function App() {
             focusName=""
             vaultRoot={vault}
             talkReady={false}
-            onOpen={() => {}}
-            onOpenInEditor={() => {}}
+            onOpen={openStagedNote}
+            onOpenInEditor={openStagedNote}
             onClose={() => setDistillRun(null)}
             reloadKey={0}
             statusSlot={
@@ -1378,6 +1426,14 @@ export default function App() {
           onCancel={() => setPrompt(null)}
         />
       )}
+      {mergePlan && (
+        <MergeDialog
+          plan={mergePlan.plan}
+          folder={`Distilled/${mergePlan.runId}`}
+          onCancel={() => setMergePlan(null)}
+          onConfirm={(sameAs) => confirmMerge(mergePlan.runId, sameAs)}
+        />
+      )}
       {confirm && (
         <Confirm
           message={confirm.message}
@@ -1401,8 +1457,6 @@ export default function App() {
             Distilling…{' '}
             {({
               chunking: 'reading',
-              embedding: 'embedding',
-              clustering: 'finding themes',
               extracting: 'extracting concepts',
               finalizing: 'writing notes',
               done: 'done'

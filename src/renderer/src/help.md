@@ -138,6 +138,10 @@ it by hand, and nothing here changes your notes.
 - **Distilled documents** — notes distilled from a document all link back to it, and
   those "from the same book" lines would swallow the picture. The map hides the
   document's own node by default; the **📕 Source** button brings it back.
+- **Two names, one note** — when you told Merge that a distilled note is the same
+  thing as one you already had, the map draws them as one dot and lists the other
+  name under **also known as** when you click it. That decision is a plain
+  `same_as:: [[Other note]]` line in the note — delete it and they split apart again.
 
 ## Talk to docs — semantic search
 
@@ -201,10 +205,12 @@ original**. Start it with **File ▸ Distill a Document…** (it needs a chat
 provider, same as Ask). Legacy binary `.doc` isn't readable — save it as `.docx`
 first.
 
-- **What happens** — Nodebook reads the document, groups its ideas by topic, and asks
-  the model to write one short note per concept. Every claim in a note carries a
-  **citation**: a real quote from the document. If the model can't back a point with a
-  verbatim quote, that point is dropped — not guessed.
+- **What happens** — Nodebook reads the whole document from start to finish, in
+  steps, and asks the model to write one short note per concept. Each step is told
+  which concepts the earlier steps already named, so the same idea keeps one name
+  and notes link across the document. Every claim in a note carries a **citation**:
+  a real quote from the document. If the model can't back a point with a verbatim
+  quote, that point is dropped — not guessed.
 - **Quotes are checked against the whole document** — a point is kept only when its
   quote is found **exactly once** in the document (if the model pointed at the wrong
   passage, Nodebook finds the right one and corrects it); a quote that isn't there, or
@@ -221,7 +227,12 @@ first.
 - **Runs are kept** — every distilled run appears under **Distilled runs** in the
   sidebar until you discard it, so closing the map loses nothing. Click a run to
   reopen its map; **✕** discards it. A run that hasn't been merged yet lives only in
-  the vault's `.nodebook/distill/` folder, so deleting that folder loses it.
+  the vault's `.distill/` folder — keep that folder and back it up if your unmerged
+  runs matter. (`.nodebook/` beside it is just a cache and is safe to delete.)
+- **Read a run before you merge it** — click a note on the run's map to read it, with
+  its quotes, without adding anything to your vault. Click one of its **Sources** and
+  the run's own copy of the document opens at that passage, with the quote
+  highlighted, so you can check it. **← Back to map** returns.
 - **Cancel any time** — the **Cancel** button on the progress toast stops a run.
   Only one document can be distilled at a time.
 - **Nothing is wasted** — a run that you cancel, or that stops because the model
@@ -231,15 +242,29 @@ first.
   busy server, a dropped connection) is simply tried again, and a passage the model
   never manages to read costs that passage, not the run.
 - **What it will cost** — before it starts, the progress toast says how many passages
-  the document has and how many steps reading them will take.
+  the document has and how many steps reading them will take. If a document needs
+  more steps than your budget allows, Nodebook asks first, and says what share of
+  the text the cheaper answer reads.
 - **Merge when happy** — **⤓ Merge** copies the run's notes into your vault under a
   `Distilled/…` folder. It's reversible: **Undo** in the banner removes exactly what
   was written. Any merged note you edited afterwards is moved to the **Trash**
   instead of being deleted, so your edits are always recoverable.
+- **Merge never writes over a note of yours** — before it copies anything, Merge tells
+  you how many notes are new, how many you already have word-for-word (those are
+  skipped), and which share a name with a note you already have. A shared name is
+  saved beside yours as “Name (Book)” — because two notes with one name aren't
+  necessarily about the same thing. If they *are*, tick **same as the existing note**
+  next to it and the map will show them as a single note from then on, with the other
+  name listed beside it.
 - **Click a citation** — a distilled note lists its **Sources** in the right-hand
   panel; clicking one opens the original document at the quoted passage.
-- **Sampling** — very long documents are read *representatively*, not line by line;
-  when that happens Nodebook tells you how much of the text it looked at.
+- **Very long documents** — a run reads everything up to a budget of **120 model
+  calls** (`[distill] maxCalls` in Settings). Past that it reads evenly spaced steps
+  instead of stopping, and the banner says what share of the text that was. Two more
+  settings shape the steps: `[talk.chat] contextTokens` says how much your model
+  accepts in one go (bigger = fewer, longer steps), and `[distill] windowSize` forces
+  a step size instead of working one out. If your model refuses a step for being too
+  long, Nodebook splits it in two and reads both halves — nothing is skipped.
 - **The document's node** — every distilled note links back to the document it came
   from. The run's own map shows that node (it's what the run is about), but once
   merged, your vault's knowledge map hides it — otherwise it sits in the middle of a
