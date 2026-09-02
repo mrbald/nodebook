@@ -7,6 +7,11 @@ test-results/
 playwright-report/
 .playwright/
 
+# npm run eval:distill's report (regenerated every run; already covered by
+# the unanchored `out/` rule above — listed explicitly so it stays ignored
+# even if that rule is ever narrowed to the build output directory).
+scripts/out/
+
 # Rebuildable local index — must never become a second source of truth.
 .nodebook/
 
