@@ -3,6 +3,7 @@ import {
   clusterNotes,
   parseThemeNames,
   themeK,
+  distinctThemeNames,
   themeNameOf,
   themeNamingPrompt,
   MAX_THEMES,
@@ -149,6 +150,26 @@ describe('parseThemeNames leniency', () => {
     const r = parseThemeNames('{"themes":[{"index":0,"name":"the "apply" family"}]}', 1)
     expect(r.ok).toBe(true)
     expect(r.names[0]).toBe('the "apply" family')
+  })
+})
+
+describe('distinctThemeNames', () => {
+  it('suffixes a theme named exactly like a placed note, case-insensitively', () => {
+    const placed = ['Book', 'Python Language Basics', 'Faction']
+    expect(distinctThemeNames(['python language basics', 'Checks on power'], placed)).toEqual([
+      'python language basics (theme)',
+      'Checks on power'
+    ])
+  })
+
+  it('compares by note name, the way files collide', () => {
+    // `noteName` strips characters a file name cannot carry, so a theme whose
+    // raw name differs only by one of them still lands on the note's file.
+    expect(distinctThemeNames(['Faction: causes'], ['Faction causes'])).toEqual(['Faction: causes (theme)'])
+  })
+
+  it('leaves two themes given one name to the numeric backstop', () => {
+    expect(distinctThemeNames(['Same', 'Same'], ['Other'])).toEqual(['Same', 'Same'])
   })
 })
 

@@ -62,6 +62,7 @@ import {
 import { countComponents } from './link'
 import {
   clusterNotes,
+  distinctThemeNames,
   parseThemeNames,
   themeNameOf,
   themeNamingPrompt,
@@ -572,9 +573,12 @@ async function addThemes(
   if (!replayed) opts.checkpoint?.save({ type: 'themes', names: resolved })
 
   // A theme is a note on disk like any other, so its name is de-collided
-  // against the notes already placed (and the book) before anything links to it.
+  // against the notes already placed (and the book) before anything links to
+  // it: a name that is already a note's becomes `<name> (theme)`, and the
+  // numeric backstop only ever answers two themes given one name.
   const sourceName = sourceNoteName(source.file)
-  const names = dedupeNames(resolved, [sourceName, ...emitted.notes.map((n) => n.name)])
+  const placed = [sourceName, ...emitted.notes.map((n) => n.name)]
+  const names = dedupeNames(distinctThemeNames(resolved, placed), placed)
   const assignment = new Map<string, string>()
   clusters.forEach((c, i) => {
     for (const m of c.members) assignment.set(emitted.notes[m].name, names[i])

@@ -992,6 +992,20 @@ const themesOf = (content: string): string[] =>
   [...content.matchAll(/^part_of:: \[\[([^\]]+)\]\]$/gm)].map((m) => m[1])
 
 describe('distill — themes', () => {
+  it('names a theme that copied a note\'s name "<name> (theme)", never "<name> 2"', async () => {
+    const plain = await distill({ file: 'Book.md', text: SRC8 }, { embedder, chat: themingChat() }, opts8)
+    const copied = plain.notes.find((n) => !plain.themes.includes(n.name))!.name
+    const chat = themingChat((count) =>
+      JSON.stringify({
+        themes: Array.from({ length: count }, (_, i) => ({ index: i, name: i === 0 ? copied : `Theme ${i + 1}` }))
+      })
+    )
+    const res = await distill({ file: 'Book.md', text: SRC8 }, { embedder, chat }, opts8)
+    expect(res.notes.map((n) => n.name)).toContain(copied) // the note keeps its name
+    expect(res.themes).toContain(`${copied} (theme)`)
+    expect(res.themes).not.toContain(`${copied} 2`)
+  })
+
   it('groups the notes under theme notes, one primary theme each', async () => {
     const chat = themingChat()
     const res = await distill({ file: 'Book.md', text: SRC8 }, { embedder, chat }, opts8)

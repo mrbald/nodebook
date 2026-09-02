@@ -23,6 +23,7 @@
 
 import { kmeans, type Point } from './cluster'
 import { parseLenientObject } from './lenientJson'
+import { noteName } from './link'
 
 /** Below this many notes a run is not themed: three themes over five notes is
  *  filing, not grouping, and the map reads better flat. */
@@ -181,3 +182,16 @@ export function themeNameOf(
   return titles[cluster.medoid] ?? titles[cluster.members[0]] ?? 'theme'
 }
 
+/**
+ * Theme names a reader cannot mistake for a note's. A group named exactly like
+ * one of the run's notes — the prompt asks the model not to, and the medoid
+ * fallback does it by construction — becomes `<name> (theme)`. Without this
+ * the file-level backstop (`dedupeNames` in `emit.ts`) would write it as
+ * `<name> 2`, which reads as a mistake. Compared the way files collide: by
+ * note name, case-insensitively. The backstop still runs after this for the
+ * case it is for, two groups given one name.
+ */
+export function distinctThemeNames(names: string[], placed: string[]): string[] {
+  const taken = new Set(placed.map((n) => noteName(n).toLowerCase()))
+  return names.map((n) => (taken.has(noteName(n).toLowerCase()) ? `${n} (theme)` : n))
+}

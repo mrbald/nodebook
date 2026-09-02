@@ -219,7 +219,9 @@ first.
   that could be in two different places, is dropped rather than guessed at. The banner
   after a run says how many were dropped and why.
 - **Themes** — a distilled run groups its notes under a handful of theme notes, so
-  the map reads book → themes → notes; the sidebar lists a run's themes under it.
+  the map reads book → themes → notes; the sidebar lists a run's themes under it. A
+  theme is named by the model; if it picks a name one of the run's notes already
+  has, the theme is called *Name (theme)* so the two never share a file.
 - **The notes are linked to each other** — when one note's text names another, Nodebook
   adds a link between them; and when two notes turned out to be the same idea and were
   merged, links written for either name still land on the note that survived.
