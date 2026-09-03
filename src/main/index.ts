@@ -410,7 +410,11 @@ async function openVault(root: string): Promise<VaultListing> {
   })
   watcher
     .on('add', (p: string) => {
-      if (MD_EXT.test(p)) void indexPath(p).then(notifyTalkDirty)
+      if (MD_EXT.test(p))
+        void indexPath(p).then(() => {
+          notifyTalkDirty()
+          notifyIndexChanged()
+        })
       notifyVaultChanged()
     })
     .on('change', (p: string) => {
@@ -425,7 +429,10 @@ async function openVault(root: string): Promise<VaultListing> {
       }
     })
     .on('unlink', (p: string) => {
-      if (MD_EXT.test(p)) index?.removeFile(p)
+      if (MD_EXT.test(p)) {
+        index?.removeFile(p)
+        notifyIndexChanged()
+      }
       notifyVaultChanged()
     })
     .on('addDir', notifyVaultChanged)
@@ -815,6 +822,13 @@ function registerIpc(): void {
   ipcMain.handle('index:backlinks', (_e, target: string) => index?.backlinks(target) ?? [])
 
   ipcMain.handle('index:outbound', (_e, sourceFile: string) => index?.outbound(sourceFile) ?? [])
+
+  // The notes a confirmed `same_as::` made one thing with this one. The renderer
+  // only ever asks about the note it has open, so the path is checked like any
+  // other path it hands us.
+  ipcMain.handle('index:sameAs', (_e, path: string) =>
+    index && withinVault(path) ? index.sameAs(path) : []
+  )
 
   ipcMain.handle('index:search', (_e, query: string) => index?.search(query) ?? [])
 

@@ -14,6 +14,7 @@ import type {
   GraphData,
   MenuState,
   Outbound,
+  SameAsTwin,
   SearchHit,
   Settings,
   TalkChunk,
@@ -46,6 +47,8 @@ const api = {
   backlinks: (target: string): Promise<Backlink[]> => ipcRenderer.invoke('index:backlinks', target),
   outbound: (sourceFile: string): Promise<Outbound[]> =>
     ipcRenderer.invoke('index:outbound', sourceFile),
+  /** The notes a confirmed `same_as::` made one thing with this one. */
+  sameAs: (path: string): Promise<SameAsTwin[]> => ipcRenderer.invoke('index:sameAs', path),
   search: (query: string): Promise<SearchHit[]> => ipcRenderer.invoke('index:search', query),
   noteNames: (): Promise<string[]> => ipcRenderer.invoke('index:noteNames'),
   graph: (
