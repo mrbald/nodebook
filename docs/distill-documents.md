@@ -203,6 +203,15 @@ clash with a stranger — is dropped, never redirected (`confirmedSameAs`). Merg
 crash never leaves un-undoable files; **Undo** hashes each file and sends anything
 you edited to the Trash instead of deleting it.
 
+**Two notes, one reading.** A confirmed `same_as` group is one thing everywhere,
+not only on the map: opening any member shows the others' summary, quotes and
+citations in the right-hand panel, each borrowed citation marked with the note it
+came from. The group is computed by `sameAsGroups()` in `graph.ts` — the same
+union-find, the same target resolution the map folds by, so the two views cannot
+disagree — and the panel reads the twins' files at display time. Nothing is
+written: an append would have the merge rewrite files it does not own, and undo
+would have to unpick one run's additions from another's.
+
 ## Ingestion — the converter seam
 
 The seam is `convertDocument()` in `convert.ts`: **one switch on the file
