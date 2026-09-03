@@ -259,8 +259,12 @@ round-trip rules.) Because each run lives in its own namespace:
 - **Perspectives are first-class** — the same book distilled "by theme" vs "by
   chronology" vs "by argument" (different extraction prompts) are just different
   artifacts side by side. Several lenses on one source coexisting *is* the
-  knowledge-management win. *Prompt presets are not built yet;* re-running the same
-  document already gives you side-by-side runs.
+  knowledge-management win. A lens is a **focus given per run**: one line, asked
+  once when the run starts — three named lenses (Arguments, Timeline, People) or
+  free text, normalised and capped at 300 characters. It rides in the user half of
+  every extraction prompt, is saved in `run.json` so a resume reads the document
+  the same way, and is recorded in `meta.json` so the runs list can say what a
+  reading was for.
 - **Comparable** — each run's `meta.json` stamps the source hash, model, provider,
   prompt version, date, settings and coverage, so runs can be told apart and a
   stale one recognised.

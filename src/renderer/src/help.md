@@ -215,6 +215,11 @@ first.
   and notes link across the document. Every claim in a note carries a **citation**:
   a real quote from the document. If the model can't back a point with a verbatim
   quote, that point is dropped — not guessed.
+- **Give the reading a focus** — starting a run asks what the notes should focus on:
+  leave it empty for the usual reading, press one of **Arguments**, **Timeline** or
+  **People**, or type your own line. The run keeps that focus for every step, remembers
+  it if you pause and resume, and shows it under **Distilled runs** — so the same book
+  read two ways gives you two runs you can tell apart.
 - **Quotes are checked against the whole document** — a point is kept only when its
   quote is found **exactly once** in the document (if the model pointed at the wrong
   passage, Nodebook finds the right one and corrects it); a quote that isn't there, or
