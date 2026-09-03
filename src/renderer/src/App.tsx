@@ -1509,6 +1509,7 @@ export default function App() {
           document={sourceDocument}
           onOpenOriginal={openOriginal}
           onOpenCitation={openCitation}
+          reloadKey={graphEpoch}
         />
       )}
 
