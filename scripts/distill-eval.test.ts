@@ -22,15 +22,27 @@
  * committed to `docs/distill-documents.md`'s baseline section and written
  * fresh to `scripts/out/distill-eval.md` (gitignored) on every run, are what
  * those phases compare against.
+ *
+ * Every run also saves what it scored — each fixture's emitted notes and
+ * stats — to `scripts/out/run-<provider>-<fixture>.json`. The same command
+ * with `DISTILL_EVAL_REPLAY=1` re-scores those instead of running the
+ * pipeline, so a metric can be redefined and re-read against a real model's
+ * output without paying for the model again (a real-provider run is ~25
+ * minutes).
  */
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, mkdirSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { convertDocument } from '../src/main/distill/convert'
-import { distill, type DistillSource, type DistillDeps } from '../src/main/distill/run'
+import { distill, type DistillSource, type DistillDeps, type DistillResult } from '../src/main/distill/run'
 import { hashEmbedder, heuristicChat } from '../src/main/distill/eval/stubs'
-import { computeMetrics, type GoldenSet, type EvalMetrics } from '../src/main/distill/eval/metrics'
+import {
+  computeMetrics,
+  type GoldenSet,
+  type EvalMetrics,
+  type EvalDistillResult
+} from '../src/main/distill/eval/metrics'
 import { makeChatModel } from '../src/main/rag/chat'
 import type { ChatModel, ProviderConfig, ProviderKind } from '../src/main/rag/provider'
 
@@ -126,6 +138,27 @@ function buildDeps(): DistillDeps {
   return { embedder: hashEmbedder(), chat: buildChat() }
 }
 
+// --- Saved runs: re-score without re-running -----------------------------
+
+/** Where a fixture's last run under this provider is kept — the slice the
+ *  metrics read (`notes` + `stats`), keyed by provider so a stub run never
+ *  overwrites a paid one. */
+function runFile(key: string): string {
+  return join(OUT_DIR, `run-${process.env.DISTILL_EVAL_PROVIDER || 'stub'}-${key}.json`)
+}
+
+function saveRun(key: string, result: DistillResult): void {
+  mkdirSync(OUT_DIR, { recursive: true })
+  writeFileSync(runFile(key), JSON.stringify({ notes: result.notes, stats: result.stats }, null, 2), 'utf8')
+}
+
+function loadRun(key: string): EvalDistillResult {
+  const path = runFile(key)
+  if (!existsSync(path))
+    throw new Error(`DISTILL_EVAL_REPLAY: no saved run at ${path} — run the same command once without it first`)
+  return JSON.parse(readFileSync(path, 'utf8')) as EvalDistillResult
+}
+
 // --- Reporting ---------------------------------------------------------
 
 const COLUMNS = [
@@ -140,6 +173,7 @@ const COLUMNS = [
   'duplicateTitleRate',
   'conceptRecall',
   'edgePrecision',
+  'edgesJudged',
   'edgeRecall'
 ] as const
 
@@ -161,12 +195,18 @@ function formatTable(rows: { fixture: string; metrics: EvalMetrics }[]): string 
 describe('distill eval', () => {
   it('runs the pipeline over every fixture and reports metrics', async () => {
     const golden = loadGolden()
-    const deps = buildDeps()
+    const replay = Boolean(process.env.DISTILL_EVAL_REPLAY)
+    const deps = replay ? null : buildDeps()
     const rows: { fixture: string; metrics: EvalMetrics }[] = []
 
     for (const fx of FIXTURES) {
       const source = await fx.load()
-      const result = await distill(source, deps)
+      let result: EvalDistillResult
+      if (deps) {
+        const fresh = await distill(source, deps)
+        saveRun(fx.key, fresh)
+        result = fresh
+      } else result = loadRun(fx.key)
       const metrics = computeMetrics(source.text, result, golden[fx.key])
       rows.push({ fixture: fx.key, metrics })
 
