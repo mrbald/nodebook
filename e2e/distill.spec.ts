@@ -398,6 +398,15 @@ test('a staged note opens READ-ONLY before merge, and its citation shows the quo
 /** A distilled concept note this run staged — never the book itself. */
 const someConcept = (id: string): string => stagedNames(id).find((n) => n !== 'on-government')!
 
+/** Open a note from the sidebar by its EXACT name — after a merge two notes
+ *  share a prefix ("Faction" and "Faction (on-government)"), so a substring
+ *  match would open whichever the tree happened to list first. */
+const openNote = async (name: string): Promise<void> => {
+  if (await page.locator('.graph-close').count()) await page.locator('.graph-close').click()
+  const exact = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+  await page.locator('.tree-name').filter({ hasText: exact }).first().click()
+}
+
 test('MERGE beside a note you already have: "Name (Book)", with the links rewritten', async () => {
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
   const id = runs[0].id
@@ -491,6 +500,36 @@ test('ticking "same as the existing note" collapses the two into one dot', async
   await page.locator('.graph-node', { hasText: clashName }).first().click()
   await expect(page.locator('.graph-insp-aliases')).toContainText(`${clashName} (on-government)`)
   await page.locator('.graph-close').click()
+
+  // Reading either note now shows what the other says. Your note has no
+  // citations of its own, so everything under Sources came from the twin and
+  // says so — and neither file was written to.
+  const twinName = `${clashName} (on-government)`
+  await openNote(clashName)
+  await expect(page.locator('.backlinks .same-as-name')).toHaveText(twinName)
+  await expect(page.locator('.backlinks .same-as-quote').first()).toBeVisible()
+
+  const fromTwin = page.locator('.backlinks .source-cite', { hasText: `from ${twinName}` })
+  await expect(fromTwin.first()).toBeVisible()
+  const quoted = (await fromTwin.first().locator('.source-quote').innerText())
+    .replace(/[“”…]/g, '')
+    .trim()
+  // Clicking it does what the note's own citation does: the book, at the quote.
+  await fromTwin.first().click()
+  await expect(page.locator('.cm-content')).toContainText(quoted.slice(0, 30))
+  await expect(page.locator('.cm-selectionBackground').first()).toBeVisible()
+
+  // The other direction reads the same, from the note that carries the field.
+  await openNote(twinName)
+  await expect(page.locator('.backlinks .same-as-name')).toHaveText(clashName)
+
+  // A note nobody merged has no such section.
+  await openNote('welcome')
+  await expect(page.locator('.backlinks .same-as')).toHaveCount(0)
+
+  expect(readFileSync(join(realpathSync(vaultDir), `${clashName}.md`), 'utf8')).not.toContain(
+    'same_as'
+  )
 
   await page.evaluate((r) => window.nodebook.distillUnmerge(r), id)
 })
