@@ -352,6 +352,9 @@ export interface DistillRunInfo {
    *  empty) for a run too small to group, and for runs distilled before
    *  themes existed. */
   themes?: string[]
+  /** What the run was asked to focus on, in the user's own words. Absent when
+   *  no focus was given — which is every run made before a focus could be. */
+  focus?: string
 }
 
 /** What a run will cost, worked out from the document before it starts. */

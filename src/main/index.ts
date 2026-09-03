@@ -22,6 +22,7 @@ import { overlayGraph, noteName } from './graph'
 import { noteVector, sameAsCandidatesYielding, type NoteVec } from './distill/sameAs'
 import { chunkMarkdown, embedText } from './rag/chunk'
 import { distill, probeChat, estimateDistill, type DistillEmbedder } from './distill/run'
+import { normalizeFocus } from './distill/extract'
 import { StagedRunStore } from './distill/staged'
 import { convertDocument } from './distill/convert'
 import { convertSource, originalPathOf } from './distill/sources'
@@ -546,7 +547,7 @@ function distillBudget(): { inputBudget: number; windowSize: number; maxCalls: n
 async function runDistillPipeline(
   runId: string,
   source: RunSource,
-  opts: { resume: boolean }
+  opts: { resume: boolean; focus?: string }
 ): Promise<DistillRunResult> {
   const root = vaultRoot
   const runs = distillRuns
@@ -571,12 +572,13 @@ async function runDistillPipeline(
       )
     }
     if (!opts.resume)
-      beginRun(root, runId, source, { provider: cfg.kind, model: cfg.model ?? '' })
+      beginRun(root, runId, source, { provider: cfg.kind, model: cfg.model ?? '' }, opts.focus)
     const result = await distill(
       source,
       { embedder: rendererEmbedder(runId), chat },
       {
         ...distillBudget(),
+        focus: opts.focus,
         signal: ctrl.signal,
         onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p),
         checkpoint: checkpointStore(root, runId)
@@ -595,7 +597,8 @@ async function runDistillPipeline(
         droppedNotFound: why.notFound,
         droppedAmbiguous: why.ambiguous
       },
-      result.themes
+      result.themes,
+      opts.focus
     )
     return { runId, stats: result.stats }
   } finally {
@@ -969,38 +972,57 @@ function registerIpc(): void {
 
   // What a run would cost, before committing to it: the document is converted
   // (once — the run reuses this copy) and handed to the same pure planner.
-  ipcMain.handle('distill:estimate', async (_e, docId: string): Promise<DistillEstimate> => {
-    const filePath = pickedDocs.get(docId)
-    if (!filePath) throw new Error('Unknown document — pick it again.')
-    return estimateDistill((await convertPicked(filePath)).text, distillBudget())
-  })
+  ipcMain.handle(
+    'distill:estimate',
+    async (_e, docId: string, focus?: string): Promise<DistillEstimate> => {
+      const filePath = pickedDocs.get(docId)
+      if (!filePath) throw new Error('Unknown document — pick it again.')
+      // The focus rides in every prompt, so it costs window room — the estimate
+      // has to be made against the same budget the run will have.
+      return estimateDistill((await convertPicked(filePath)).text, {
+        ...distillBudget(),
+        focus: normalizeFocus(focus)
+      })
+    }
+  )
 
   // Run the distill pipeline on a document → a staged, cited run-artifact. The
   // chunks are embedded via the renderer bridge; extraction uses the chat model;
   // output lands in the run's own db (never the canonical index).
-  ipcMain.handle('distill:run', async (_e, docId: string): Promise<DistillRunResult> => {
-    if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
-    if (activeRunId !== null)
-      throw new Error('A document is already being distilled — wait for it to finish or cancel it.')
-    const filePath = pickedDocs.get(docId)
-    if (!filePath) throw new Error('Unknown document — pick it again.')
-    // Claim the single run slot and the id BEFORE the first await, so two
-    // clicks in the same tick can't both get past the guard. One document, one
-    // run: the id is consumed here.
-    pickedDocs.delete(docId)
-    const runId = uniqueRunId(distillRunId(filePath), [
-      ...distillRuns.list(),
-      ...RESERVED_RUN_IDS
-    ])
-    activeRunId = runId
-    try {
-      // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
-      // rest of the pipeline is format-agnostic.
-      return await runDistillPipeline(runId, await convertPicked(filePath), { resume: false })
-    } finally {
-      activeRunId = null
+  ipcMain.handle(
+    'distill:run',
+    async (_e, docId: string, focus?: string): Promise<DistillRunResult> => {
+      if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
+      if (activeRunId !== null)
+        throw new Error(
+          'A document is already being distilled — wait for it to finish or cancel it.'
+        )
+      const filePath = pickedDocs.get(docId)
+      if (!filePath) throw new Error('Unknown document — pick it again.')
+      // Normalised (and capped) here, before the id is spent: an over-long
+      // focus must cost the user nothing but the message that says so.
+      const asked = normalizeFocus(focus)
+      // Claim the single run slot and the id BEFORE the first await, so two
+      // clicks in the same tick can't both get past the guard. One document, one
+      // run: the id is consumed here.
+      pickedDocs.delete(docId)
+      const runId = uniqueRunId(distillRunId(filePath), [
+        ...distillRuns.list(),
+        ...RESERVED_RUN_IDS
+      ])
+      activeRunId = runId
+      try {
+        // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
+        // rest of the pipeline is format-agnostic.
+        return await runDistillPipeline(runId, await convertPicked(filePath), {
+          resume: false,
+          focus: asked || undefined
+        })
+      } finally {
+        activeRunId = null
+      }
     }
-  })
+  )
 
   // Continue a run that was cancelled or interrupted. Everything it needs is in
   // its own folder — the converted text and the windows already extracted — so
@@ -1014,7 +1036,12 @@ function registerIpc(): void {
     if (!source) throw new Error("That run can't be resumed — its saved text is missing.")
     activeRunId = runId
     try {
-      return await runDistillPipeline(runId, source, { resume: true })
+      // The focus was asked for once, when the run started; `run.json` is where
+      // it has been waiting, so a resume reads the document the same way.
+      return await runDistillPipeline(runId, source, {
+        resume: true,
+        focus: readRunJson(vaultRoot, runId)?.focus
+      })
     } finally {
       activeRunId = null
     }
@@ -1082,6 +1109,7 @@ function registerIpc(): void {
           id,
           notes: meta?.notes ?? 0,
           themes: meta?.themes ?? [],
+          ...(meta?.focus ? { focus: meta.focus } : {}),
           merged: readMergeManifest(root, id)?.complete === true,
           unfinished: isUnfinishedRun(root, id)
         })
