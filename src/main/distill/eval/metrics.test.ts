@@ -153,7 +153,7 @@ describe('computeMetrics — golden set', () => {
     expect(m.edgeRecall).toBeCloseTo(1 / 3)
   })
 
-  it('an edge to a non-golden target lowers precision without raising recall', () => {
+  it('an edge to a non-golden target is not judged: precision and recall unchanged', () => {
     const notes = [
       note('Faction', [
         { key: 'about', target: 'Judicial Review' },
@@ -162,12 +162,39 @@ describe('computeMetrics — golden set', () => {
       note('Judicial Review', [])
     ]
     const m = computeMetrics('x', result(notes), golden)
-    expect(m.edgePrecision).toBeCloseTo(0.5) // 1 of 2 predicted edges resolves correctly
+    // The golden has no opinion on "Nothing To Do With Golden", so only the
+    // Faction–Judicial Review edge is judged — and it is right.
+    expect(m.edgesJudged).toBe(1)
+    expect(m.edgePrecision).toBeCloseTo(1)
+    expect(m.edgeRecall).toBeCloseTo(1 / 3)
   })
 
-  it('scores 0 precision (not 1) when nothing was predicted', () => {
+  it('an edge between two golden concepts the golden does not pair counts against precision', () => {
+    const notes = [
+      note('Faction', [
+        { key: 'about', target: 'Judicial Review' }, // a golden edge
+        { key: 'about', target: 'Unmentioned Concept' } // both golden, not paired
+      ]),
+      note('Judicial Review', []),
+      note('Unmentioned Concept', [])
+    ]
+    const m = computeMetrics('x', result(notes), golden)
+    expect(m.edgesJudged).toBe(2)
+    expect(m.edgePrecision).toBeCloseTo(0.5)
+  })
+
+  it('scores 0 precision (not 1) when nothing was judged', () => {
     const m = computeMetrics('x', result([note('Solo', [])]), golden)
+    expect(m.edgesJudged).toBe(0)
     expect(m.edgePrecision).toBe(0)
+    // Predicted, but outside the golden entirely: still nothing judged.
+    const outside = computeMetrics(
+      'x',
+      result([note('Alpha', [{ key: 'about', target: 'Beta' }]), note('Beta', [])]),
+      golden
+    )
+    expect(outside.edgesJudged).toBe(0)
+    expect(outside.edgePrecision).toBe(0)
   })
 
   it('scores vacuous 1 recall/precision-adjacent cases when the golden set is empty', () => {

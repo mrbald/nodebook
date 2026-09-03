@@ -357,8 +357,48 @@ duplicate titles and at most one dropped quote. **`conceptRecall`** rises by
 fivefold. **`edgePrecision`** stays near 0.01, and that is a fact about the
 golden, not the model: it lists a few dozen edges per fixture while a model
 writes about three per note, so nearly every edge written is one the golden
-never listed. It is the metric to redefine (or the golden to grow) before it
-is read as a quality signal.
+never listed. The metric was redefined the next day — see below — and the
+same three runs re-scored under the new rule.
+
+### `edgePrecision` redefined — judged edges only (2026-09-03)
+
+The old rule counted every predicted edge in the denominator, so an edge
+between two concepts the golden never listed counted as wrong. A golden of
+twenty-odd concepts has no opinion on most of a book, and a model that links
+its notes three times each was scored against that silence. The new rule
+scores only the edges the golden can judge:
+
+- **`edgePrecision`** = of the predicted edges whose both endpoints resolve to
+  two different golden concepts, the share that is a golden edge. An edge with
+  an endpoint outside the golden is neither a hit nor a miss. Nothing judged
+  scores 0, not 1.
+- **`edgesJudged`** (new column) = how many predicted edges that was. A
+  precision figure over 5 edges and one over 50 are not the same evidence, so
+  the count sits beside it.
+- Still a lower bound: the golden's edge list is a curated sample, not every
+  true relation among its concepts. A real relation it happens not to list is
+  scored as wrong. Growing the golden's edge list raises the ceiling; the
+  concept list can stay as it is.
+
+Tables dated before 2026-09-03 use the old rule. Every eval run now saves what
+it scored (`scripts/out/run-<provider>-<fixture>.json`), and the same command
+with `DISTILL_EVAL_REPLAY=1` re-scores those files instead of running the
+pipeline, so the next metric change can be read against a real model's output
+without paying for the model again.
+
+Stub, re-scored (the pipeline is unchanged; only the last three columns moved):
+
+| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgesJudged | edgeRecall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| book-en | 10.34 | 1.00 | 0.00 | 0.00 | 339.00 | 7.44 | 0.00 | 1.00 | 0.00 | 0.32 | 0.17 | 6.00 | 0.05 |
+| paper.pdf | 14.00 | 1.00 | 0.00 | 0.00 | 225.00 | 6.85 | 0.00 | 1.00 | 0.00 | 0.29 | 0.00 | 2.00 | 0.00 |
+| chapter-ru.md | 25.20 | 1.00 | 0.00 | 0.00 | 38.00 | 3.20 | 0.00 | 1.00 | 0.00 | 0.26 | 0.60 | 5.00 | 0.14 |
+
+The stub's regex links land on golden pairs a handful of times per fixture —
+too few judged edges to mean anything, which is the point of printing the
+count.
+
+<!-- REAL-PROVIDER-RESCORE -->
 
 ### Baseline — Phase 1 (2026-09-02, cluster-sampling pipeline)
 
