@@ -209,11 +209,23 @@ export function beginRun(
   return dir
 }
 
+/** A hand-edited or half-written run file can hold anything, so a `focus` that
+ *  is not a string is DROPPED rather than passed on: a resume that took it back
+ *  would fail with a type error instead of simply having no focus, and the runs
+ *  list would render whatever it found. */
+function withCheckedFocus<T extends { focus?: unknown }>(m: T): T {
+  if (typeof m.focus === 'string' && m.focus) return m
+  const out = { ...m }
+  delete out.focus
+  return out
+}
+
 /** A run's `run.json`, or null when it predates the start marker / is unreadable. */
 export function readRunJson(vaultRoot: string, runId: string): RunJson | null {
   try {
     const m = JSON.parse(readFileSync(join(runDir(vaultRoot, runId), RUN_FILE), 'utf8')) as RunJson
-    return typeof m.file === 'string' && typeof m.createdAt === 'string' ? m : null
+    if (typeof m.file !== 'string' || typeof m.createdAt !== 'string') return null
+    return withCheckedFocus(m)
   } catch {
     return null
   }
@@ -471,7 +483,8 @@ export function readRunMeta(vaultRoot: string, runId: string): RunMeta | null {
   try {
     const raw = readFileSync(join(runDir(vaultRoot, runId), 'meta.json'), 'utf8')
     const m = JSON.parse(raw) as RunMeta
-    return typeof m.source === 'string' && typeof m.notes === 'number' ? m : null
+    if (typeof m.source !== 'string' || typeof m.notes !== 'number') return null
+    return withCheckedFocus(m)
   } catch {
     return null
   }

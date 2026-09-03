@@ -81,12 +81,18 @@ test.afterAll(async () => {
   await app?.close()
 })
 
-/** The distill flow asks what to focus on before it spends anything. These
- *  tests are not about the focus, so they confirm the empty field — which is
- *  the "no focus" answer, and the reading these tests have always made. */
-async function skipFocusDialog(): Promise<void> {
+/** The fixed words behind the "Timeline" lens (`FOCUS_LENSES` in App.tsx). This
+ *  story starts its run WITH a focus, because a focus is asked once and has to
+ *  survive the pause: the paused row can only be showing it from the run's start
+ *  marker (`run.json`), since `meta.json` is not written until a run finishes. */
+const FOCUS = 'what happens, in order: events, dates, and what led to what'
+
+/** Answer the dialog the distill flow opens, choosing the Timeline lens. */
+async function chooseFocus(): Promise<void> {
   const modal = page.locator('.modal', { hasText: 'What should the notes focus on?' })
   await expect(modal).toBeVisible({ timeout: 15_000 })
+  await modal.getByRole('button', { name: 'Timeline' }).click()
+  await expect(modal.locator('.modal-input')).toHaveValue(FOCUS)
   await modal.getByRole('button', { name: 'Distill' }).click()
 }
 
@@ -101,7 +107,7 @@ test('Cancel stops a run in flight: it is not an error, and the run is paused', 
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
   })
-  await skipFocusDialog()
+  await chooseFocus()
 
   const toast = page.locator('.distill-toast')
   await expect(toast).toBeVisible({ timeout: 15_000 })
@@ -119,10 +125,13 @@ test('Cancel stops a run in flight: it is not an error, and the run is paused', 
   // carry on. Nothing is staged as notes yet — that only happens on completion.
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
   expect(runs).toEqual([
-    { id: 'on-government', notes: 0, themes: [], merged: false, unfinished: true }
+    { id: 'on-government', notes: 0, themes: [], focus: FOCUS, merged: false, unfinished: true }
   ])
   await expect(page.locator('.run-item-meta')).toContainText('paused')
   await expect(page.locator('.run-item-resume')).toBeVisible()
+  // …and it says which reading is paused, which is the thing you need before
+  // deciding to resume it.
+  await expect(page.locator('.run-item-focus')).toContainText(FOCUS)
 })
 
 test('Resume carries the paused run to the end, and stages its notes', async () => {
@@ -138,8 +147,11 @@ test('Resume carries the paused run to the end, and stages its notes', async () 
   await expect(page.locator('.error-banner')).toHaveCount(0)
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
   expect(runs).toHaveLength(1)
-  expect(runs[0]).toMatchObject({ id: 'on-government', unfinished: false })
+  // The same focus, now out of `meta.json`: the resume read it back from the
+  // start marker and carried on reading the document the same way.
+  expect(runs[0]).toMatchObject({ id: 'on-government', unfinished: false, focus: FOCUS })
   expect(runs[0].notes).toBeGreaterThan(0)
+  await expect(page.locator('.run-item-focus')).toContainText(FOCUS)
   await expect(page.locator('.run-item-resume')).toHaveCount(0)
 })
 

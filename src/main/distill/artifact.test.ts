@@ -647,6 +647,19 @@ describe('a run in flight (start marker, checkpoint, resume)', () => {
     expect(readRunSource(v, 'r1')).toEqual(src)
   })
 
+  it('drops a focus that is not a string, rather than handing it on', () => {
+    // A hand-edited or half-written run file: a resume that took `12` back would
+    // fail with a type error instead of simply reading without a focus.
+    const v = tmpVault()
+    beginRun(v, 'r1', src)
+    const file = join(runDir(v, 'r1'), 'run.json')
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    writeFileSync(file, JSON.stringify({ ...raw, focus: 12 }))
+    const run = readRunJson(v, 'r1')
+    expect(run?.file).toBe('Federalist.md') // still a readable run
+    expect(run?.focus).toBeUndefined()
+  })
+
   it('is "unfinished" from the start marker until meta.json exists', () => {
     const v = tmpVault()
     beginRun(v, 'r1', src)

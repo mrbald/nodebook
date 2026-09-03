@@ -1105,11 +1105,15 @@ function registerIpc(): void {
       // things in, and one unreadable run must not take the whole sidebar down.
       try {
         const meta = readRunMeta(root, id)
+        // `meta.json` only exists once a run has FINISHED, so a paused run's
+        // focus comes from the start marker instead — which is exactly the
+        // moment the user needs to know which reading they would resume.
+        const focus = meta?.focus ?? readRunJson(root, id)?.focus
         out.push({
           id,
           notes: meta?.notes ?? 0,
           themes: meta?.themes ?? [],
-          ...(meta?.focus ? { focus: meta.focus } : {}),
+          ...(focus ? { focus } : {}),
           merged: readMergeManifest(root, id)?.complete === true,
           unfinished: isUnfinishedRun(root, id)
         })
