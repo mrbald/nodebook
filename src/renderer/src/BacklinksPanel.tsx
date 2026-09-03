@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MarkdownFile, Backlink, Outbound } from '@shared/types'
 import { parseCitations, type NoteCitation, type NoteDocument } from './citations'
 import { noteGist, quoteLine, unionCitations, type NoteGist } from './twins'
@@ -41,6 +41,8 @@ export function BacklinksPanel({
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [outbound, setOutbound] = useState<Outbound[]>([])
   const [twins, setTwins] = useState<TwinView[]>([])
+  /** The note the current `twins` were loaded for (see the effect below). */
+  const twinsFor = useRef<string | null>(null)
 
   useEffect(() => {
     let ignore = false
@@ -80,7 +82,14 @@ export function BacklinksPanel({
   // will not read is skipped, never an error.
   useEffect(() => {
     let ignore = false
-    setTwins([])
+    // Clear only on a note switch: the previous note's twins must not linger
+    // under the new one. A reload for the same note (the index changed — every
+    // autosave does that) keeps the section up until the fresh answer lands,
+    // instead of blinking it out at each pause in typing.
+    if (twinsFor.current !== active.path) {
+      twinsFor.current = active.path
+      setTwins([])
+    }
 
     void window.nodebook
       .sameAs(active.path)
@@ -120,10 +129,20 @@ export function BacklinksPanel({
   // A `same_as` that landed on a twin has its own section below, so it is not
   // repeated among the ordinary links. One that resolved to nothing — a typo, a
   // note not written yet — stays listed, so the broken link is still visible.
+  // The row's target is matched against the twins the MAP resolved (by name, or
+  // by path suffix for a `[[folder/Name]]` link), not re-resolved here: with two
+  // notes of one name the map prefers the linking note's folder, and this
+  // panel's own name-first lookup could pick the other one and list the same
+  // fact twice.
   const twinPaths = new Set(twins.map((t) => t.path))
-  const namesATwin = (name: string): boolean => {
-    const f = resolveTarget(name)
-    return f !== undefined && twinPaths.has(f.path)
+  const namesATwin = (object: string): boolean => {
+    const key = object
+      .replace(/\\/g, '/')
+      .replace(/^\.?\//, '')
+      .replace(/\.md$/i, '')
+    return twins.some(
+      (t) => t.name === key || t.path.replace(/\\/g, '/').replace(/\.md$/i, '').endsWith(`/${key}`)
+    )
   }
   const shownOutbound = outbound.filter(
     (o) => !(o.relation === 'same_as' && namesATwin(o.object))

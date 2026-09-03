@@ -40,6 +40,17 @@ describe('noteGist', () => {
     expect(gist.quotes).toEqual([])
   })
 
+  it('a field written inside a quote block is a field, not one of the quotes', () => {
+    const gist = noteGist('# T\n\n> source:: [[book]]\n\n> A real quote.\n')
+    expect(gist.quotes).toEqual(['A real quote.'])
+    expect(gist.summary).toBe('')
+  })
+
+  it('list items join the summary as words, their markers gone', () => {
+    const gist = noteGist('# Theme\n\n- Faction\n- Liberty\n1. Property\n\nProse after.\n')
+    expect(gist.summary).toBe('Faction Liberty Property Prose after.')
+  })
+
   it('a note with only a title says nothing', () => {
     expect(noteGist('---\nkind: note\n---\n\n# Alone\n')).toEqual({ summary: '', quotes: [] })
   })

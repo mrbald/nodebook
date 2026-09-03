@@ -33,6 +33,8 @@ const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n?/
 /** A line-level `key:: value` field — the same shape `harvest` reads. */
 const FIELD_RE = /^[ \t]*[A-Za-z][\w -]*?\s*::/
 const WIKILINK_RE = /\[\[([^[\]]+)\]\]/g
+/** A bullet or numbered-list marker at the start of a line. */
+const LIST_MARKER_RE = /^(?:[-*+]|\d+[.)])\s+/
 
 /** `[[X|Y]]` reads as Y and `[[X]]` as X — a reader wants the words, not the
  *  link syntax, and the panel has nowhere to navigate to anyway. */
@@ -66,11 +68,17 @@ export function noteGist(content: string): NoteGist {
     }
     if (line.startsWith('>')) {
       endPara()
-      const quote = quoteLine(flattenWikilinks(line.replace(/^>\s?/, '')))
+      const inner = line.replace(/^>\s?/, '')
+      // `> key:: [[x]]` is a field written inside a quote block — harvest reads
+      // it as a field, so the panel must not read it as one of the quotes.
+      if (FIELD_RE.test(inner)) continue
+      const quote = quoteLine(flattenWikilinks(inner))
       if (quote) quotes.push(quote)
       continue
     }
-    para.push(line)
+    // A list item reads as prose once its marker is gone: a theme note's member
+    // list, or a hand-written bullet list, joins the summary as words.
+    para.push(line.replace(LIST_MARKER_RE, ''))
   }
   endPara()
 
