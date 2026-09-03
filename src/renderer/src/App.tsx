@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_EMBED_MODEL,
+  DISTILL_FOCUS_MAX,
   type DistillEstimate,
   type DistillMergePlan,
   type DistillRunInfo,
@@ -23,7 +24,7 @@ import { ConfigEditor } from './editor/ConfigEditor'
 import { getTheme } from './editor/themes'
 import { FileTree, type ContextTarget } from './FileTree'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
-import { Prompt } from './Prompt'
+import { Prompt, type PromptPreset } from './Prompt'
 import { Confirm } from './Confirm'
 import { MergeDialog } from './MergeDialog'
 import { StagedNoteView } from './StagedNoteView'
@@ -48,6 +49,23 @@ const THEME_OPTIONS = [
   { value: 'system', label: 'System' },
   { value: 'dark', label: 'Dark' },
   { value: 'light', label: 'Light' }
+]
+
+/** Three ready-made ways to read a document. They are fixed strings, so a lens
+ *  is reproducible: the same words reach the model every time, and a run's
+ *  `meta.json` records which reading it was. The field stays editable — these
+ *  are a starting point, not a menu. */
+const FOCUS_LENSES = [
+  {
+    label: 'Arguments',
+    value:
+      'the arguments the author makes, the evidence given for each, and the objections answered'
+  },
+  { label: 'Timeline', value: 'what happens, in order: events, dates, and what led to what' },
+  {
+    label: 'People',
+    value: 'the people, places and organisations named, and how they are connected'
+  }
 ]
 
 /** Parse an FTS snippet's `<mark>` markers into safe React nodes (no innerHTML). */
@@ -135,7 +153,11 @@ export default function App() {
   const [prompt, setPrompt] = useState<{
     title: string
     initialValue?: string
+    placeholder?: string
     confirmLabel?: string
+    presets?: PromptPreset[]
+    maxLength?: number
+    allowEmpty?: boolean
     onConfirm: (value: string) => void
   } | null>(null)
   const [confirm, setConfirm] = useState<{
@@ -860,31 +882,56 @@ export default function App() {
     [refreshRuns]
   )
 
+  // Price the run, warn if it needs more steps than the budget allows, then go.
+  // The focus is passed to both halves so the estimate is made against the same
+  // prompt the run will send.
+  const estimateThenRun = useCallback(
+    async (docId: string, focus: string) => {
+      // The estimate converts the document; the run reuses that same copy, so
+      // this costs the conversion once and the toast can say what is coming.
+      const est = await window.nodebook.distillEstimate(docId, focus).catch(() => null)
+      setDistillEstimate(est)
+      const go = (): Promise<void> =>
+        startDistilling(() => window.nodebook.distillRun(docId, focus))
+      // Reading a long document in full can cost more calls than the budget
+      // allows. That is the user's money and quota, so ask BEFORE spending it —
+      // and say exactly what the cheaper answer reads.
+      if (est && est.totalWindows > est.maxCalls) {
+        setConfirm({
+          message: `This document needs ${est.totalWindows} steps; your budget is ${est.maxCalls}. Read ${est.maxCalls} evenly spaced steps (about ${Math.round(est.coverage * 100)}% of the text), or raise [distill] maxCalls in Settings.`,
+          confirmLabel: `Read ${est.maxCalls} steps`,
+          onConfirm: () => {
+            setConfirm(null)
+            void go()
+          }
+        })
+        return
+      }
+      await go()
+    },
+    [startDistilling]
+  )
+
   const runDistill = useCallback(async () => {
     // main hands back an opaque id for the picked document, never a path.
     const doc = await window.nodebook.distillPick()
     if (!doc) return
-    // The estimate converts the document; the run reuses that same copy, so
-    // this costs the conversion once and the toast can say what is coming.
-    const est = await window.nodebook.distillEstimate(doc.id).catch(() => null)
-    setDistillEstimate(est)
-    const go = (): Promise<void> => startDistilling(() => window.nodebook.distillRun(doc.id))
-    // Reading a long document in full can cost more calls than the budget
-    // allows. That is the user's money and quota, so ask BEFORE spending it —
-    // and say exactly what the cheaper answer reads.
-    if (est && est.totalWindows > est.maxCalls) {
-      setConfirm({
-        message: `This document needs ${est.totalWindows} steps; your budget is ${est.maxCalls}. Read ${est.maxCalls} evenly spaced steps (about ${Math.round(est.coverage * 100)}% of the text), or raise [distill] maxCalls in Settings.`,
-        confirmLabel: `Read ${est.maxCalls} steps`,
-        onConfirm: () => {
-          setConfirm(null)
-          void go()
-        }
-      })
-      return
-    }
-    await go()
-  }, [startDistilling])
+    // Ask what this reading is for BEFORE the estimate: the focus rides in
+    // every prompt, so it is part of what the run will cost. An empty field is
+    // an answer — no focus, and the run reads as it always did.
+    setPrompt({
+      title: 'What should the notes focus on? (optional)',
+      placeholder: 'e.g. the arguments and the evidence for them',
+      confirmLabel: 'Distill',
+      presets: FOCUS_LENSES,
+      maxLength: DISTILL_FOCUS_MAX,
+      allowEmpty: true,
+      onConfirm: (focus) => {
+        setPrompt(null)
+        void estimateThenRun(doc.id, focus)
+      }
+    })
+  }, [estimateThenRun])
 
   // Carry on a run that was cancelled or interrupted, from its own checkpoint.
   const resumeStagedRun = useCallback(
@@ -1147,6 +1194,13 @@ export default function App() {
                 >
                   ✕
                 </button>
+                {/* What this reading was asked to look for — how two runs of
+                    one book are told apart before their themes are read. */}
+                {r.focus && (
+                  <span className="run-item-focus" title={r.focus}>
+                    Focus: {r.focus}
+                  </span>
+                )}
                 {/* What the run turned out to be about — its themes, on their
                     own line under the run (see the wrapping rule in the CSS). */}
                 {(r.themes?.length ?? 0) > 0 && (
@@ -1454,7 +1508,11 @@ export default function App() {
         <Prompt
           title={prompt.title}
           initialValue={prompt.initialValue}
+          placeholder={prompt.placeholder}
           confirmLabel={prompt.confirmLabel}
+          presets={prompt.presets}
+          maxLength={prompt.maxLength}
+          allowEmpty={prompt.allowEmpty}
           onConfirm={prompt.onConfirm}
           onCancel={() => setPrompt(null)}
         />

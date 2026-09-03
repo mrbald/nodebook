@@ -180,6 +180,11 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
   })
+  // A run is asked what to focus on before it costs anything. Confirming the
+  // empty field means no focus, and the reading is exactly what it always was.
+  const focusModal = page.locator('.modal', { hasText: 'What should the notes focus on?' })
+  await expect(focusModal).toBeVisible()
+  await focusModal.getByRole('button', { name: 'Distill' }).click()
   // The run map renders via the reused GraphView, with nodes + a source edge.
   await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('.graph-node').first()).toBeVisible()
@@ -196,6 +201,10 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(page.locator('.distill-coverage-banner')).toContainText(/Staged \d+ notes?/)
   await expect(page.locator('.distill-coverage-banner')).toContainText('Merge')
   await page.locator('.distill-coverage-close').click()
+
+  // Nothing was asked for, so nothing is recorded — an old run reads the same.
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(runs.every((r) => r.focus === undefined)).toBe(true)
 })
 
 test('a closed run map is reachable again from the sidebar "Distilled runs" list', async () => {
@@ -589,4 +598,33 @@ test('a legacy .nodebook/distill run migrates to .distill, and a lost run.db reb
   expect(migrated.nodes.length).toBeGreaterThan(1)
   const rebuilt = await page.evaluate((r) => window.nodebook.distillGraph(r), id)
   expect(rebuilt.nodes.length).toBeGreaterThan(1)
+})
+
+test('a run can be told what to focus on, and the runs list says what it was', async () => {
+  // The fixed words behind the "Timeline" lens — a lens is reproducible because
+  // it is a string, not a paraphrase (see FOCUS_LENSES in App.tsx).
+  const TIMELINE = 'what happens, in order: events, dates, and what led to what'
+  if (await page.locator('.graph-close').count()) await page.locator('.graph-close').click()
+  await app.evaluate(async ({ dialog }, p) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] })
+  }, bookPath)
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
+  })
+
+  const modal = page.locator('.modal', { hasText: 'What should the notes focus on?' })
+  await expect(modal).toBeVisible()
+  await modal.getByRole('button', { name: 'Timeline' }).click()
+  await expect(modal.locator('.modal-input')).toHaveValue(TIMELINE)
+  await modal.getByRole('button', { name: 'Distill' }).click()
+
+  await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
+  // The run remembers what it was read for, so two runs of one book can be
+  // told apart in the sidebar.
+  const focused = await page.evaluate(
+    async (t) => (await window.nodebook.distillListRuns()).filter((r) => r.focus === t),
+    TIMELINE
+  )
+  expect(focused).toHaveLength(1)
+  await expect(page.locator('.run-item-focus').first()).toContainText(TIMELINE)
 })

@@ -75,6 +75,15 @@ test.afterAll(async () => {
   await app?.close()
 })
 
+/** The distill flow asks what to focus on before it spends anything. These
+ *  tests are not about the focus, so they confirm the empty field — which is
+ *  the "no focus" answer, and the reading these tests have always made. */
+async function skipFocusDialog(): Promise<void> {
+  const modal = page.locator('.modal', { hasText: 'What should the notes focus on?' })
+  await expect(modal).toBeVisible({ timeout: 15_000 })
+  await modal.getByRole('button', { name: 'Distill' }).click()
+}
+
 test('Merge proposes a vault note that means the same as a staged one, and a tick links them', async () => {
   // Talk on: the vault's note vectors are what the proposal is matched against.
   await page.locator('.talk-cta').click()
@@ -88,6 +97,7 @@ test('Merge proposes a vault note that means the same as a staged one, and a tic
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
   })
+  await skipFocusDialog()
   await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('.distill-coverage-banner')).toBeVisible()
   await page.locator('.distill-coverage-close').click()
@@ -149,6 +159,7 @@ test('a tick means the twin that was shown: a clash appearing under the dialog d
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
   })
+  await skipFocusDialog()
   await expect(page.locator('.distill-coverage-banner')).toBeVisible({ timeout: 15000 })
   await page.locator('.distill-coverage-close').click()
   // The new run is the one the previous test did not make (both are unmerged now).

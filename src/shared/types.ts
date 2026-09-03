@@ -7,6 +7,12 @@
  *  copy of this string once drifted stale. */
 export const DEFAULT_EMBED_MODEL = 'Xenova/multilingual-e5-base'
 
+/** How long a distill run's focus may be, in characters. Long enough for a
+ *  sentence or two, short enough that repeating it in every model call costs
+ *  nothing worth measuring. Shared because the field that types it and the
+ *  main-side check that enforces it must agree (`main/distill/extract.ts`). */
+export const DISTILL_FOCUS_MAX = 300
+
 /** A markdown file discovered inside the open vault. */
 export interface MarkdownFile {
   /** Absolute path on disk. */

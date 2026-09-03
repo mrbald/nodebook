@@ -81,6 +81,15 @@ test.afterAll(async () => {
   await app?.close()
 })
 
+/** The distill flow asks what to focus on before it spends anything. These
+ *  tests are not about the focus, so they confirm the empty field — which is
+ *  the "no focus" answer, and the reading these tests have always made. */
+async function skipFocusDialog(): Promise<void> {
+  const modal = page.locator('.modal', { hasText: 'What should the notes focus on?' })
+  await expect(modal).toBeVisible({ timeout: 15_000 })
+  await modal.getByRole('button', { name: 'Distill' }).click()
+}
+
 test('Cancel stops a run in flight: it is not an error, and the run is paused', async () => {
   // The stub chat deliberately stalls (probe + one extraction call), so this
   // test needs more than the suite's fail-fast ceiling.
@@ -92,6 +101,7 @@ test('Cancel stops a run in flight: it is not an error, and the run is paused', 
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
   })
+  await skipFocusDialog()
 
   const toast = page.locator('.distill-toast')
   await expect(toast).toBeVisible({ timeout: 15_000 })
