@@ -398,7 +398,27 @@ The stub's regex links land on golden pairs a handful of times per fixture —
 too few judged edges to mean anything, which is the point of printing the
 count.
 
-<!-- REAL-PROVIDER-RESCORE -->
+Real provider, run again under the new rule — `DISTILL_EVAL_PROVIDER=claude-cli
+DISTILL_EVAL_MODEL=sonnet npm run eval:distill`, 23 minutes, 2026-09-03:
+
+| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgesJudged | edgeRecall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| book-en | 22.17 | 1.00 | 0.00 | 0.00 | 9.00 | 2.80 | 0.00 | 1.00 | 0.00 | 0.27 | 0.50 | 6.00 | 0.14 |
+| paper.pdf | 21.65 | 1.00 | 0.00 | 0.00 | 9.00 | 2.89 | 0.00 | 1.00 | 0.01 | 0.43 | 0.50 | 4.00 | 0.09 |
+| chapter-ru.md | 22.68 | 1.00 | 3.00 | 0.00 | 0.00 | 2.44 | 0.04 | 1.00 | 0.00 | 0.26 | 0.75 | 4.00 | 0.14 |
+
+Two things to read off it. First, of the edges the golden can judge, the
+model gets half to three quarters right — a lower bound, as said above, and
+still only four to six judged edges per fixture, because a golden of twenty
+concepts meets a run of a hundred notes at a few pairs. The number to grow is
+`edgesJudged`, by listing more golden pairs among the concepts already there.
+Second, this is a fresh run of the same model over the same fixtures as the
+table above, and it is not the same run: `conceptRecall` on `book-en` came
+out 0.27 where the earlier run had 0.45, and dedup merged 9 notes where it
+had merged 2. Nothing in the pipeline between the two runs touched
+extraction; that spread is the model's own. One run is one sample — compare
+runs of the same fixture before reading a difference of a few hundredths as
+a change in the pipeline.
 
 ### Baseline — Phase 1 (2026-09-02, cluster-sampling pipeline)
 
