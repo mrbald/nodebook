@@ -71,6 +71,125 @@ export interface GraphRows {
   triples: TripleRow[]
 }
 
+/** Where a link target landed: a real note's path, or `ghost:<target>`. */
+export interface ResolvedTarget {
+  id: string
+  /** The normalised target text, for counting ambiguous *targets* not edges. */
+  key: string
+  ambiguous: boolean
+}
+
+/**
+ * Resolve a link target to a real note by name OR by path suffix (so
+ * `[[projects/Roadmap]]` finds `projects/Roadmap.md`), matching the editor's
+ * link resolver. Exactly one file with that name wins outright; several prefer
+ * one in the linking note's own folder, else the lexicographically smallest
+ * path — and either way the target is reported as ambiguous, because the link
+ * really could have meant either note; none is a ghost. Matching is
+ * case-sensitive, so a target that differs only in case is a ghost.
+ *
+ * Extracted so the map and the reading view resolve `same_as` identically —
+ * one definition of "these two notes are the same thing" (see `sameAsGroups`).
+ */
+export function targetResolver(paths: string[]): (object: string, from: string) => ResolvedTarget {
+  // Every suffix keeps *all* of its files, because a name is not an identity:
+  // several files can answer to it.
+  const suffixToPaths = new Map<string, string[]>()
+  for (const path of paths) {
+    const segs = path
+      .replace(/\.md$/i, '')
+      .split(/[/\\]/)
+      .filter(Boolean)
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const key = segs.slice(i).join('/')
+      const list = suffixToPaths.get(key)
+      if (list) list.push(path)
+      else suffixToPaths.set(key, [path])
+    }
+  }
+  for (const list of suffixToPaths.values()) list.sort()
+
+  return (object: string, from: string): ResolvedTarget => {
+    const key = object
+      .replace(/\\/g, '/')
+      .replace(/^\.?\//, '')
+      .replace(/\.md$/i, '')
+    const cands = suffixToPaths.get(key)
+    if (!cands || cands.length === 0) return { id: `${GHOST}${object}`, key, ambiguous: false }
+    if (cands.length === 1) return { id: cands[0], key, ambiguous: false }
+    const sameFolder = cands.filter((p) => folderOf(p) === folderOf(from))
+    return { id: sameFolder[0] ?? cands[0], key, ambiguous: true }
+  }
+}
+
+/** Which notes a confirmed `same_as::` decision has made one thing. */
+export interface SameAsGroups {
+  /** The surviving note for a path — the path itself when nothing folded it. */
+  canon: (path: string) => string
+  /** Surviving path → every path folded onto it, sorted, itself included. Only
+   *  real groups (two notes or more) get an entry. */
+  groups: Map<string, string[]>
+}
+
+/**
+ * The one definition of "these notes are the same thing".
+ *
+ * `same_as:: [[Other]]` is a user-confirmed decision written into markdown by
+ * the merge dialog. Union the SUBJECT into the OBJECT (the note that was
+ * already in the vault wins, so a merge converges onto what you had), following
+ * chains to their end. The pairs are sorted first, so a run of triples in any
+ * order collapses to the same canonical note every time. An alias naming a note
+ * that does not exist is not a collapse — a typo stays visible as an ordinary
+ * edge to a ghost.
+ *
+ * The map folds the group into one dot; the reading view shows a note what its
+ * twins say. Both call this, so they can never disagree.
+ */
+export function sameAsGroups(triples: TripleRow[], paths: string[]): SameAsGroups {
+  const pathSet = new Set(paths)
+  const resolve = targetResolver(paths)
+
+  const parent = new Map<string, string>()
+  const find = (x: string): string => {
+    let r = x
+    for (let i = 0; i < 64; i++) {
+      const up = parent.get(r)
+      if (up === undefined || up === r) break
+      r = up
+    }
+    return r
+  }
+  const pairs: [string, string][] = []
+  for (const t of triples) {
+    if (t.relation !== SAME_AS || !pathSet.has(t.source_file)) continue
+    const { id } = resolve(t.object, t.source_file)
+    if (pathSet.has(id)) pairs.push([t.source_file, id])
+  }
+  pairs.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]))
+  for (const [subject, object] of pairs) {
+    const a = find(subject)
+    const b = find(object)
+    if (a !== b) parent.set(a, b)
+  }
+  const canon = parent.size === 0 ? (id: string): string => id : find
+
+  const groups = new Map<string, string[]>()
+  for (const path of new Set(pairs.flat())) {
+    const c = canon(path)
+    const list = groups.get(c)
+    if (list) list.push(path)
+    else groups.set(c, [path])
+  }
+  for (const list of groups.values()) list.sort()
+  return { canon, groups }
+}
+
+/** The notes confirmed to be the same thing as `path`, itself excluded. */
+export function sameAsTwins(triples: TripleRow[], paths: string[], path: string): string[] {
+  const { canon, groups } = sameAsGroups(triples, paths)
+  return (groups.get(canon(path)) ?? []).filter((p) => p !== path)
+}
+
 /**
  * Overlay two graph sources into one view — a `primary` (the vault) and a
  * `secondary` (a distilled run; in future, another vault). Pure: it unions the
@@ -137,83 +256,22 @@ export function buildGraph(
   // for the map's node styling. Files with no recorded kind read as `note`.
   const kindOf = new Map<string, NoteKind>()
   for (const f of files) if (f.kind && f.kind !== 'note') kindOf.set(f.path, f.kind)
-  // Resolve a link target to a real note by name OR by path suffix (so
-  // `[[projects/Roadmap]]` finds `projects/Roadmap.md`), matching the editor's
-  // link resolver. Every suffix keeps *all* of its files, because a name is not
-  // an identity: several files can answer to it.
-  const suffixToPaths = new Map<string, string[]>()
-  for (const f of files) {
-    const segs = f.path
-      .replace(/\.md$/i, '')
-      .split(/[/\\]/)
-      .filter(Boolean)
-    for (let i = segs.length - 1; i >= 0; i--) {
-      const key = segs.slice(i).join('/')
-      const list = suffixToPaths.get(key)
-      if (list) list.push(f.path)
-      else suffixToPaths.set(key, [f.path])
-    }
-  }
-  for (const list of suffixToPaths.values()) list.sort()
-
-  /**
-   * A link target → a node id, seen from the note that wrote the link:
-   * exactly one file with that name (or path suffix) wins outright; several
-   * prefer one in the linking note's own folder, else the lexicographically
-   * smallest path — and either way the target is reported as ambiguous, because
-   * the link really could have meant either note; none is a ghost.
-   */
-  const resolve = (object: string, from: string): { id: string; key: string; ambiguous: boolean } => {
-    const key = object
-      .replace(/\\/g, '/')
-      .replace(/^\.?\//, '')
-      .replace(/\.md$/i, '')
-    const cands = suffixToPaths.get(key)
-    if (!cands || cands.length === 0) return { id: `${GHOST}${object}`, key, ambiguous: false }
-    if (cands.length === 1) return { id: cands[0], key, ambiguous: false }
-    const sameFolder = cands.filter((p) => folderOf(p) === folderOf(from))
-    return { id: sameFolder[0] ?? cands[0], key, ambiguous: true }
-  }
+  const resolve = targetResolver(files.map((f) => f.path))
 
   // --- Confirmed aliases collapse ----------------------------------------
-  // `same_as:: [[Other]]` is a user-confirmed decision written into markdown by
-  // the merge dialog. Union the SUBJECT into the OBJECT (the note that was
-  // already in the vault wins, so a merge converges onto what you had), following
-  // chains to their end. The pairs are sorted first, so a run of triples in any
-  // order collapses to the same canonical node every time.
-  const parent = new Map<string, string>()
-  const find = (x: string): string => {
-    let r = x
-    for (let i = 0; i < 64; i++) {
-      const up = parent.get(r)
-      if (up === undefined || up === r) break
-      r = up
-    }
-    return r
-  }
-  const aliasPairs: [string, string][] = []
-  for (const t of triples) {
-    if (t.relation !== SAME_AS || !pathSet.has(t.source_file)) continue
-    const { id } = resolve(t.object, t.source_file)
-    // An alias naming a note that does not exist is not a collapse — it stays an
-    // ordinary edge to a ghost, so a typo is visible instead of silent.
-    if (pathSet.has(id)) aliasPairs.push([t.source_file, id])
-  }
-  aliasPairs.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]))
-  for (const [subject, object] of aliasPairs) {
-    const a = find(subject)
-    const b = find(object)
-    if (a !== b) parent.set(a, b)
-  }
-  const canon = parent.size === 0 ? (id: string): string => id : find
+  // A group of notes the user confirmed are one thing folds into one node. The
+  // rule itself lives in `sameAsGroups` above, because the reading view honours
+  // exactly the same groups.
+  const { canon, groups } = sameAsGroups(
+    triples,
+    files.map((f) => f.path)
+  )
   /** Labels folded into each surviving node — shown in the map's inspector. */
   const aliasLabels = new Map<string, Set<string>>()
-  for (const id of new Set(aliasPairs.flat())) {
-    const c = canon(id)
-    if (c === id) continue
-    const set = aliasLabels.get(c) ?? new Set<string>()
-    set.add(noteName(id))
-    aliasLabels.set(c, set)
+  for (const [survivor, group] of groups) {
+    const set = new Set<string>()
+    for (const id of group) if (id !== survivor) set.add(noteName(id))
+    if (set.size > 0) aliasLabels.set(survivor, set)
   }
   const collapsed = (t: TripleRow, object: string): boolean =>
     t.relation === SAME_AS && pathSet.has(t.source_file) && pathSet.has(object)

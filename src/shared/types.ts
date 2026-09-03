@@ -35,6 +35,13 @@ export interface Outbound {
   object: string
 }
 
+/** A note the user confirmed is the same thing as another (`same_as::`), as the
+ *  reading view names it: the file to read, and the name to show. */
+export interface SameAsTwin {
+  path: string
+  name: string
+}
+
 /** A node in the derived knowledge graph (a note, or a "ghost" — a linked target
  *  with no file yet). Keyed by the note's *path*, so two notes with one name are
  *  two nodes; a ghost's id is `ghost:<target>`. */

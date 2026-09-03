@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildGraph, overlayGraph, noteName, type FileRow, type TripleRow } from './graph'
+import {
+  buildGraph,
+  overlayGraph,
+  noteName,
+  sameAsGroups,
+  sameAsTwins,
+  type FileRow,
+  type TripleRow
+} from './graph'
 
 /** A harvested triple: the subject IS the file it came from (identity is path). */
 const t = (from: string, relation: string, object: string): TripleRow => ({
@@ -451,5 +459,68 @@ describe('confirmed same_as collapses two notes into one', () => {
     const g = buildGraph(clash, [t(COPY, 'about', 'Ref'), t(REF, 'about', 'Options')], null)
     expect(ids(g)).toEqual(new Set([OPT, COPY, REF]))
     expect(g.nodes.every((n) => n.aliases === undefined)).toBe(true)
+  })
+})
+
+describe('sameAsGroups — one definition of "these notes are one thing"', () => {
+  const OPT = '/v/Options.md'
+  const COPY = '/v/Distilled/book/Options (Book).md'
+  const paths = [OPT, COPY, A, B, C]
+  const pair = [t(COPY, 'same_as', 'Options')]
+
+  it('a pair: the object survives and each note names the other', () => {
+    const { canon, groups } = sameAsGroups(pair, paths)
+    expect(canon(COPY)).toBe(OPT)
+    expect(canon(OPT)).toBe(OPT)
+    expect(groups.get(OPT)).toEqual([COPY, OPT].sort())
+    expect(sameAsTwins(pair, paths, COPY)).toEqual([OPT])
+    expect(sameAsTwins(pair, paths, OPT)).toEqual([COPY])
+  })
+
+  it('a note nobody merged has no group and no twins', () => {
+    expect(sameAsGroups(pair, paths).groups.has(A)).toBe(false)
+    expect(sameAsTwins(pair, paths, A)).toEqual([])
+  })
+
+  it('a chain A→B→C lands on C, and every member sees the other two', () => {
+    const chain = [t(A, 'same_as', 'B'), t(B, 'same_as', 'C')]
+    const { canon, groups } = sameAsGroups(chain, paths)
+    expect(canon(A)).toBe(C)
+    expect(canon(B)).toBe(C)
+    expect(groups.get(C)).toEqual([A, B, C].sort())
+    expect(sameAsTwins(chain, paths, A)).toEqual([B, C].sort())
+  })
+
+  it('the direction decides who survives, not who is in the group', () => {
+    const forward = sameAsGroups([t(A, 'same_as', 'B')], paths)
+    const back = sameAsGroups([t(B, 'same_as', 'A')], paths)
+    expect(forward.canon(A)).toBe(B)
+    expect(back.canon(B)).toBe(A)
+    expect(forward.groups.get(B)).toEqual([A, B].sort())
+    expect(back.groups.get(A)).toEqual([A, B].sort())
+  })
+
+  it('an alias naming a note that does not exist groups nothing', () => {
+    const { canon, groups } = sameAsGroups([t(A, 'same_as', 'Nowhere')], paths)
+    expect(canon(A)).toBe(A)
+    expect(groups.size).toBe(0)
+  })
+
+  it('a target that differs only in case is a ghost, not a twin', () => {
+    expect(sameAsGroups([t(A, 'same_as', 'options')], paths).groups.size).toBe(0)
+  })
+
+  it('a path-suffix target resolves the way a wikilink does', () => {
+    const { canon, groups } = sameAsGroups([t(A, 'same_as', 'sub/C')], paths)
+    expect(canon(A)).toBe(C)
+    expect(groups.get(C)).toEqual([A, C].sort())
+  })
+
+  it('a duplicate basename prefers the linking note folder over the lexical first', () => {
+    const HERE = '/v/team/Roadmap.md'
+    const THERE = '/v/archive/Roadmap.md'
+    const FROM = '/v/team/Plan.md'
+    const { canon } = sameAsGroups([t(FROM, 'same_as', 'Roadmap')], [FROM, THERE, HERE])
+    expect(canon(FROM)).toBe(HERE)
   })
 })
