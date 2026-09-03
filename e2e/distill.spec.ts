@@ -204,6 +204,7 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
 
   // Nothing was asked for, so nothing is recorded — an old run reads the same.
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(runs.length).toBeGreaterThan(0) // else the check below proves nothing
   expect(runs.every((r) => r.focus === undefined)).toBe(true)
 })
 

@@ -68,6 +68,18 @@ const FOCUS_LENSES = [
   }
 ]
 
+/** One open one-line dialog (`Prompt.tsx`), as the app asks for it. */
+interface PromptRequest {
+  title: string
+  initialValue?: string
+  placeholder?: string
+  confirmLabel?: string
+  presets?: PromptPreset[]
+  maxLength?: number
+  allowEmpty?: boolean
+  onConfirm: (value: string) => void
+}
+
 /** Parse an FTS snippet's `<mark>` markers into safe React nodes (no innerHTML). */
 function renderSnippet(snippet: string): React.ReactNode {
   let inMark = false
@@ -150,16 +162,15 @@ export default function App() {
   const [dirs, setDirs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null)
-  const [prompt, setPrompt] = useState<{
-    title: string
-    initialValue?: string
-    placeholder?: string
-    confirmLabel?: string
-    presets?: PromptPreset[]
-    maxLength?: number
-    allowEmpty?: boolean
-    onConfirm: (value: string) => void
-  } | null>(null)
+  // `seq` is what gives the rendered <Prompt> its key. Without it React reuses
+  // the mounted instance when one prompt replaces another, and the new dialog
+  // opens holding the previous one's typed text — a half-typed note name became
+  // the focus of a distill run. `openPrompt` stamps it, so no caller can forget.
+  const promptSeq = useRef(0)
+  const [prompt, setPrompt] = useState<(PromptRequest & { seq: number }) | null>(null)
+  const openPrompt = useCallback((p: PromptRequest): void => {
+    setPrompt({ ...p, seq: ++promptSeq.current })
+  }, [])
   const [confirm, setConfirm] = useState<{
     message: string
     confirmLabel?: string
@@ -693,7 +704,7 @@ export default function App() {
 
   const newNoteIn = useCallback(
     (dir: string): void => {
-      setPrompt({
+      openPrompt({
         title: 'New note name',
         onConfirm: (name) => {
           setPrompt(null)
@@ -706,11 +717,11 @@ export default function App() {
         }
       })
     },
-    [relist, openFile]
+    [relist, openFile, openPrompt]
   )
 
   const newFolderIn = (dir: string): void => {
-    setPrompt({
+    openPrompt({
       title: 'New folder name',
       onConfirm: (name) => {
         setPrompt(null)
@@ -723,7 +734,7 @@ export default function App() {
 
   const renameTarget = (target: ContextTarget): void => {
     const oldPath = pathOf(target)
-    setPrompt({
+    openPrompt({
       title: 'Rename',
       initialValue: labelOf(target),
       confirmLabel: 'Rename',
@@ -919,7 +930,7 @@ export default function App() {
     // Ask what this reading is for BEFORE the estimate: the focus rides in
     // every prompt, so it is part of what the run will cost. An empty field is
     // an answer — no focus, and the run reads as it always did.
-    setPrompt({
+    openPrompt({
       title: 'What should the notes focus on? (optional)',
       placeholder: 'e.g. the arguments and the evidence for them',
       confirmLabel: 'Distill',
@@ -931,7 +942,7 @@ export default function App() {
         void estimateThenRun(doc.id, focus)
       }
     })
-  }, [estimateThenRun])
+  }, [estimateThenRun, openPrompt])
 
   // Carry on a run that was cancelled or interrupted, from its own checkpoint.
   const resumeStagedRun = useCallback(
@@ -1506,6 +1517,7 @@ export default function App() {
       )}
       {prompt && (
         <Prompt
+          key={prompt.seq}
           title={prompt.title}
           initialValue={prompt.initialValue}
           placeholder={prompt.placeholder}
