@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { join } from 'path'
-import { distill, probeChat, estimateDistill, DistillAborted, type DistillProgress } from './run'
+import {
+  distill,
+  probeChat,
+  estimateDistill,
+  windowBudgets,
+  DistillAborted,
+  type DistillProgress
+} from './run'
+import { focusSentence } from './extract'
 import { planRunFiles } from './artifact'
 import { renderDocumentNote } from './emit'
 import {
@@ -858,6 +866,123 @@ describe('estimateDistill', () => {
       totalWindows: 0,
       maxCalls: 120
     })
+  })
+})
+
+describe("a run's focus", () => {
+  const FOCUS = 'the people named and how they are connected'
+  /** What every extraction prompt of a focused run must contain, verbatim. */
+  const SENTENCE = focusSentence(FOCUS)
+
+  /** A chat stub that records the user prompt of every call, and lets a test
+   *  decide what each one answers. */
+  function recordingChat(
+    reply: (call: number, user: string) => string | Error
+  ): ChatModel & { prompts: string[] } {
+    const model = {
+      id: 'recording',
+      inputBudget: 40_000,
+      prompts: [] as string[],
+      async *chat(req: { messages: { content: string }[] }) {
+        const user = req.messages[0]?.content ?? ''
+        model.prompts.push(user)
+        const out = reply(model.prompts.length, user)
+        if (out instanceof Error) throw out
+        yield out
+      }
+    }
+    return model as unknown as ChatModel & { prompts: string[] }
+  }
+
+  /** The one usable answer the stubs give: an item quoting the first chunk. */
+  function quoteFirst(user: string): string {
+    const m = /\[chunk (\d+)[^\]]*\]\n([^\n]+)/.exec(user)
+    if (!m) return '{"items":[]}'
+    const quote = m[2].split(/\s+/).slice(0, 4).join(' ')
+    return JSON.stringify({
+      items: [
+        { kind: 'concept', title: quote, summary: 's', evidence: [{ chunkId: Number(m[1]), quote }], links: [] }
+      ]
+    })
+  }
+
+  it('takes the focus out of the window, exactly as the prompt will carry it', () => {
+    const plain = windowBudgets(20_000)
+    const focused = windowBudgets(20_000, FOCUS)
+    expect(focused.registryBudget).toBe(plain.registryBudget)
+    expect(plain.windowWeight - focused.windowWeight).toBe(weightOf(SENTENCE))
+    // No focus, no cost — and an empty field is no focus.
+    expect(windowBudgets(20_000, '   ').windowWeight).toBe(plain.windowWeight)
+  })
+
+  it('plans more, smaller steps for a long focus', () => {
+    // A budget where the whole document fits one window without a focus, and
+    // no longer does once the focus rides in the prompt too.
+    const long = 'the people, places and organisations named, and how they are connected'.repeat(4)
+    const plain = estimateDistill(LONG, { inputBudget: 12_000 })
+    const focused = estimateDistill(LONG, { inputBudget: 12_000, focus: long })
+    expect(focused.totalWindows).toBeGreaterThan(plain.totalWindows)
+  })
+
+  it('carries the focus into every call, the repair retry included', async () => {
+    // The second call answers rubbish, so the window is repaired — and the
+    // repair resends the same user prompt, focus and all.
+    const chat = recordingChat((n, user) => (n === 2 ? 'sorry, no JSON here' : quoteFirst(user)))
+    const res = await distill(
+      { file: 'B.md', text: SRC4 },
+      { embedder, chat },
+      { ...opts4, ...noWait, focus: FOCUS }
+    )
+    expect(res.stats.windows).toBe(4)
+    const reading = chat.prompts.filter((p) => p.includes('SOURCE CHUNKS'))
+    expect(reading.length).toBe(5) // four windows + the repair
+    for (const p of reading) expect(p).toContain(SENTENCE)
+  })
+
+  it('carries the focus into both halves of a window the model rejects for length', async () => {
+    // One window over all eight chunks, really rejected over 3k: the halves are
+    // read as calls of their own, and each must still say what to look for.
+    const chat = recordingChat((_n, user) => {
+      const weight = weightOf(user)
+      return weight > 3_000 ? new ContextLengthError('prompt is too long') : quoteFirst(user)
+    })
+    const res = await distill({ file: 'L.md', text: LONG }, { embedder, chat }, { focus: FOCUS })
+    expect(res.stats.splits).toBeGreaterThan(0)
+    const reading = chat.prompts.filter((p) => p.includes('SOURCE CHUNKS'))
+    expect(reading.length).toBeGreaterThan(1)
+    for (const p of reading) expect(p).toContain(SENTENCE)
+  })
+
+  it('reads the windows left after a resume with the same focus', async () => {
+    const store = fakeCheckpoint()
+    const ctrl = new AbortController()
+    const first = recordingChat((n, user) => {
+      if (n === 3) ctrl.abort()
+      return quoteFirst(user)
+    })
+    await expect(
+      distill(
+        { file: 'B.md', text: SRC4 },
+        { embedder, chat: first },
+        { ...opts4, ...noWait, focus: FOCUS, checkpoint: store, signal: ctrl.signal }
+      )
+    ).rejects.toBeInstanceOf(DistillAborted)
+
+    const second = recordingChat((_n, user) => quoteFirst(user))
+    await distill(
+      { file: 'B.md', text: SRC4 },
+      { embedder, chat: second },
+      { ...opts4, ...noWait, focus: FOCUS, checkpoint: store }
+    )
+    const resumed = second.prompts.filter((p) => p.includes('SOURCE CHUNKS'))
+    expect(resumed.length).toBe(2) // only the windows the first attempt never read
+    for (const p of resumed) expect(p).toContain(SENTENCE)
+  })
+
+  it('sends no focus sentence at all when the run has none', async () => {
+    const chat = recordingChat((_n, user) => quoteFirst(user))
+    await distill({ file: 'B.md', text: SRC4 }, { embedder, chat }, { ...opts4, ...noWait })
+    for (const p of chat.prompts) expect(p).not.toContain('Focus this reading on')
   })
 })
 

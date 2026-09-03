@@ -7,6 +7,12 @@
  *  copy of this string once drifted stale. */
 export const DEFAULT_EMBED_MODEL = 'Xenova/multilingual-e5-base'
 
+/** How long a distill run's focus may be, in characters. Long enough for a
+ *  sentence or two, short enough that repeating it in every model call costs
+ *  nothing worth measuring. Shared because the field that types it and the
+ *  main-side check that enforces it must agree (`main/distill/extract.ts`). */
+export const DISTILL_FOCUS_MAX = 300
+
 /** A markdown file discovered inside the open vault. */
 export interface MarkdownFile {
   /** Absolute path on disk. */
@@ -27,6 +33,13 @@ export interface Backlink {
 export interface Outbound {
   relation: string
   object: string
+}
+
+/** A note the user confirmed is the same thing as another (`same_as::`), as the
+ *  reading view names it: the file to read, and the name to show. */
+export interface SameAsTwin {
+  path: string
+  name: string
 }
 
 /** A node in the derived knowledge graph (a note, or a "ghost" — a linked target
@@ -352,6 +365,9 @@ export interface DistillRunInfo {
    *  empty) for a run too small to group, and for runs distilled before
    *  themes existed. */
   themes?: string[]
+  /** What the run was asked to focus on, in the user's own words. Absent when
+   *  no focus was given — which is every run made before a focus could be. */
+  focus?: string
 }
 
 /** What a run will cost, worked out from the document before it starts. */

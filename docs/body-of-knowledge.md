@@ -132,8 +132,14 @@ deltas" are *both* true once separated — is the contract in
 
 - ✅ **K1. Merge target — shipped.** A distill run merges into the canonical vault
   (`Distilled/<run>/`), the document lands once in `Sources/`, and the merge is
-  planned, hash-checked and undoable. *Open within K1:* multi-source `cite::`
-  accumulation into one note.
+  planned, hash-checked and undoable. Multi-source accumulation shipped too, as a
+  **read-time union**: a note whose confirmed `same_as` group has other members
+  shows their summary, quotes and citations in its own reading panel. The union
+  is not written into either file. Appending a second book's claims into the
+  first note would have the merge rewrite files it does not own, and undo would
+  then have to unpick one run's additions from another's; reading unions instead,
+  so the files stay each run's own and deleting the `same_as::` line splits them
+  again.
 - ◐ **K2. Entity-resolution suggestions — half shipped.** Name-match candidates in
   the merge dialog + **user-confirmed `same_as`**, consumed by `buildGraph`.
   *Next:* embedding-kNN candidates over concept-grain vectors, and optional LLM

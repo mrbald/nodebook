@@ -203,6 +203,15 @@ clash with a stranger — is dropped, never redirected (`confirmedSameAs`). Merg
 crash never leaves un-undoable files; **Undo** hashes each file and sends anything
 you edited to the Trash instead of deleting it.
 
+**Two notes, one reading.** A confirmed `same_as` group is one thing everywhere,
+not only on the map: opening any member shows the others' summary, quotes and
+citations in the right-hand panel, each borrowed citation marked with the note it
+came from. The group is computed by `sameAsGroups()` in `graph.ts` — the same
+union-find, the same target resolution the map folds by, so the two views cannot
+disagree — and the panel reads the twins' files at display time. Nothing is
+written: an append would have the merge rewrite files it does not own, and undo
+would have to unpick one run's additions from another's.
+
 ## Ingestion — the converter seam
 
 The seam is `convertDocument()` in `convert.ts`: **one switch on the file
@@ -259,8 +268,12 @@ round-trip rules.) Because each run lives in its own namespace:
 - **Perspectives are first-class** — the same book distilled "by theme" vs "by
   chronology" vs "by argument" (different extraction prompts) are just different
   artifacts side by side. Several lenses on one source coexisting *is* the
-  knowledge-management win. *Prompt presets are not built yet;* re-running the same
-  document already gives you side-by-side runs.
+  knowledge-management win. A lens is a **focus given per run**: one line, asked
+  once when the run starts — three named lenses (Arguments, Timeline, People) or
+  free text, normalised and capped at 300 characters. It rides in the user half of
+  every extraction prompt, is saved in `run.json` so a resume reads the document
+  the same way, and is recorded in `meta.json` so the runs list can say what a
+  reading was for.
 - **Comparable** — each run's `meta.json` stamps the source hash, model, provider,
   prompt version, date, settings and coverage, so runs can be told apart and a
   stale one recognised.
@@ -357,8 +370,68 @@ duplicate titles and at most one dropped quote. **`conceptRecall`** rises by
 fivefold. **`edgePrecision`** stays near 0.01, and that is a fact about the
 golden, not the model: it lists a few dozen edges per fixture while a model
 writes about three per note, so nearly every edge written is one the golden
-never listed. It is the metric to redefine (or the golden to grow) before it
-is read as a quality signal.
+never listed. The metric was redefined the next day — see below — and the
+same three runs re-scored under the new rule.
+
+### `edgePrecision` redefined — judged edges only (2026-09-03)
+
+The old rule counted every predicted edge in the denominator, so an edge
+between two concepts the golden never listed counted as wrong. A golden of
+twenty-odd concepts has no opinion on most of a book, and a model that links
+its notes three times each was scored against that silence. The new rule
+scores only the edges the golden can judge:
+
+- **`edgePrecision`** = of the predicted edges whose both endpoints resolve to
+  two different golden concepts, the share that is a golden edge. An edge with
+  an endpoint outside the golden is neither a hit nor a miss. Nothing judged
+  scores 0, not 1.
+- **`edgesJudged`** (new column) = how many predicted edges that was. A
+  precision figure over 5 edges and one over 50 are not the same evidence, so
+  the count sits beside it.
+- Still a lower bound: the golden's edge list is a curated sample, not every
+  true relation among its concepts. A real relation it happens not to list is
+  scored as wrong. Growing the golden's edge list raises the ceiling; the
+  concept list can stay as it is.
+
+Tables dated before 2026-09-03 use the old rule. Every eval run now saves what
+it scored (`scripts/out/run-<provider>-<fixture>.json`), and the same command
+with `DISTILL_EVAL_REPLAY=1` re-scores those files instead of running the
+pipeline, so the next metric change can be read against a real model's output
+without paying for the model again.
+
+Stub, re-scored (the pipeline is unchanged; only the last three columns moved):
+
+| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgesJudged | edgeRecall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| book-en | 10.34 | 1.00 | 0.00 | 0.00 | 339.00 | 7.44 | 0.00 | 1.00 | 0.00 | 0.32 | 0.17 | 6.00 | 0.05 |
+| paper.pdf | 14.00 | 1.00 | 0.00 | 0.00 | 225.00 | 6.85 | 0.00 | 1.00 | 0.00 | 0.29 | 0.00 | 2.00 | 0.00 |
+| chapter-ru.md | 25.20 | 1.00 | 0.00 | 0.00 | 38.00 | 3.20 | 0.00 | 1.00 | 0.00 | 0.26 | 0.60 | 5.00 | 0.14 |
+
+The stub's regex links land on golden pairs a handful of times per fixture —
+too few judged edges to mean anything, which is the point of printing the
+count.
+
+Real provider, run again under the new rule — `DISTILL_EVAL_PROVIDER=claude-cli
+DISTILL_EVAL_MODEL=sonnet npm run eval:distill`, 23 minutes, 2026-09-03:
+
+| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgesJudged | edgeRecall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| book-en | 22.17 | 1.00 | 0.00 | 0.00 | 9.00 | 2.80 | 0.00 | 1.00 | 0.00 | 0.27 | 0.50 | 6.00 | 0.14 |
+| paper.pdf | 21.65 | 1.00 | 0.00 | 0.00 | 9.00 | 2.89 | 0.00 | 1.00 | 0.01 | 0.43 | 0.50 | 4.00 | 0.09 |
+| chapter-ru.md | 22.68 | 1.00 | 3.00 | 0.00 | 0.00 | 2.44 | 0.04 | 1.00 | 0.00 | 0.26 | 0.75 | 4.00 | 0.14 |
+
+Two things to read off it. First, of the edges the golden can judge, the
+model gets half to three quarters right — a lower bound, as said above, and
+still only four to six judged edges per fixture, because a golden of twenty
+concepts meets a run of a hundred notes at a few pairs. The number to grow is
+`edgesJudged`, by listing more golden pairs among the concepts already there.
+Second, this is a fresh run of the same model over the same fixtures as the
+table above, and it is not the same run: `conceptRecall` on `book-en` came
+out 0.27 where the earlier run had 0.45, and dedup merged 9 notes where it
+had merged 2. Nothing in the pipeline between the two runs touched
+extraction; that spread is the model's own. One run is one sample — compare
+runs of the same fixture before reading a difference of a few hundredths as
+a change in the pipeline.
 
 ### Baseline — Phase 1 (2026-09-02, cluster-sampling pipeline)
 

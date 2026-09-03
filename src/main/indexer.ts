@@ -4,8 +4,16 @@ import { basename, dirname } from 'path'
 import { harvest, frontmatterKind } from './harvest'
 import { VectorStore, type PendingChunk } from './rag/store'
 import { rrfRank } from './rag/rrf'
-import { buildGraph, noteName, type FileRow, type TripleRow, type GraphRows } from './graph'
-import type { Backlink, GraphData, Outbound, SearchHit } from '../shared/types'
+import {
+  buildGraph,
+  noteName,
+  sameAsTwins,
+  SAME_AS,
+  type FileRow,
+  type TripleRow,
+  type GraphRows
+} from './graph'
+import type { Backlink, GraphData, Outbound, SameAsTwin, SearchHit } from '../shared/types'
 
 /** Schema revision the one-time `files.kind` backfill is recorded under
  *  (`PRAGMA user_version`). Bump only if a future backfill needs to rerun. */
@@ -190,6 +198,24 @@ export class VaultIndex {
       )
       .all() as TripleRow[]
     return { files, triples }
+  }
+
+  /** The notes a confirmed `same_as::` has made one thing with `path` — the
+   *  same group the map folds into one dot, minus the note itself. Only the
+   *  `same_as` triples are read, not the whole store. */
+  sameAs(path: string): SameAsTwin[] {
+    const paths = (
+      this.db
+        .prepare("SELECT path FROM files WHERE path NOT LIKE '%.map.md'")
+        .all() as { path: string }[]
+    ).map((r) => r.path)
+    const triples = this.db
+      .prepare(
+        `SELECT subject, relation, object, source_file FROM triples
+         WHERE relation = ? AND source_file NOT LIKE '%.map.md'`
+      )
+      .all(SAME_AS) as TripleRow[]
+    return sameAsTwins(triples, paths, path).map((p) => ({ path: p, name: noteName(p) }))
   }
 
   /** A slice of the knowledge graph: local depth-`d` around a focus note (by

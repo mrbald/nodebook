@@ -14,6 +14,7 @@ import type {
   GraphData,
   MenuState,
   Outbound,
+  SameAsTwin,
   SearchHit,
   Settings,
   TalkChunk,
@@ -46,6 +47,8 @@ const api = {
   backlinks: (target: string): Promise<Backlink[]> => ipcRenderer.invoke('index:backlinks', target),
   outbound: (sourceFile: string): Promise<Outbound[]> =>
     ipcRenderer.invoke('index:outbound', sourceFile),
+  /** The notes a confirmed `same_as::` made one thing with this one. */
+  sameAs: (path: string): Promise<SameAsTwin[]> => ipcRenderer.invoke('index:sameAs', path),
   search: (query: string): Promise<SearchHit[]> => ipcRenderer.invoke('index:search', query),
   noteNames: (): Promise<string[]> => ipcRenderer.invoke('index:noteNames'),
   graph: (
@@ -146,11 +149,14 @@ const api = {
   /** e2e only (main refuses unless NODEBOOK_E2E): register a path, get its id. */
   distillRegisterPath: (absPath: string): Promise<string> =>
     ipcRenderer.invoke('distill:registerPath', absPath),
-  distillRun: (docId: string): Promise<DistillRunResult> =>
-    ipcRenderer.invoke('distill:run', docId),
-  /** What a run would cost, before starting it (no model calls). */
-  distillEstimate: (docId: string): Promise<DistillEstimate> =>
-    ipcRenderer.invoke('distill:estimate', docId),
+  /** Distil a picked document. `focus` is what this reading is for, in the
+   *  user's words — omitted or empty means the reading has no focus. */
+  distillRun: (docId: string, focus?: string): Promise<DistillRunResult> =>
+    ipcRenderer.invoke('distill:run', docId, focus),
+  /** What a run would cost, before starting it (no model calls). The focus is
+   *  passed too: it rides in every prompt, so it costs window room. */
+  distillEstimate: (docId: string, focus?: string): Promise<DistillEstimate> =>
+    ipcRenderer.invoke('distill:estimate', docId, focus),
   /** Continue a run that was cancelled or interrupted, from its checkpoint. */
   distillResume: (runId: string): Promise<DistillRunResult> =>
     ipcRenderer.invoke('distill:resume', runId),

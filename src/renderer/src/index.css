@@ -237,6 +237,23 @@ body {
   font-style: italic;
   margin-top: 2px;
 }
+/* Which twin a citation came from, when two notes are one idea. */
+.source-from {
+  color: var(--muted);
+  font-size: 11px;
+}
+/* What a note's `same_as` twin says — read from its file, never copied into it. */
+.same-as-twin + .same-as-twin {
+  margin-top: 10px;
+}
+.same-as-summary {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 2px 6px 0;
+}
+.same-as-quote {
+  margin-left: 6px;
+}
 /* Where a distilled document came from, and the button that opens it. */
 .source-document-path {
   word-break: break-all;
@@ -1072,6 +1089,18 @@ body {
   color: var(--muted);
   font-size: 11px;
 }
+/* What the run was asked to focus on, on its own line above the themes. */
+.run-item-focus {
+  flex-basis: 100%;
+  min-width: 0;
+  margin-top: -2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* The run's theme names, wrapped onto their own line under the run. */
 .run-item-themes {
   flex-basis: 100%;
@@ -1740,6 +1769,29 @@ body {
 
 .modal-input:focus {
   outline: none;
+  border-color: var(--accent);
+}
+
+/* Named lenses above a prompt's field — one click fills it in. */
+.modal-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.modal-preset {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.modal-preset:hover {
+  color: var(--accent);
   border-color: var(--accent);
 }
 

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MarkdownFile, Backlink, Outbound } from '@shared/types'
-import type { NoteCitation, NoteDocument } from './citations'
+import { parseCitations, type NoteCitation, type NoteDocument } from './citations'
+import { noteGist, quoteLine, unionCitations, type NoteGist } from './twins'
 
 interface Props {
   active: MarkdownFile
@@ -14,12 +15,17 @@ interface Props {
   document?: NoteDocument | null
   /** Open the file the document was converted from (main resolves the path). */
   onOpenOriginal?: () => void
+  /** Bumped when the index changed, so a `same_as` ticked just now shows up
+   *  without reopening the note. */
+  reloadKey?: number
 }
 
-/** A quote, on one line, short enough to sit under a citation. */
-function quoteLine(quote: string): string {
-  const flat = quote.replace(/\s+/g, ' ').trim()
-  return flat.length > 90 ? `${flat.slice(0, 89)}…` : flat
+/** A twin note as this panel shows it: its name, what it says, what it cites. */
+interface TwinView {
+  path: string
+  name: string
+  gist: NoteGist
+  citations: NoteCitation[]
 }
 
 export function BacklinksPanel({
@@ -29,10 +35,14 @@ export function BacklinksPanel({
   citations,
   onOpenCitation,
   document,
-  onOpenOriginal
+  onOpenOriginal,
+  reloadKey
 }: Props) {
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [outbound, setOutbound] = useState<Outbound[]>([])
+  const [twins, setTwins] = useState<TwinView[]>([])
+  /** The note the current `twins` were loaded for (see the effect below). */
+  const twinsFor = useRef<string | null>(null)
 
   useEffect(() => {
     let ignore = false
@@ -65,7 +75,44 @@ export function BacklinksPanel({
     }
     // active.name/.rel are derived from active.path, so path alone is sufficient.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active.path])
+  }, [active.path, reloadKey])
+
+  // What the note's confirmed twins say. Read fresh each time, because a twin is
+  // an ordinary file the user can edit. The section is decoration: a twin that
+  // will not read is skipped, never an error.
+  useEffect(() => {
+    let ignore = false
+    // Clear only on a note switch: the previous note's twins must not linger
+    // under the new one. A reload for the same note (the index changed — every
+    // autosave does that) keeps the section up until the fresh answer lands,
+    // instead of blinking it out at each pause in typing.
+    if (twinsFor.current !== active.path) {
+      twinsFor.current = active.path
+      setTwins([])
+    }
+
+    void window.nodebook
+      .sameAs(active.path)
+      .then(async (list) => {
+        if (ignore) return
+        const views = await Promise.all(
+          list.map(async (t): Promise<TwinView | null> => {
+            const content = await window.nodebook.readFile(t.path).catch(() => null)
+            if (content === null) return null
+            return { ...t, gist: noteGist(content), citations: parseCitations(content) }
+          })
+        )
+        if (ignore) return
+        setTwins(views.filter((v): v is TwinView => v !== null))
+      })
+      .catch(() => {
+        // No twins to show is the honest fallback — the panel never errors.
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [active.path, reloadKey])
 
   // A triple object is a note name (navigable) or a literal value (e.g. a
   // `key:: value` field). Resolve it the same way wikilink navigation does.
@@ -79,10 +126,37 @@ export function BacklinksPanel({
     return Object.entries(acc)
   }
 
-  const outboundGroups = groupBy(outbound, (o) => o.relation)
-  const backlinkGroups = groupBy(backlinks, (b) => b.relation)
+  // A `same_as` that landed on a twin has its own section below, so it is not
+  // repeated among the ordinary links. One that resolved to nothing — a typo, a
+  // note not written yet — stays listed, so the broken link is still visible.
+  // The row's target is matched against the twins the MAP resolved (by name, or
+  // by path suffix for a `[[folder/Name]]` link), not re-resolved here: with two
+  // notes of one name the map prefers the linking note's folder, and this
+  // panel's own name-first lookup could pick the other one and list the same
+  // fact twice.
+  const twinPaths = new Set(twins.map((t) => t.path))
+  const namesATwin = (object: string): boolean => {
+    const key = object
+      .replace(/\\/g, '/')
+      .replace(/^\.?\//, '')
+      .replace(/\.md$/i, '')
+    return twins.some(
+      (t) => t.name === key || t.path.replace(/\\/g, '/').replace(/\.md$/i, '').endsWith(`/${key}`)
+    )
+  }
+  const shownOutbound = outbound.filter(
+    (o) => !(o.relation === 'same_as' && namesATwin(o.object))
+  )
+  const shownBacklinks = backlinks.filter(
+    (b) => !(b.relation === 'same_as' && twinPaths.has(b.source_file))
+  )
 
-  const cites = citations ?? []
+  const outboundGroups = groupBy(shownOutbound, (o) => o.relation)
+  const backlinkGroups = groupBy(shownBacklinks, (b) => b.relation)
+
+  // Both notes' provenance in one list: the note's own citations first, then
+  // each twin's, labelled, and nothing said twice.
+  const cites = unionCitations(citations ?? [], twins)
 
   return (
     <div className="backlinks">
@@ -97,6 +171,39 @@ export function BacklinksPanel({
               Open original
             </button>
           )}
+        </section>
+      )}
+      {twins.length > 0 && (
+        <section className="same-as">
+          <h2>Same as</h2>
+          {twins.map((twin) => {
+            const target = files.find((f) => f.path === twin.path)
+            return (
+              <div key={twin.path} className="same-as-twin">
+                <div
+                  className={`outbound-item same-as-name${target ? ' is-link' : ''}`}
+                  title={target ? `Open ${twin.name}` : undefined}
+                  role={target ? 'button' : undefined}
+                  tabIndex={target ? 0 : undefined}
+                  onClick={() => target && onOpen(target)}
+                  onKeyDown={(e) => {
+                    if (target && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault()
+                      onOpen(target)
+                    }
+                  }}
+                >
+                  {twin.name}
+                </div>
+                {twin.gist.summary && <p className="same-as-summary">{twin.gist.summary}</p>}
+                {twin.gist.quotes.map((q, i) => (
+                  <div key={i} className="source-quote same-as-quote">
+                    “{q}”
+                  </div>
+                ))}
+              </div>
+            )
+          })}
         </section>
       )}
       {cites.length > 0 && (
@@ -120,13 +227,18 @@ export function BacklinksPanel({
               <div>
                 📄 {c.source}{' '}
                 <span className="source-span">{c.where ?? `${c.start}–${c.end}`}</span>
+                {c.from && <span className="source-from"> from {c.from}</span>}
               </div>
               {c.quote && <div className="source-quote">“{quoteLine(c.quote)}”</div>}
             </div>
           ))}
         </section>
       )}
-      {outbound.length === 0 && backlinks.length === 0 && cites.length === 0 && !document ? (
+      {shownOutbound.length === 0 &&
+      shownBacklinks.length === 0 &&
+      cites.length === 0 &&
+      twins.length === 0 &&
+      !document ? (
         <>
           <h2>Connections</h2>
           <p className="backlinks-empty">

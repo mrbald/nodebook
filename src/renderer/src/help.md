@@ -144,8 +144,12 @@ it by hand, and nothing here changes your notes.
   is what your notes are about, not one of them.
 - **Two names, one note** — when you told Merge that a distilled note is the same
   thing as one you already had, the map draws them as one dot and lists the other
-  name under **also known as** when you click it. That decision is a plain
-  `same_as:: [[Other note]]` line in the note — delete it and they split apart again.
+  name under **also known as** when you click it. Open either note and the
+  right-hand panel adds a **Same as** section with the other one's summary and
+  quotes, and lists its sources beside your own, marked with the name they came
+  from — so what two books say about one idea reads in one place. Nothing is
+  copied between the two files: that decision is a plain `same_as:: [[Other note]]`
+  line in the note — delete it and they split apart again.
 
 ## Talk to docs — semantic search
 
@@ -215,6 +219,11 @@ first.
   and notes link across the document. Every claim in a note carries a **citation**:
   a real quote from the document. If the model can't back a point with a verbatim
   quote, that point is dropped — not guessed.
+- **Give the reading a focus** — starting a run asks what the notes should focus on:
+  leave it empty for the usual reading, press one of **Arguments**, **Timeline** or
+  **People**, or type your own line. The run keeps that focus for every step, remembers
+  it if you pause and resume, and shows it under **Distilled runs** — so the same book
+  read two ways gives you two runs you can tell apart.
 - **Quotes are checked against the whole document** — a point is kept only when its
   quote is found **exactly once** in the document (if the model pointed at the wrong
   passage, Nodebook finds the right one and corrects it); a quote that isn't there, or
@@ -263,7 +272,10 @@ first.
   saved beside yours as “Name (Book)” — because two notes with one name aren't
   necessarily about the same thing. If they *are*, tick **same as the existing note**
   next to it and the map will show them as a single note from then on, with the other
-  name listed beside it.
+  name listed beside it. Each of the two then shows the other's summary, quotes and
+  sources in its right-hand panel, so you read both readings of the idea without
+  leaving the note. Neither file is written to — the panel gathers this while you
+  read.
 - **The same idea under another name** — with Talk to docs on, Merge also points out a
   new note that looks like the same idea as a note you already have under a different
   name (the two are each other's closest match by meaning). It is a suggestion, shown

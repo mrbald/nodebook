@@ -177,6 +177,11 @@ export interface RunJson {
   originalPath?: string
   /** Provider/model the run was started with (free-form, for later diagnosis). */
   settings?: Record<string, string>
+  /** What the user asked this reading to focus on (see `extract.ts`), already
+   *  normalised. Recorded here because a resume must read the same document
+   *  the same way — it is asked once, at the start, and never again. Absent
+   *  for a run given no focus, and for every run made before there was one. */
+  focus?: string
 }
 
 /** Create the run dir and record what the run is, before any model call.
@@ -186,7 +191,8 @@ export function beginRun(
   vaultRoot: string,
   runId: string,
   source: RunSource,
-  settings?: Record<string, string>
+  settings?: Record<string, string>,
+  focus?: string
 ): string {
   const dir = runDir(vaultRoot, runId)
   mkdirSync(dir, { recursive: true })
@@ -195,18 +201,31 @@ export function beginRun(
     createdAt: new Date().toISOString(),
     ...(source.hash ? { hash: source.hash } : {}),
     ...(source.originalPath ? { originalPath: source.originalPath } : {}),
-    ...(settings ? { settings } : {})
+    ...(settings ? { settings } : {}),
+    ...(focus ? { focus } : {})
   }
   atomicWrite(join(dir, RUN_FILE), JSON.stringify(run, null, 2))
   atomicWrite(join(dir, SOURCE_FILE), source.text)
   return dir
 }
 
+/** A hand-edited or half-written run file can hold anything, so a `focus` that
+ *  is not a string is DROPPED rather than passed on: a resume that took it back
+ *  would fail with a type error instead of simply having no focus, and the runs
+ *  list would render whatever it found. */
+function withCheckedFocus<T extends { focus?: unknown }>(m: T): T {
+  if (typeof m.focus === 'string' && m.focus) return m
+  const out = { ...m }
+  delete out.focus
+  return out
+}
+
 /** A run's `run.json`, or null when it predates the start marker / is unreadable. */
 export function readRunJson(vaultRoot: string, runId: string): RunJson | null {
   try {
     const m = JSON.parse(readFileSync(join(runDir(vaultRoot, runId), RUN_FILE), 'utf8')) as RunJson
-    return typeof m.file === 'string' && typeof m.createdAt === 'string' ? m : null
+    if (typeof m.file !== 'string' || typeof m.createdAt !== 'string') return null
+    return withCheckedFocus(m)
   } catch {
     return null
   }
@@ -404,7 +423,8 @@ export function planRunFiles(
   source: RunSource,
   notes: EmittedNote[],
   stats?: Record<string, number>,
-  themes?: string[]
+  themes?: string[],
+  focus?: string
 ): PlannedFile[] {
   const sourceFile = `${sourceNoteName(source.file)}.md`
   const files: PlannedFile[] = [
@@ -427,6 +447,7 @@ export function planRunFiles(
         source: source.file,
         ...(source.hash ? { sourceHash: source.hash } : {}),
         notes: notes.length,
+        ...(focus ? { focus } : {}),
         ...(themes?.length ? { themes } : {}),
         ...(stats ? { stats } : {})
       },
@@ -449,6 +470,10 @@ export interface RunMeta {
    *  run so you can tell one run of a book from another. Absent when the run
    *  was too small to group (see `themes.ts`). */
   themes?: string[]
+  /** What this reading was asked to focus on. The other half of telling two
+   *  runs of one book apart, and the run's only record of the question it was
+   *  answering. Absent = no focus was given. */
+  focus?: string
   stats?: Record<string, number>
 }
 
@@ -458,7 +483,8 @@ export function readRunMeta(vaultRoot: string, runId: string): RunMeta | null {
   try {
     const raw = readFileSync(join(runDir(vaultRoot, runId), 'meta.json'), 'utf8')
     const m = JSON.parse(raw) as RunMeta
-    return typeof m.source === 'string' && typeof m.notes === 'number' ? m : null
+    if (typeof m.source !== 'string' || typeof m.notes !== 'number') return null
+    return withCheckedFocus(m)
   } catch {
     return null
   }
@@ -487,15 +513,16 @@ export function writeRunArtifact(
   source: RunSource,
   notes: EmittedNote[],
   stats?: Record<string, number>,
-  themes?: string[]
+  themes?: string[],
+  focus?: string
 ): RunArtifact {
   const dir = runDir(vaultRoot, runId)
   if (!existsSync(join(dir, RUN_FILE)) || !existsSync(join(dir, SOURCE_FILE)))
-    beginRun(vaultRoot, runId, source)
+    beginRun(vaultRoot, runId, source, undefined, focus)
   rmSync(join(dir, 'notes'), { recursive: true, force: true })
   mkdirSync(join(dir, 'notes'), { recursive: true })
   const notePaths: string[] = []
-  for (const f of planRunFiles(source, notes, stats, themes)) {
+  for (const f of planRunFiles(source, notes, stats, themes, focus)) {
     const abs = join(dir, f.relPath)
     atomicWrite(abs, f.content)
     if (f.relPath.startsWith(`notes${sep}`)) notePaths.push(abs)

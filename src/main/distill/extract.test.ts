@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildExtractionPrompt,
+  focusSentence,
+  normalizeFocus,
   parseExtraction,
   locateQuote,
   groundItems,
@@ -10,6 +12,7 @@ import {
   type ChunkProvenance,
   type ExtractedItem
 } from './extract'
+import { DISTILL_FOCUS_MAX } from '../../shared/types'
 
 /** `[start, end]` of a located span, failing loudly when it is null. */
 function spanOf(loc: { start: number; end: number } | null): [number, number] {
@@ -54,6 +57,74 @@ describe('buildExtractionPrompt', () => {
     const chunks = [{ chunkId: 0, heading: '', text: 'A first passage.' }]
     expect(buildExtractionPrompt(chunks).system).not.toMatch(/known concepts/i)
     expect(buildExtractionPrompt(chunks, { registry: '   ' }).system).not.toMatch(/known concepts/i)
+  })
+})
+
+describe("buildExtractionPrompt — the run's focus", () => {
+  const chunks = [{ chunkId: 3, heading: '', text: 'A republic checks faction.' }]
+
+  /** The user preamble as it read before a focus could be given. Pinned here as
+   *  a literal so "no focus, no change" is measured against the OLD bytes and
+   *  not against whatever the builder happens to produce today. */
+  const PREAMBLE_BEFORE_FOCUS =
+    'Extract the key concepts, claims, and entities in these source chunks, and ' +
+    'how they relate. Each item needs at least one evidence quote with its chunk ' +
+    'id. Prefer a few well-supported items over many weak ones.\n\nSOURCE CHUNKS:\n\n'
+
+  it('is byte-for-byte the old prompt when no focus is given', () => {
+    const plain = buildExtractionPrompt(chunks)
+    expect(plain.user.startsWith(PREAMBLE_BEFORE_FOCUS)).toBe(true)
+    // An empty field, and a field of nothing but spaces, are both "no focus".
+    for (const focus of [undefined, '', '   ', '\n\t ']) {
+      const p = buildExtractionPrompt(chunks, { focus })
+      expect(p.user).toBe(plain.user)
+      expect(p.system).toBe(plain.system)
+    }
+    expect(focusSentence(undefined)).toBe('')
+    expect(focusSentence('  ')).toBe('')
+  })
+
+  it('adds the focus to the USER prompt only, quoted, before the chunks', () => {
+    const plain = buildExtractionPrompt(chunks)
+    const { system, user } = buildExtractionPrompt(chunks, { focus: 'the timeline of events' })
+    // The system prompt is the contract — grounding, schema, language — and does
+    // not move because the user asked a different question of the same book.
+    expect(system).toBe(plain.system)
+    expect(system).not.toContain('timeline')
+    expect(user).toContain('"the timeline of events"')
+    expect(user.indexOf('Focus this reading on')).toBeGreaterThan(user.indexOf('Extract the key'))
+    expect(user.indexOf('Focus this reading on')).toBeLessThan(user.indexOf('SOURCE CHUNKS'))
+    // A focus says which items to prefer; it is never a licence to invent them.
+    expect(focusSentence('the timeline of events')).toMatch(/verbatim quote/i)
+    // Everything the old prompt said is still said.
+    expect(user).toContain('Prefer a few well-supported items over many weak ones.')
+  })
+
+  it('sends a focus as one line, whatever the field was typed like', () => {
+    const { user } = buildExtractionPrompt(chunks, { focus: '  the   people\n\nnamed  ' })
+    expect(user).toContain('"the people named"')
+  })
+})
+
+describe('normalizeFocus', () => {
+  it('collapses whitespace and trims; nothing typed means no focus', () => {
+    expect(normalizeFocus('  the  arguments\nthe author makes ')).toBe(
+      'the arguments the author makes'
+    )
+    expect(normalizeFocus(undefined)).toBe('')
+    expect(normalizeFocus(null)).toBe('')
+    expect(normalizeFocus('   ')).toBe('')
+  })
+
+  it('refuses a focus over the cap instead of quietly truncating it', () => {
+    // A run that read half the instruction it was given, and then recorded that
+    // half as what it did, is a worse answer than a refusal.
+    expect(normalizeFocus('x'.repeat(DISTILL_FOCUS_MAX))).toHaveLength(DISTILL_FOCUS_MAX)
+    expect(() => normalizeFocus('x'.repeat(DISTILL_FOCUS_MAX + 1))).toThrow(String(DISTILL_FOCUS_MAX))
+  })
+
+  it('measures the cap after normalising, not before', () => {
+    expect(normalizeFocus(`  ${'x'.repeat(DISTILL_FOCUS_MAX)}  `)).toHaveLength(DISTILL_FOCUS_MAX)
   })
 })
 

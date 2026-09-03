@@ -12,6 +12,7 @@
  */
 
 import { parseLenientObject } from './lenientJson'
+import { DISTILL_FOCUS_MAX } from '../../shared/types'
 
 export type ItemKind = 'concept' | 'claim' | 'entity'
 
@@ -161,6 +162,53 @@ export interface PromptOptions {
    *  and can link across windows it can no longer see. Empty/absent = the
    *  first window, which has nothing to reuse. */
   registry?: string
+  /** What this reading is for, in the user's own words — the run's focus.
+   *  Empty/absent = no focus, and the prompt is exactly what it was before a
+   *  focus could be given. */
+  focus?: string
+}
+
+/** The one shape a focus is ever stored or sent in: whitespace runs collapsed
+ *  to a single space, ends trimmed. */
+function tidyFocus(focus: string | null | undefined): string {
+  return (focus ?? '').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Normalise a focus as it arrives from the renderer, and refuse one that is
+ * too long. Pure, and the only place the cap is decided — the field's
+ * `maxLength` is a courtesy, not a guarantee, because the IPC call can be made
+ * without it. Over the cap is an error rather than a quiet truncation: a run
+ * that read half the instruction it was given, and recorded that half as what
+ * it did, is a worse answer than a refusal. Empty means no focus.
+ */
+export function normalizeFocus(raw: string | null | undefined): string {
+  const focus = tidyFocus(raw)
+  if (focus.length > DISTILL_FOCUS_MAX)
+    throw new Error(
+      `That focus is ${focus.length} characters — keep it to ${DISTILL_FOCUS_MAX} or fewer.`
+    )
+  return focus
+}
+
+/**
+ * The sentence a focus adds to the USER preamble, with the leading space that
+ * joins it to the sentence before — or '' when there is no focus. Exported so
+ * the planner can weigh exactly what every call will carry (`run.ts`) instead
+ * of estimating it.
+ *
+ * The focus is quoted so the model can see where the user's words end and the
+ * instructions resume, and the sentence repeats the grounding rule, because a
+ * focus is an invitation to prefer some items over others and never a licence
+ * to invent the ones it asked for.
+ */
+export function focusSentence(focus: string | null | undefined): string {
+  const f = tidyFocus(focus)
+  if (!f) return ''
+  return (
+    ` Focus this reading on: "${f}". Prefer items that serve that focus, and ` +
+    'still keep only what a verbatim quote supports.'
+  )
 }
 
 /**
@@ -176,6 +224,11 @@ export interface PromptOptions {
  * with an example is a rule with a bias; this one has to hold for any
  * language, so it names none — and the schema's first field asks the model to
  * say which language it sees before it writes a word (see `SCHEMA_HINT`).
+ *
+ * A run's focus rides in the USER preamble only. The system prompt is the
+ * contract — grounding, schema, language — and must read the same whatever the
+ * user asked this reading to look for; the focus is the ask, so it belongs
+ * with it.
  */
 export function buildExtractionPrompt(
   chunks: ClusterChunk[],
@@ -199,7 +252,9 @@ export function buildExtractionPrompt(
     .join('\n\n')
   const user =
     'Extract the key concepts, claims, and entities in these source chunks, and ' +
-    'how they relate. Each item needs at least one evidence quote with its chunk ' +
+    'how they relate.' +
+    focusSentence(opts.focus) +
+    ' Each item needs at least one evidence quote with its chunk ' +
     'id. Prefer a few well-supported items over many weak ones.\n\nSOURCE CHUNKS:\n\n' +
     body
   return { system, user }

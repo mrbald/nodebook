@@ -180,6 +180,11 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
   })
+  // A run is asked what to focus on before it costs anything. Confirming the
+  // empty field means no focus, and the reading is exactly what it always was.
+  const focusModal = page.locator('.modal', { hasText: 'What should the notes focus on?' })
+  await expect(focusModal).toBeVisible()
+  await focusModal.getByRole('button', { name: 'Distill' }).click()
   // The run map renders via the reused GraphView, with nodes + a source edge.
   await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
   await expect(page.locator('.graph-node').first()).toBeVisible()
@@ -196,6 +201,11 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(page.locator('.distill-coverage-banner')).toContainText(/Staged \d+ notes?/)
   await expect(page.locator('.distill-coverage-banner')).toContainText('Merge')
   await page.locator('.distill-coverage-close').click()
+
+  // Nothing was asked for, so nothing is recorded — an old run reads the same.
+  const runs = await page.evaluate(() => window.nodebook.distillListRuns())
+  expect(runs.length).toBeGreaterThan(0) // else the check below proves nothing
+  expect(runs.every((r) => r.focus === undefined)).toBe(true)
 })
 
 test('a closed run map is reachable again from the sidebar "Distilled runs" list', async () => {
@@ -388,6 +398,15 @@ test('a staged note opens READ-ONLY before merge, and its citation shows the quo
 /** A distilled concept note this run staged — never the book itself. */
 const someConcept = (id: string): string => stagedNames(id).find((n) => n !== 'on-government')!
 
+/** Open a note from the sidebar by its EXACT name — after a merge two notes
+ *  share a prefix ("Faction" and "Faction (on-government)"), so a substring
+ *  match would open whichever the tree happened to list first. */
+const openNote = async (name: string): Promise<void> => {
+  if (await page.locator('.graph-close').count()) await page.locator('.graph-close').click()
+  const exact = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+  await page.locator('.tree-name').filter({ hasText: exact }).first().click()
+}
+
 test('MERGE beside a note you already have: "Name (Book)", with the links rewritten', async () => {
   const runs = await page.evaluate(() => window.nodebook.distillListRuns())
   const id = runs[0].id
@@ -481,6 +500,36 @@ test('ticking "same as the existing note" collapses the two into one dot', async
   await page.locator('.graph-node', { hasText: clashName }).first().click()
   await expect(page.locator('.graph-insp-aliases')).toContainText(`${clashName} (on-government)`)
   await page.locator('.graph-close').click()
+
+  // Reading either note now shows what the other says. Your note has no
+  // citations of its own, so everything under Sources came from the twin and
+  // says so — and neither file was written to.
+  const twinName = `${clashName} (on-government)`
+  await openNote(clashName)
+  await expect(page.locator('.backlinks .same-as-name')).toHaveText(twinName)
+  await expect(page.locator('.backlinks .same-as-quote').first()).toBeVisible()
+
+  const fromTwin = page.locator('.backlinks .source-cite', { hasText: `from ${twinName}` })
+  await expect(fromTwin.first()).toBeVisible()
+  const quoted = (await fromTwin.first().locator('.source-quote').innerText())
+    .replace(/[“”…]/g, '')
+    .trim()
+  // Clicking it does what the note's own citation does: the book, at the quote.
+  await fromTwin.first().click()
+  await expect(page.locator('.cm-content')).toContainText(quoted.slice(0, 30))
+  await expect(page.locator('.cm-selectionBackground').first()).toBeVisible()
+
+  // The other direction reads the same, from the note that carries the field.
+  await openNote(twinName)
+  await expect(page.locator('.backlinks .same-as-name')).toHaveText(clashName)
+
+  // A note nobody merged has no such section.
+  await openNote('welcome')
+  await expect(page.locator('.backlinks .same-as')).toHaveCount(0)
+
+  expect(readFileSync(join(realpathSync(vaultDir), `${clashName}.md`), 'utf8')).not.toContain(
+    'same_as'
+  )
 
   await page.evaluate((r) => window.nodebook.distillUnmerge(r), id)
 })
@@ -589,4 +638,33 @@ test('a legacy .nodebook/distill run migrates to .distill, and a lost run.db reb
   expect(migrated.nodes.length).toBeGreaterThan(1)
   const rebuilt = await page.evaluate((r) => window.nodebook.distillGraph(r), id)
   expect(rebuilt.nodes.length).toBeGreaterThan(1)
+})
+
+test('a run can be told what to focus on, and the runs list says what it was', async () => {
+  // The fixed words behind the "Timeline" lens — a lens is reproducible because
+  // it is a string, not a paraphrase (see FOCUS_LENSES in App.tsx).
+  const TIMELINE = 'what happens, in order: events, dates, and what led to what'
+  if (await page.locator('.graph-close').count()) await page.locator('.graph-close').click()
+  await app.evaluate(async ({ dialog }, p) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] })
+  }, bookPath)
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
+  })
+
+  const modal = page.locator('.modal', { hasText: 'What should the notes focus on?' })
+  await expect(modal).toBeVisible()
+  await modal.getByRole('button', { name: 'Timeline' }).click()
+  await expect(modal.locator('.modal-input')).toHaveValue(TIMELINE)
+  await modal.getByRole('button', { name: 'Distill' }).click()
+
+  await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
+  // The run remembers what it was read for, so two runs of one book can be
+  // told apart in the sidebar.
+  const focused = await page.evaluate(
+    async (t) => (await window.nodebook.distillListRuns()).filter((r) => r.focus === t),
+    TIMELINE
+  )
+  expect(focused).toHaveLength(1)
+  await expect(page.locator('.run-item-focus').first()).toContainText(TIMELINE)
 })

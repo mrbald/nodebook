@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { useModal } from './useModal'
 
+/** A one-click filling of the field — a named lens, in the caller's words. */
+export interface PromptPreset {
+  label: string
+  value: string
+}
+
 interface PromptProps {
   title: string
   initialValue?: string
   placeholder?: string
   confirmLabel?: string
+  /** Buttons above the field; clicking one replaces what is typed. */
+  presets?: PromptPreset[]
+  maxLength?: number
+  /** Whether confirming with an empty field means something. Off by default:
+   *  a new note has to be named, but an optional answer is confirmable empty. */
+  allowEmpty?: boolean
   onConfirm: (value: string) => void
   onCancel: () => void
 }
@@ -15,6 +27,9 @@ export function Prompt({
   initialValue,
   placeholder,
   confirmLabel,
+  presets,
+  maxLength,
+  allowEmpty,
   onConfirm,
   onCancel,
 }: PromptProps) {
@@ -31,7 +46,7 @@ export function Prompt({
 
   function handleConfirm() {
     const trimmed = value.trim()
-    if (trimmed) {
+    if (trimmed || allowEmpty) {
       onConfirm(trimmed)
     }
   }
@@ -57,11 +72,29 @@ export function Prompt({
         <div className="modal-title" id="prompt-title">
           {title}
         </div>
+        {presets && presets.length > 0 && (
+          <div className="modal-presets">
+            {presets.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                className="modal-preset"
+                onClick={() => {
+                  setValue(p.value)
+                  inputRef.current?.focus()
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
         <input
           ref={inputRef}
           className="modal-input"
           value={value}
           placeholder={placeholder}
+          maxLength={maxLength}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
         />
