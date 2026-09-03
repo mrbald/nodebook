@@ -61,15 +61,17 @@ export class StagedRunStore {
   }
 
   /** Write a run's notes to disk and index them into its own db. Replaces any
-   *  previous run with the same id (closes its index first). `stats` and the
-   *  run's `themes` are persisted into meta.json — the first for later
-   *  diagnosis, the second for the runs list (see artifact.planRunFiles). */
+   *  previous run with the same id (closes its index first). `stats`, the run's
+   *  `themes` and the `focus` it was read with are persisted into meta.json —
+   *  the first for later diagnosis, the other two for the runs list (see
+   *  artifact.planRunFiles). */
   create(
     runId: string,
     source: RunSource,
     notes: EmittedNote[],
     stats?: Record<string, number>,
-    themes?: string[]
+    themes?: string[],
+    focus?: string
   ): { runId: string; dir: string } {
     this.closeOne(runId)
     // Finishing a run no longer wipes its whole folder (run.json/source.md are
@@ -77,7 +79,15 @@ export class StagedRunStore {
     // attempt has to go explicitly — otherwise its rows would join the new ones.
     for (const f of ['run.db', 'run.db-wal', 'run.db-shm'])
       rmSync(join(runDir(this.vaultRoot, runId), f), { force: true })
-    const { dir, notePaths } = writeRunArtifact(this.vaultRoot, runId, source, notes, stats, themes)
+    const { dir, notePaths } = writeRunArtifact(
+      this.vaultRoot,
+      runId,
+      source,
+      notes,
+      stats,
+      themes,
+      focus
+    )
     const idx = this.indexOf(runId, false) // the loop below indexes them; no rebuild
     for (const p of notePaths) idx.indexFile(p, readFileSync(p, 'utf8'), 0)
     return { runId, dir }

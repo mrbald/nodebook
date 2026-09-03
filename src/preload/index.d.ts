@@ -69,8 +69,8 @@ export interface NodebookApi {
   onFileChanged: (cb: (path: string) => void) => () => void
   distillPick: () => Promise<DistillDocument | null>
   distillRegisterPath: (absPath: string) => Promise<string>
-  distillRun: (docId: string) => Promise<DistillRunResult>
-  distillEstimate: (docId: string) => Promise<DistillEstimate>
+  distillRun: (docId: string, focus?: string) => Promise<DistillRunResult>
+  distillEstimate: (docId: string, focus?: string) => Promise<DistillEstimate>
   distillResume: (runId: string) => Promise<DistillRunResult>
   distillCancel: (runId: string) => Promise<void>
   distillGraph: (

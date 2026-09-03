@@ -144,6 +144,20 @@ describe('readRunMeta', () => {
     expect(m).toMatchObject({ source: 'B.md', notes: 0 })
     expect(m!.stats).toBeUndefined()
   })
+
+  it("round-trips the focus a run was read with — that is how two runs of one book are told apart", () => {
+    const v = tmpVault()
+    const focus = 'the arguments the author makes'
+    writeRunArtifact(v, 'r1', { file: 'B.md', text: 'x' }, [], undefined, ['Theme'], focus)
+    expect(readRunMeta(v, 'r1')?.focus).toBe(focus)
+    // A run given no focus records none, and still reads back (as every run
+    // made before there was a focus does).
+    writeRunArtifact(v, 'r2', { file: 'B.md', text: 'x' }, [])
+    expect(readRunMeta(v, 'r2')?.focus).toBeUndefined()
+    expect(JSON.parse(readFileSync(join(runDir(v, 'r2'), 'meta.json'), 'utf8'))).not.toHaveProperty(
+      'focus'
+    )
+  })
 })
 
 describe('writeRunArtifact', () => {
@@ -616,9 +630,20 @@ describe('a run in flight (start marker, checkpoint, resume)', () => {
     const run = readRunJson(v, 'r1')
     expect(run?.file).toBe('Federalist.md')
     expect(run?.settings).toEqual({ provider: 'anthropic', model: 'claude-test' })
+    expect(run?.focus).toBeUndefined()
     expect(Number.isNaN(Date.parse(run!.createdAt))).toBe(false)
     // The converted text is the run's own copy — a resume never re-converts,
     // and never depends on the original file still being where it was.
+    expect(readRunSource(v, 'r1')).toEqual(src)
+  })
+
+  it('remembers the focus, so a resume never asks for it again', () => {
+    const v = tmpVault()
+    const focus = 'what happens, in order: events, dates, and what led to what'
+    beginRun(v, 'r1', src, undefined, focus)
+    expect(readRunJson(v, 'r1')?.focus).toBe(focus)
+    // The saved text is the run's own copy and carries no focus of its own —
+    // the focus belongs to the reading, not to the document.
     expect(readRunSource(v, 'r1')).toEqual(src)
   })
 

@@ -43,6 +43,7 @@ import { coverageOf, planWindows } from './windows'
 import { ConceptRegistry } from './registry'
 import {
   buildExtractionPrompt,
+  focusSentence,
   parseExtraction,
   groundItems,
   type ChunkProvenance,
@@ -171,6 +172,11 @@ export interface DistillOptions {
   /** Where completed windows are recorded, and where a resume reads them back.
    *  Absent = a run that cannot be resumed (the unit tests' default). */
   checkpoint?: CheckpointStore
+  /** What this reading is for, in the user's own words (see `extract.ts`).
+   *  Normalised by the caller; every extraction call of the run carries it.
+   *  Absent = no focus, and the prompts are what they were before a focus
+   *  could be given. */
+  focus?: string
 }
 
 /** What a run will cost, from the converted text alone — no model calls, no
@@ -204,10 +210,18 @@ function promptOverhead(): number {
 
 /**
  * Pure: how a prompt budget is spent. The model declares what it will accept;
- * out of that come the fixed instructions, the concept registry and room for
- * the answer, and what is left is what the planner may fill with source text.
+ * out of that come the fixed instructions, the run's focus, the concept
+ * registry and room for the answer, and what is left is what the planner may
+ * fill with source text.
+ *
+ * The focus is weighed from the very sentence the builder inserts, and is not
+ * cached: it belongs to one run, so a cache of the fixed overhead must never
+ * answer for it.
  */
-export function windowBudgets(inputBudget: number): {
+export function windowBudgets(
+  inputBudget: number,
+  focus?: string
+): {
   windowWeight: number
   registryBudget: number
 } {
@@ -216,7 +230,7 @@ export function windowBudgets(inputBudget: number): {
   return {
     windowWeight: Math.max(
       MIN_WINDOW_WEIGHT,
-      inputBudget - promptOverhead() - registryBudget - reserve
+      inputBudget - promptOverhead() - weightOf(focusSentence(focus)) - registryBudget - reserve
     ),
     registryBudget
   }
@@ -228,7 +242,7 @@ function planFor(
   opts: DistillOptions
 ): ReturnType<typeof planWindows> & { registryBudget: number } {
   const budget = opts.inputBudget && opts.inputBudget > 0 ? opts.inputBudget : DEFAULT_INPUT_BUDGET
-  const derived = windowBudgets(budget)
+  const derived = windowBudgets(budget, opts.focus)
   const windowWeight =
     opts.windowSize && opts.windowSize > 0 ? opts.windowSize : derived.windowWeight
   return {
@@ -318,14 +332,17 @@ async function collect(stream: AsyncIterable<string>, signal?: AbortSignal): Pro
   return out
 }
 
-/** Extract one window, with a single repair retry on unparseable JSON. */
+/** Extract one window, with a single repair retry on unparseable JSON. The
+ *  repair resends this same user prompt, so it carries the run's focus by
+ *  construction rather than by a second rule. */
 async function extractWindow(
   chat: ChatModel,
   chunks: { chunkId: number; heading: string; text: string }[],
   registry: string,
+  focus: string | undefined,
   signal?: AbortSignal
 ): Promise<{ items: ExtractedItem[]; failed: boolean }> {
-  const { system, user } = buildExtractionPrompt(chunks, { registry })
+  const { system, user } = buildExtractionPrompt(chunks, { registry, focus })
   const first = await collect(
     chat.chat({ system, messages: [{ role: 'user', content: user }], signal }),
     signal
@@ -390,6 +407,9 @@ interface ReadContext {
   prov: Map<number, ChunkProvenance>
   registry: ConceptRegistry
   registryBudget: number
+  /** The run's focus, carried into every extraction prompt — the halves of a
+   *  split window included, since they read through this same context. */
+  focus?: string
   /** chunk id → the ids shown in the same call, for grounding's re-attribution. */
   windowOf: Map<number, number[]>
   retry?: RetryOptions
@@ -429,7 +449,14 @@ async function readWindow(ctx: ReadContext, ids: number[], depth: number): Promi
   ]
   try {
     const { items, failed } = await withRetry(
-      () => extractWindow(ctx.chat, shown, ctx.registry.render(ctx.registryBudget), ctx.signal),
+      () =>
+        extractWindow(
+          ctx.chat,
+          shown,
+          ctx.registry.render(ctx.registryBudget),
+          ctx.focus,
+          ctx.signal
+        ),
       { ...ctx.retry, signal: ctx.signal }
     )
     registerTitles(ctx, items, ids)
@@ -670,6 +697,7 @@ export async function distill(
     prov,
     registry: new ConceptRegistry(),
     registryBudget: planned.registryBudget,
+    focus: opts.focus,
     windowOf: new Map<number, number[]>(),
     retry: opts.retry,
     signal: opts.signal,
