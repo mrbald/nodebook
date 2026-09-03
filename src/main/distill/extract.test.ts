@@ -3,7 +3,6 @@ import {
   buildExtractionPrompt,
   focusSentence,
   normalizeFocus,
-  FOCUS_MAX,
   parseExtraction,
   locateQuote,
   groundItems,
@@ -13,6 +12,7 @@ import {
   type ChunkProvenance,
   type ExtractedItem
 } from './extract'
+import { DISTILL_FOCUS_MAX } from '../../shared/types'
 
 /** `[start, end]` of a located span, failing loudly when it is null. */
 function spanOf(loc: { start: number; end: number } | null): [number, number] {
@@ -119,12 +119,12 @@ describe('normalizeFocus', () => {
   it('refuses a focus over the cap instead of quietly truncating it', () => {
     // A run that read half the instruction it was given, and then recorded that
     // half as what it did, is a worse answer than a refusal.
-    expect(normalizeFocus('x'.repeat(FOCUS_MAX))).toHaveLength(FOCUS_MAX)
-    expect(() => normalizeFocus('x'.repeat(FOCUS_MAX + 1))).toThrow(String(FOCUS_MAX))
+    expect(normalizeFocus('x'.repeat(DISTILL_FOCUS_MAX))).toHaveLength(DISTILL_FOCUS_MAX)
+    expect(() => normalizeFocus('x'.repeat(DISTILL_FOCUS_MAX + 1))).toThrow(String(DISTILL_FOCUS_MAX))
   })
 
   it('measures the cap after normalising, not before', () => {
-    expect(normalizeFocus(`  ${'x'.repeat(FOCUS_MAX)}  `)).toHaveLength(FOCUS_MAX)
+    expect(normalizeFocus(`  ${'x'.repeat(DISTILL_FOCUS_MAX)}  `)).toHaveLength(DISTILL_FOCUS_MAX)
   })
 })
 

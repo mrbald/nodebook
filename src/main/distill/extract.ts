@@ -12,6 +12,7 @@
  */
 
 import { parseLenientObject } from './lenientJson'
+import { DISTILL_FOCUS_MAX } from '../../shared/types'
 
 export type ItemKind = 'concept' | 'claim' | 'entity'
 
@@ -167,10 +168,6 @@ export interface PromptOptions {
   focus?: string
 }
 
-/** How long a run's focus may be. Long enough for a sentence or two, short
- *  enough that repeating it in every call costs nothing worth measuring. */
-export const FOCUS_MAX = 300
-
 /** The one shape a focus is ever stored or sent in: whitespace runs collapsed
  *  to a single space, ends trimmed. */
 function tidyFocus(focus: string | null | undefined): string {
@@ -187,9 +184,9 @@ function tidyFocus(focus: string | null | undefined): string {
  */
 export function normalizeFocus(raw: string | null | undefined): string {
   const focus = tidyFocus(raw)
-  if (focus.length > FOCUS_MAX)
+  if (focus.length > DISTILL_FOCUS_MAX)
     throw new Error(
-      `That focus is ${focus.length} characters — keep it to ${FOCUS_MAX} or fewer.`
+      `That focus is ${focus.length} characters — keep it to ${DISTILL_FOCUS_MAX} or fewer.`
     )
   return focus
 }
