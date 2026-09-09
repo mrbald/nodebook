@@ -1,7 +1,17 @@
 # Vulnerability ignores for the osv-scanner job (security.yml).
 # Each entry needs a reason and should be re-checked when the dep tree moves.
 #
-# Currently empty: the one entry we carried (GHSA-mh99-v99m-4gvg, brace-expansion
+# History: the entry we once carried (GHSA-mh99-v99m-4gvg, brace-expansion
 # OOM DoS under electron-builder's minimatch@3) was reported by the scanner as an
 # unused ignore once the dep tree moved, so it was dropped rather than left as
 # stale config that reads like a live exception.
+
+# adm-zip 0.6.0 — GHSA-vwc7-r8mq-g2x9 (extraction follows destination
+# symlinks). No fixed release as of 2026-09-09. Reached only through
+# onnxruntime-node, which uses adm-zip in its INSTALL script to unpack the
+# runtime binary it downloads from its own release; nothing calls adm-zip when
+# the app runs, and nothing hands it a zip from a user. Re-check when adm-zip
+# publishes a fix or onnxruntime-node drops it (npm view adm-zip version).
+[[IgnoredVulns]]
+id = "GHSA-vwc7-r8mq-g2x9"
+reason = "adm-zip is used only by onnxruntime-node's install script to unpack its own downloaded binary; never invoked at app runtime; no fixed release yet (2026-09-09)"
