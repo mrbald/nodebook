@@ -1,7 +1,9 @@
 import MarkdownIt from 'markdown-it'
-import type { StateInline } from 'markdown-it/index.js'
+// markdown-it 15 exports the instance as a TYPE named like the default export
+// (a callable), so the type is imported under its own name.
+import type { MarkdownIt as MarkdownItInstance, StateInline } from 'markdown-it'
 
-function wikilink(md: MarkdownIt): void {
+function wikilink(md: MarkdownItInstance): void {
   md.inline.ruler.before('link', 'wikilink', (state: StateInline, silent: boolean) => {
     const src = state.src
     const start = state.pos
