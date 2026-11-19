@@ -32,12 +32,9 @@ store) index in the main process.
   See [docs/talk-to-docs.md](docs/talk-to-docs.md).
 - **Distill a document** — turn a **PDF, EPUB, .docx, HTML, Markdown or text** file
   into small, linked notes (**File ▸ Distill a Document…**; needs a chat provider).
-  Nodebook reads the **whole** document in order, one model call per window sized
+  Nodebook reads the extracted text in order and flags PDF pages that yielded no usable text before starting. It makes one model call per window sized
   to the model's context, each call carrying the concepts already named — so one
-  idea keeps one name and links reach across the book. Every point carries a
-  **citation**: a verbatim quote, accepted only where it occurs **uniquely** in the
-  document, with the **page or section** beside it; unbacked points are dropped,
-  not guessed. Notes are grouped under named **themes**, so the map reads
+  idea keeps one name and links reach across the book. Each staged concept note includes a **citation** to a matching quote, with its **page or section**. Notes are grouped under named **themes**, so the map reads
   book → themes → notes. The run stages in `<vault>/.distill/` behind its own
   index — readable, but invisible to search and the vault graph — until **Merge**
   copies it in; merge plans the write, never overwrites a note of yours, and
@@ -47,7 +44,7 @@ store) index in the main process.
 - **Knowledge index** — `[[links]]` and `key:: value` fields are harvested into a
   triple store (`subject, relation, object`).
 - **Knowledge map** — a force-directed graph (the **⊹ Map** button): local or global,
-  pan/zoom, **PageRank-sized** nodes (the hubs), **cluster-coloured** communities,
+  pan/zoom, optional **Routed (ELK)** placement and edge routing, **PageRank-sized** nodes (the hubs), **cluster-coloured** communities,
   relation-coloured edges, "ghost" nodes for uncreated links; click to recenter, live
   on save. With Talk-to-docs on, an opt-in **✨ Related** overlay adds dashed edges to
   *semantically similar but unlinked* notes. Derived from the index, never hand-drawn.
@@ -109,10 +106,16 @@ node node_modules/electron/install.js
 
 ## Downloads & releases
 
-Tagged releases publish signed-or-unsigned installers for **macOS** (`.dmg`/`.zip`),
-**Windows** (NSIS installer + portable), and **Linux** (`AppImage`/`.deb`) via
-GitHub Actions. See the [Releases](https://github.com/mrbald/nodebook/releases)
-page, and [RELEASING.md](RELEASING.md) for the release + code-signing setup.
+On macOS, choose the **arm64 DMG** for an Apple silicon Mac or the **x64 DMG**
+for an Intel Mac. Open the DMG, drag Nodebook to Applications, then open it
+from Applications. The app is ad-hoc signed and Apple has not notarized it.
+If macOS says it can't verify the copy you downloaded from GitHub Releases,
+dismiss the alert, then choose **System Settings → Privacy & Security →
+Open Anyway** for Nodebook and confirm. macOS remembers the exception for
+that copy. [Apple’s first-launch instructions](https://support.apple.com/en-us/102445)
+
+Windows downloads include an installer and a portable executable. Linux
+downloads include AppImage and Debian packages. [GitHub releases](https://github.com/mrbald/nodebook/releases) · [Release procedure](RELEASING.md)
 
 ## Project layout
 

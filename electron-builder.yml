@@ -18,14 +18,11 @@ asarUnpack:
   - '**/node_modules/sqlite-vec*/**'
 mac:
   category: public.app-category.productivity
-  # Signing is applied only when a cert is provided via CSC_LINK (see
-  # .github/workflows/release.yml); without it the build is unsigned.
+  # afterPack applies the ad-hoc signature used for GitHub releases.
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # Notarization: flip to `true` once the APPLE_* secrets are added, so the
-  # first unsigned release doesn't fail on a missing Apple credential.
   notarize: false
   target:
     - target: dmg
@@ -41,6 +38,6 @@ linux:
   target:
     - AppImage
     - deb
-# Publish to GitHub Releases for the pushed tag (needs GH_TOKEN in CI).
+# The release workflow stages and verifies the GitHub Release draft.
 publish:
   provider: github

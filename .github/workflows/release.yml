@@ -1,64 +1,208 @@
 name: Release
 
-# Tag a commit `vX.Y.Z` and push the tag to build + publish all three OS
-# binaries to a single GitHub Release.
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write # GITHUB_TOKEN needs this to create the Release
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
 
 jobs:
-  release:
+  build:
     strategy:
-      fail-fast: false # one OS failing must not cancel the others
+      fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        include:
+          - os: macos-15
+            mac_arch: arm64
+            runner_arch: ARM64
+            macho_arch: arm64
+          - os: macos-15-intel
+            mac_arch: x64
+            runner_arch: X64
+            macho_arch: x86_64
+          - os: windows-latest
+          - os: ubuntu-latest
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
-      # Native better-sqlite3 must compile on each OS — no cross-compile, which
-      # is exactly why this is a per-OS matrix.
-      - run: npm ci
-      # Don't ship a build stamped with the wrong version.
       - name: Verify tag matches package.json version
         shell: bash
         run: |
-          PKG=$(node -p "require('./package.json').version")
-          TAG=${GITHUB_REF_NAME#v}
-          test "$PKG" = "$TAG" || { echo "::error::tag $GITHUB_REF_NAME != package.json $PKG"; exit 1; }
-      # Gate the release on the same checks CI runs (the e2e is Linux-only).
-      - name: Typecheck & unit tests
+          version=$(node -p "require('./package.json').version")
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+      - run: npm ci
+      - name: Typecheck and unit tests
         run: npm run typecheck && npm test
-      - name: Build & publish
+      - run: npm run build
+      - name: Build ad-hoc signed macOS distribution files
+        if: runner.os == 'macOS'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Raw cert secrets (base64 .p12/.pfx). CSC_LINK is exported below ONLY
-          # when non-empty — setting it to "" makes macOS electron-builder treat
-          # the empty value as a cert path and fail ("not a file").
-          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          MAC_ARCH: ${{ matrix.mac_arch }}
+          EXPECTED_ARCH: ${{ matrix.runner_arch }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          test "$RUNNER_ARCH" = "$EXPECTED_ARCH"
+          # The afterPack hook ad-hoc signs the app before packaging.
+          npx --no-install electron-builder --mac dmg zip "--$MAC_ARCH" --publish never \
+            -c.dmg.writeUpdateInfo=false \
+            '-c.mac.artifactName=${productName}-${version}-${arch}.${ext}'
+      - name: Verify and smoke test macOS distribution files
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_ARCH: ${{ matrix.mac_arch }}
+          MACHO_ARCH: ${{ matrix.macho_arch }}
+        run: |
+          base="dist/Nodebook-${GITHUB_REF_NAME#v}-$MAC_ARCH"
+          dmg="$base.dmg"
+          zip="$base.zip"
+          test -s "$dmg"
+          test -s "$zip"
+          verify_and_smoke() {
+            local app="$1"
+            local binary="$app/Contents/MacOS/Nodebook"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            local signature
+            signature=$(LC_ALL=C codesign --display --verbose=4 "$app" 2>&1)
+            grep -Fxq 'Signature=adhoc' <<< "$signature"
+            test "$(lipo -archs "$binary")" = "$MACHO_ARCH"
+            NODEBOOK_SMOKE_BINARY="$binary" npx --no-install playwright test e2e/talk.spec.ts
+          }
+
+          hdiutil verify "$dmg"
+
+          scratch=$(mktemp -d)
+          mount="$scratch/mount"
+          mounted=false
+          cleanup() {
+            if [[ "$mounted" == true ]]; then
+              hdiutil detach "$mount" >/dev/null || return
+            fi
+            rm -rf "$scratch"
+          }
+          trap cleanup EXIT
+          mkdir "$mount"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg"
+          mounted=true
+          ditto "$mount/Nodebook.app" "$scratch/dmg/Nodebook.app"
+          hdiutil detach "$mount"
+          mounted=false
+          verify_and_smoke "$scratch/dmg/Nodebook.app"
+
+          ditto -x -k "$zip" "$scratch/zip"
+          verify_and_smoke "$scratch/zip/Nodebook.app"
+      - name: Build Windows or Linux distribution files
+        if: runner.os != 'macOS'
+        shell: bash
+        env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          # Apple notarization (effective once mac.notarize is `true`).
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Enable signing only when a cert is actually present; otherwise build
-          # unsigned without electron-builder attempting (and failing) to sign.
-          if [ "$RUNNER_OS" = "macOS" ] && [ -n "$MAC_CSC_LINK" ]; then
-            export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
-          elif [ "$RUNNER_OS" = "Windows" ] && [ -n "$WIN_CSC_LINK" ]; then
+          if [[ "$RUNNER_OS" == Windows && -n "$WIN_CSC_LINK" ]]; then
             export CSC_LINK="$WIN_CSC_LINK" CSC_KEY_PASSWORD="$WIN_CSC_KEY_PASSWORD"
           else
+            unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD
             export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
-          npm run build
-          npx electron-builder --publish always
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            npx --no-install electron-builder --publish never \
+              '-c.nsis.artifactName=${productName}-${version}-setup.${ext}' \
+              '-c.portable.artifactName=${productName}-${version}-portable.${ext}'
+          else
+            npx --no-install electron-builder --publish never
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+
+  draft:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: Create and verify the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          shopt -s nullglob dotglob
+          mac=()
+          for arch in arm64 x64; do
+            for extension in dmg zip; do
+              asset="assets/Nodebook-${GITHUB_REF_NAME#v}-$arch.$extension"
+              mac+=("$asset")
+            done
+          done
+          windows=(
+            "assets/Nodebook-${GITHUB_REF_NAME#v}-setup.exe"
+            "assets/Nodebook-${GITHUB_REF_NAME#v}-portable.exe"
+          )
+          appimages=(assets/*.AppImage)
+          debs=(assets/*.deb)
+          test "${#appimages[@]}" = 1
+          test "${#debs[@]}" = 1
+          files=("${mac[@]}" "${windows[@]}" "${appimages[@]}" "${debs[@]}")
+          for asset in "${files[@]}"; do
+            test -s "$asset"
+          done
+
+          state=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" |
+            jq -r --arg tag "$GITHUB_REF_NAME" '.[] | select(.tag_name == $tag) | .draft')
+          case "$state" in
+            '')
+              notes="$RUNNER_TEMP/release-notes.md"
+              cat > "$notes" <<'NOTES'
+          ## Install on macOS
+
+          1. Download the `arm64` DMG for Apple silicon or the `x64` DMG for Intel.
+          2. Open the DMG, drag Nodebook to Applications, then open it from Applications.
+          3. Nodebook is ad-hoc signed and Apple has not notarized it. If macOS says it can't verify Nodebook, dismiss the alert. In **System Settings → Privacy & Security**, click **Open Anyway** for Nodebook and confirm. macOS remembers the exception for that copy.
+
+          Use this exception only for a copy you trust from this release. If macOS reports that the app is damaged or will harm your computer, stop. [Apple’s first-launch instructions](https://support.apple.com/en-us/102445)
+          NOTES
+              gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+                --draft --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$notes" --generate-notes
+              ;;
+            true) ;;
+            *)
+              echo "::error::The tag already has a public release or multiple releases"
+              exit 1
+              ;;
+          esac
+          gh release download "$GITHUB_REF_NAME" --pattern '*' --dir downloaded
+          downloaded=(downloaded/*)
+          test "${#downloaded[@]}" = "${#files[@]}"
+          for asset in "${files[@]}"; do
+            cmp "$asset" "downloaded/${asset##*/}"
+          done
