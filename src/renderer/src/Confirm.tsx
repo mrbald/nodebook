@@ -4,12 +4,13 @@ import { useModal } from './useModal'
 interface ConfirmProps {
   message: string
   confirmLabel?: string
+  secondaryAction?: { label: string; onClick: () => void }
   onConfirm: () => void
   onCancel: () => void
 }
 
 /** A yes/no modal (delete confirmation). Reuses the `.modal-*` styles. */
-export function Confirm({ message, confirmLabel, onConfirm, onCancel }: ConfirmProps) {
+export function Confirm({ message, confirmLabel, secondaryAction, onConfirm, onCancel }: ConfirmProps) {
   const modalRef = useModal()
   // Escape closes; Enter/Space activate whichever button has focus (the dialog
   // opens with Cancel focused, so an accidental Enter won't fire the destructive
@@ -39,7 +40,15 @@ export function Confirm({ message, confirmLabel, onConfirm, onCancel }: ConfirmP
           <button className="modal-btn" onClick={onCancel}>
             Cancel
           </button>
-          <button className="modal-btn modal-btn-danger" onClick={onConfirm}>
+          {secondaryAction && (
+            <button className="modal-btn modal-btn-danger" onClick={secondaryAction.onClick}>
+              {secondaryAction.label}
+            </button>
+          )}
+          <button
+            className={`modal-btn ${secondaryAction ? 'modal-btn-primary' : 'modal-btn-danger'}`}
+            onClick={onConfirm}
+          >
             {confirmLabel ?? 'Delete'}
           </button>
         </div>

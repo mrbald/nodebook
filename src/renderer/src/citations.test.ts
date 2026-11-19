@@ -3,8 +3,7 @@ import {
   parseCitations,
   parseDocumentNote,
   resolveCitationSpan,
-  gateAnswerCitations,
-  usedCitations,
+  resolveAskPassage,
   type NoteCitation
 } from './citations'
 
@@ -108,35 +107,17 @@ describe('resolveCitationSpan', () => {
   })
 })
 
-describe('gateAnswerCitations', () => {
-  const sources = ['Federalist Papers', 'welcome']
+describe('resolveAskPassage', () => {
+  const span = { start: 0, end: 8, quote: 'Evidence' }
 
-  it('leaves a wikilink naming a real source untouched', () => {
-    expect(gateAnswerCitations('See [[welcome]] for more.', sources)).toBe('See [[welcome]] for more.')
+  it('verifies the exact span in the opened bytes', () => {
+    expect(resolveAskPassage('Evidence remains here.', span)).toEqual({ start: 0, end: 8 })
   })
 
-  it('flattens a wikilink naming a non-source to plain text', () => {
-    expect(gateAnswerCitations('See [[Made Up Note]] for more.', sources)).toBe('See Made Up Note for more.')
-  })
-
-  it('is case-sensitive — a case mismatch is not a real citation', () => {
-    expect(gateAnswerCitations('See [[Welcome]].', sources)).toBe('See Welcome.')
-  })
-
-  it('flattens to the display text when a piped wikilink is not a real source', () => {
-    expect(gateAnswerCitations('See [[Fake|shown text]].', sources)).toBe('See shown text.')
-  })
-})
-
-describe('usedCitations', () => {
-  const sources = ['Federalist Papers', 'welcome']
-
-  it('collects only the sources actually named via [[wikilink]]', () => {
-    expect(usedCitations('Per [[welcome]] and [[Nonexistent]].', sources)).toEqual(new Set(['welcome']))
-  })
-
-  it('returns an empty set when nothing is cited', () => {
-    expect(usedCitations('No citations here.', sources)).toEqual(new Set())
+  it('relocates only a unique unchanged quote', () => {
+    expect(resolveAskPassage('A line above Evidence.', span)).toEqual({ start: 13, end: 21 })
+    expect(resolveAskPassage('Here: Evidence. They copied Evidence.', span)).toBeNull()
+    expect(resolveAskPassage('The claim was replaced.', span)).toBeNull()
   })
 })
 

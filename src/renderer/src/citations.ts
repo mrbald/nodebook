@@ -1,3 +1,5 @@
+import type { Citation } from '@shared/types'
+
 /**
  * Parse a distilled note's provenance from its frontmatter — the `source:` book
  * and the `cite:` list of `chunk` + `span: start-end` (character offsets into the
@@ -8,11 +10,6 @@
  *
  * Provenance lives in frontmatter (single-colon YAML) precisely so `harvest()`
  * never turns it into a graph edge — see distill/emit.ts.
- *
- * This module also holds the pure "Ask" citation-gating helpers: deciding which
- * `[[wikilink]]`s in a streamed answer are real citations (named in the
- * retrieved sources) vs. a hallucinated/misremembered name that must not render
- * as a clickable link.
  */
 
 export interface NoteCitation {
@@ -150,44 +147,14 @@ export function resolveCitationSpan(content: string, c: NoteCitation): CitationS
   return loc ? { status: 'relocated', start: loc.start, end: loc.end } : { status: 'not-found' }
 }
 
-// ---------------------------------------------------------------------------
-// "Ask" answer citation gating — only a `[[wikilink]]` that names a retrieved
-// source is a real citation; anything else must render as plain text so a
-// hallucinated citation can't look identical to a real one.
-// ---------------------------------------------------------------------------
-
-/** A wikilink's target from its `[[inner]]` text — matches markdownRender.ts's
- *  wikilink rule exactly (target is before `|` display text and `#` anchor). */
-function wikilinkTarget(inner: string): string {
-  return inner.split('|')[0].split('#')[0].trim()
-}
-
-const WIKILINK_RE = /\[\[([^[\]]+)\]\]/g
-
-/**
- * Rewrite an answer's `[[wikilink]]` syntax so only real citations stay
- * clickable: a target that exactly (case-sensitively) names one of `sources`
- * is left as wikilink syntax; anything else — a hallucinated or misremembered
- * name — is flattened to its plain display text, so `renderMarkdown` can't
- * turn it into a link.
- */
-export function gateAnswerCitations(answer: string, sources: string[]): string {
-  const known = new Set(sources)
-  return answer.replace(WIKILINK_RE, (whole, inner: string) => {
-    if (known.has(wikilinkTarget(inner))) return whole
-    return inner.includes('|') ? inner.split('|')[1].trim() : wikilinkTarget(inner)
-  })
-}
-
-/** Names from `sources` that `answer` actually cites via an exact,
- *  case-sensitive `[[wikilink]]` — the answer's real grounding, vs. merely
- *  having been retrieved as context. */
-export function usedCitations(answer: string, sources: string[]): Set<string> {
-  const known = new Set(sources)
-  const used = new Set<string>()
-  for (const m of answer.matchAll(WIKILINK_RE)) {
-    const target = wikilinkTarget(m[1])
-    if (known.has(target)) used.add(target)
-  }
-  return used
+/** Reveal an Ask passage only where its exact source text can still be verified. */
+export function resolveAskPassage(
+  content: string,
+  { start, end, quote }: Pick<Citation, 'start' | 'end' | 'quote'>
+): { start: number; end: number } | null {
+  if (!quote) return null
+  if (content.slice(start, end) === quote) return { start, end }
+  const at = content.indexOf(quote)
+  if (at < 0 || content.indexOf(quote, at + 1) !== -1) return null
+  return { start: at, end: at + quote.length }
 }

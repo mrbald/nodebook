@@ -1,7 +1,18 @@
 import type Database from 'better-sqlite3'
-import { createHash } from 'crypto'
-import * as sqliteVec from 'sqlite-vec'
+import { createHash, randomUUID } from 'crypto'
+import { join, sep } from 'node:path'
+import { getLoadablePath } from 'sqlite-vec'
 import { chunkMarkdown, embedText } from './chunk'
+
+/** SQLite opens the extension directly through the OS, outside Electron's ASAR filesystem. */
+export function sqliteExtensionPath(extension: string, resourcesPath?: string): string {
+  if (!resourcesPath) return extension
+
+  const archivePrefix = join(resourcesPath, 'app.asar') + sep
+  if (!extension.startsWith(archivePrefix)) return extension
+
+  return join(resourcesPath, 'app.asar.unpacked', extension.slice(archivePrefix.length))
+}
 
 /** sqlite-vec stores a `float[N]` vector as a BLOB of N little-endian float32s. */
 const f32ToBlob = (v: Float32Array): Buffer => Buffer.from(v.buffer, v.byteOffset, v.byteLength)
@@ -39,8 +50,10 @@ export interface PendingChunk {
 export interface VectorHit {
   id: number
   file: string
+  heading: string
+  start: number
+  end: number
   text: string
-  rank: number
 }
 
 /**
@@ -82,15 +95,26 @@ export function needsEmbeddingReset(
  * matching more of them. Null for a query with no tokens. Exported for unit
  * tests.
  */
-export function ftsOrMatch(query: string): string | null {
-  const tokens = query.match(/[\p{L}\p{N}]+/gu)
-  if (!tokens || tokens.length === 0) return null
-  return tokens.map((t) => `${t}*`).join(' OR ')
+export function ftsMatch(query: string, operator: 'AND' | 'OR'): string | null {
+  const tokens = query.match(/[\p{L}\p{N}\p{M}]+/gu)
+  if (!tokens?.length) return null
+  return tokens.map((t) => `"${t}"*`).join(` ${operator} `)
+}
+
+export function dropTalkTables(db: Database.Database): void {
+  db.transaction(() => db.exec(`
+    DROP TABLE IF EXISTS chunk_vec;
+    DROP TABLE IF EXISTS chunks_fts;
+    DROP TABLE IF EXISTS chunks;
+    DROP TABLE IF EXISTS chunk_file;
+    DROP TABLE IF EXISTS talk_meta;
+  `))()
 }
 
 export class VectorStore {
   private dims = 0
   private modelId = ''
+  generation = randomUUID()
   // Note-centroid cache: computing centroids reads every stored embedding and
   // is O(all chunks × dims) on the main process — too hot to redo per map
   // recolor. Any write that can change an embedded chunk bumps `gen`, which
@@ -110,10 +134,16 @@ export class VectorStore {
     private db: Database.Database,
     private documentPaths: () => Set<string> = () => new Set()
   ) {
-    sqliteVec.load(this.db)
+    this.db.loadExtension(sqliteExtensionPath(getLoadablePath(), process.resourcesPath))
+    const old = this.db.prepare(`SELECT sql FROM sqlite_schema WHERE name = 'chunks'`).get() as
+      | { sql: string }
+      | undefined
+    // Prior caches reused deleted chunk IDs and may already contain a vector
+    // for the wrong text. Rebuild from Markdown once, with monotonic IDs.
+    if (old && !old.sql.includes('AUTOINCREMENT')) dropTalkTables(this.db)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS chunks (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         file TEXT NOT NULL,
         heading TEXT,
         start INTEGER,
@@ -145,17 +175,21 @@ export class VectorStore {
         | { v: string }
         | undefined
       this.modelId = modelRow?.v ?? ''
-      this.ensureVecTable()
+      this.ensureVecTable(this.dims)
     }
   }
 
-  private ensureVecTable(): void {
-    this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(embedding float[${this.dims}])`)
+  private ensureVecTable(dims: number): void {
+    this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(embedding float[${dims}])`)
   }
 
   /** True once the embedding width is known and the vec table exists. */
   get ready(): boolean {
     return this.dims > 0
+  }
+
+  matchesModel(model: string): boolean {
+    return this.ready && model === this.modelId
   }
 
   /**
@@ -178,27 +212,28 @@ export class VectorStore {
    */
   setDims(dims: number, modelId?: string): void {
     if (!needsEmbeddingReset({ dims: this.dims, modelId: this.modelId }, { dims, modelId })) {
-      this.ensureVecTable()
+      this.ensureVecTable(dims)
       return
     }
     this.db.transaction(() => {
       this.db.exec(`DROP TABLE IF EXISTS chunk_vec`)
-      this.dims = dims
       this.db
         .prepare(`INSERT INTO talk_meta(k, v) VALUES('dims', ?)
                   ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
         .run(String(dims))
       if (modelId !== undefined) {
-        this.modelId = modelId
         this.db
           .prepare(`INSERT INTO talk_meta(k, v) VALUES('model', ?)
                     ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
           .run(modelId)
       }
-      this.ensureVecTable()
+      this.ensureVecTable(dims)
       this.db.exec(`DELETE FROM chunks; DELETE FROM chunk_file; DELETE FROM chunks_fts;`)
-      this.gen++ // every stored vector was just dropped
     })()
+    this.dims = dims
+    this.modelId = modelId ?? this.modelId
+    this.generation = randomUUID()
+    this.gen++
   }
 
   /** True if `file` already has chunks (lets the caller skip re-reading on enable). */
@@ -276,14 +311,13 @@ export class VectorStore {
     if (!this.dims) throw new Error('embedding dims not set')
     if (rows.length > 0) this.gen++
     this.db.transaction(() => {
-      const del = this.db.prepare(`DELETE FROM chunk_vec WHERE rowid = ?`)
       const insVec = this.db.prepare(`INSERT INTO chunk_vec(rowid, embedding) VALUES (?, ?)`)
-      const mark = this.db.prepare(`UPDATE chunks SET embedded = 1 WHERE id = ?`)
+      const mark = this.db.prepare(`UPDATE chunks SET embedded = 1 WHERE id = ? AND embedded = 0`)
       for (const r of rows) {
-        const rowid = BigInt(r.id)
-        del.run(rowid)
-        insVec.run(rowid, f32ToBlob(r.vector))
-        mark.run(r.id)
+        if (!mark.run(r.id).changes) continue
+        if (r.vector.length !== this.dims || !r.vector.every(Number.isFinite))
+          throw new Error('Invalid chunk embedding.')
+        insVec.run(BigInt(r.id), f32ToBlob(r.vector))
       }
     })()
   }
@@ -370,24 +404,19 @@ export class VectorStore {
 
   /** k-NN over chunk embeddings → best chunks, in distance order. */
   vectorHits(queryVec: Float32Array, k = 30): VectorHit[] {
-    if (!this.dims) return []
+    if (!this.dims || queryVec.length !== this.dims || !queryVec.every(Number.isFinite)) return []
     const rows = this.db
       .prepare(
         `WITH knn AS (
            SELECT rowid, distance FROM chunk_vec
            WHERE embedding MATCH ? ORDER BY distance LIMIT ?
          )
-         SELECT c.id AS id, c.file AS file, c.text AS text, knn.distance AS distance
+         SELECT c.id, c.file, c.heading, c.start, c."end", c.text
          FROM knn JOIN chunks c ON c.id = knn.rowid
          ORDER BY knn.distance`
       )
-      .all(f32ToBlob(queryVec), k) as {
-      id: number
-      file: string
-      text: string
-      distance: number
-    }[]
-    return rows.map((r, i) => ({ id: r.id, file: r.file, text: r.text, rank: i }))
+      .all(f32ToBlob(queryVec), k) as VectorHit[]
+    return rows
   }
 
   /** Chunk-level keyword (FTS5) hits for a query — same shape as `vectorHits`, so
@@ -398,15 +427,15 @@ export class VectorStore {
    *  and this leg quietly drops out of the hybrid fusion. OR still ranks by
    *  bm25, so a chunk matching more of the question's terms still ranks higher. */
   chunkSearch(query: string, k = 30): VectorHit[] {
-    const match = ftsOrMatch(query)
+    const match = ftsMatch(query, 'OR')
     if (!match) return []
     const rows = this.db
       .prepare(
-        `SELECT c.id AS id, c.file AS file, c.text AS text
+        `SELECT c.id, c.file, c.heading, c.start, c."end", c.text
          FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
          WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`
       )
-      .all(match, k) as { id: number; file: string; text: string }[]
-    return rows.map((r, i) => ({ id: r.id, file: r.file, text: r.text, rank: i }))
+      .all(match, k) as VectorHit[]
+    return rows
   }
 }

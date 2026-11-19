@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_EMBED_MODEL,
   DISTILL_FOCUS_MAX,
+  type Citation,
   type DistillEstimate,
   type DistillMergePlan,
   type DistillRunInfo,
@@ -15,6 +16,7 @@ import { BacklinksPanel } from './BacklinksPanel'
 import {
   parseCitations,
   parseDocumentNote,
+  resolveAskPassage,
   resolveCitationSpan,
   type NoteCitation,
   type NoteDocument
@@ -31,6 +33,8 @@ import { StagedNoteView } from './StagedNoteView'
 import { StatusSelect } from './StatusSelect'
 import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
+import { describePdfExtraction } from '@shared/pdfExtraction'
+import { targetResolver } from '@shared/markdown/resolveTarget'
 import { useTalk } from './talk/useTalk'
 import { getEmbedder } from './talk/embedder'
 import { TalkPanel } from './talk/TalkPanel'
@@ -176,12 +180,22 @@ export default function App() {
     confirmLabel?: string
     onConfirm: () => void
   } | null>(null)
+  const [savePrompt, setSavePrompt] = useState<{
+    seq: number
+    message: string
+    saveLabel: string
+    canDiscard: boolean
+    resolve: (decision: 'save' | 'discard' | 'cancel') => void
+  } | null>(null)
+  const navigation = useRef(false)
+  const [navigating, setNavigating] = useState(false)
   // The markdown view mode (Code / Live / Reading), persisted across file switches.
   const [editorMode, setEditorMode] = useState<ViewMode>('live')
   const settingsRef = useRef<Settings | null>(null)
   // Off-screen container that holds the fully-rendered note for Print / Export-PDF.
   const printRef = useRef<HTMLDivElement | null>(null)
   // The sidebar search box, so File ▸ Find Note… (⌘K) can focus it.
+  const searchList = useRef<HTMLUListElement>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
   // Non-blocking syntax feedback for the settings editor (set on save).
   const [settingsError, setSettingsError] = useState<string | null>(null)
@@ -208,6 +222,7 @@ export default function App() {
   const applySettings = (s: Settings): void => {
     const prev = settingsRef.current
     settingsRef.current = s
+    if (prev?.talk.chat.provider !== s.talk.chat.provider) void talk.refreshCanAsk()
     applyTheme(resolveThemeName(s), s.editor.fontSize)
     setAutosave({ delayMs: s.editor.autosaveDelayMs, onSwitch: s.editor.autosaveOnSwitch })
     setTelemetryOn(s.telemetry.enabled)
@@ -290,106 +305,140 @@ export default function App() {
     })
   }, [])
 
-  // --- Save controllers (one per editor buffer) ---------------------------
-  // Re-runs the note save with force after the user confirms an overwrite.
-  // (A ref because the conflict handler lives inside the saver's own persist.)
-  const forceNoteSave = useRef<() => void>(() => {})
+  const askToSave = useCallback(
+    (message: string, saveLabel: string, canDiscard: boolean) =>
+      new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
+        setSavePrompt({
+          seq: ++promptSeq.current,
+          message,
+          saveLabel,
+          canDiscard,
+          resolve: (decision) => {
+            setSavePrompt(null)
+            resolve(decision)
+          }
+        })
+      }),
+    []
+  )
+
+  const saveDocument = useCallback(
+    async (path: string, name: string, content: string, expected: string | null) => {
+      try {
+        for (;;) {
+          const result = await window.nodebook.saveFile(path, content, expected)
+          if (result.status === 'saved') return true
+          const decision = await askToSave(
+            result.content === null
+              ? `“${name}” was removed from disk while you were editing. Restore it with your version?`
+              : `“${name}” changed on disk while you were editing. Overwrite it with your version?`,
+            result.content === null ? 'Restore' : 'Overwrite',
+            false
+          )
+          if (decision !== 'save') return false
+          // Only overwrite the version for which the user just gave approval.
+          expected = result.content
+        }
+      } catch (err) {
+        setError(`Couldn't save “${name}”: ${err instanceof Error ? err.message : String(err)}`)
+        return false
+      }
+    },
+    [askToSave]
+  )
+
   const noteSaver = useDirtyDoc({
     docKey: active ? `${active.path}#${noteEpoch}` : null,
     initialDoc: doc,
-    persist: (content, force) => {
-      if (!active) return
-      const name = active.name
-      return window.nodebook.saveFile(active.path, content, force).catch((e: unknown) => {
-        // Refused save. A conflict means the file changed on disk under our
-        // edits (external edit, or a relation typed from the map) — let the
-        // user decide; anything else is surfaced as a plain error.
-        if (String(e).includes('Conflict')) {
-          setConfirm({
-            message: `“${name}” changed on disk while you were editing. Overwrite it with your version?`,
-            confirmLabel: 'Overwrite',
-            onConfirm: () => {
-              setConfirm(null)
-              forceNoteSave.current()
-            }
-          })
-        } else {
-          setError(`Couldn't save “${name}”: ${e instanceof Error ? e.message : String(e)}`)
-        }
-        throw e // keep the buffer dirty
-      })
-    },
-    autosaveDelayMs: autosave.delayMs,
-    autosaveOnSwitch: autosave.onSwitch
+    persist: (content, expected) =>
+      active ? saveDocument(active.path, active.name, content, expected) : Promise.resolve(false),
+    autosaveDelayMs: autosave.delayMs
   })
-  forceNoteSave.current = () => noteSaver.saveNow(true)
 
   const configSaver = useDirtyDoc({
     docKey: settingsPath == null ? null : `${settingsPath}#${settingsEpoch}`,
     initialDoc: settingsDoc,
-    persist: (content, force) => {
-      if (!settingsPath) return
-      return window.nodebook
-        .saveFile(settingsPath, content, force)
-        .then(async () => {
-          // Saved, but is it valid TOML? Surface a syntax error inline instead
-          // of silently running on the previous settings (main keeps last-good).
-          setSettingsError(await window.nodebook.validateSettings(content))
-        })
-        .then(() => window.nodebook.readSettings())
-        .then(applySettings)
-        .catch((e: unknown) => {
-          setError(
-            String(e).includes('Conflict')
-              ? 'The settings file changed on disk — close and reopen Settings to pick up the new version.'
-              : `Couldn't save settings: ${e instanceof Error ? e.message : String(e)}`
-          )
-          throw e // keep the buffer dirty
-        })
+    persist: async (content, expected) => {
+      if (!settingsPath || !(await saveDocument(settingsPath, 'Settings', content, expected))) {
+        return false
+      }
+      try {
+        setSettingsError(await window.nodebook.validateSettings(content))
+        applySettings(await window.nodebook.readSettings())
+      } catch (err) {
+        setError(`Settings were saved but could not be applied: ${String(err)}`)
+      }
+      return true
     },
-    autosaveDelayMs: autosave.delayMs,
-    autosaveOnSwitch: autosave.onSwitch
+    autosaveDelayMs: autosave.delayMs
   })
 
-  // Flush the editor we're leaving, if autosave-on-switch is enabled.
-  const flushCurrent = useCallback(() => {
-    if (settingsOpen) {
-      if (configSaver.onSwitchEnabled()) configSaver.saveNow()
-    } else if (active) {
-      if (noteSaver.onSwitchEnabled()) noteSaver.saveNow()
-    }
-  }, [settingsOpen, active, configSaver, noteSaver])
+  const saveCurrent = useCallback(() => {
+    if (navigation.current) return
+    void (settingsOpen ? configSaver : noteSaver).saveNow()
+  }, [settingsOpen, configSaver, noteSaver])
 
-  // ⌘S / Ctrl+S saves the current editor now (explicit; ignores the toggle).
+  // Keep the current editor mounted and pause edits until the save decision
+  // and the navigation complete. Cancel or a write failure leaves it intact.
+  const navigate = useCallback(
+    async <T,>(action: () => T | Promise<T>, reason?: 'close' | 'discard-note'): Promise<T | null> => {
+      if (navigation.current) return null
+      navigation.current = true
+      setNavigating(true)
+      let approved = false
+      try {
+        const useConfig = settingsOpen && reason !== 'discard-note'
+        const saver = useConfig ? configSaver : noteSaver
+        const pending = saver.pauseAutosave()
+        let discard = false
+        if (pending) {
+          if (!(await pending)) return null
+        } else if (saver.hasChanges()) {
+          let decision: 'save' | 'discard' | 'cancel' = 'save'
+          if (reason === 'discard-note') decision = 'discard'
+          else if (!autosave.onSwitch) {
+            decision = await askToSave(
+              `Save your changes to “${useConfig ? 'Settings' : active?.name}”?`,
+              'Save',
+              true
+            )
+          }
+          if (decision === 'cancel' || (decision === 'save' && !(await saver.saveNow()))) return null
+          discard = decision === 'discard'
+        }
+        const result = await action()
+        if (result !== null && discard) saver.discard()
+        approved = result !== null
+        return result
+      } finally {
+        // The native close acknowledgement is still in flight after we return.
+        if (reason !== 'close' || !approved) {
+          navigation.current = false
+          setNavigating(false)
+        }
+      }
+    },
+    [settingsOpen, configSaver, noteSaver, autosave.onSwitch, askToSave, active]
+  )
+
+  // Native close and quit both wait for the renderer's normal save decision.
+  // Keep the subscription mounted while renders update the decision callback.
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
+  useEffect(() => window.nodebook.onCloseRequested(async () => {
+    return (await navigateRef.current(() => true, 'close')) === true
+  }), [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        if (settingsOpen) configSaver.saveNow()
-        else noteSaver.saveNow()
+        saveCurrent()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [settingsOpen, configSaver, noteSaver])
-
-  // Synchronously flush on window close so nothing is lost. Closing is the
-  // terminal action, so we flush a dirty buffer regardless of the
-  // autosave-on-switch setting (that setting governs saves during normal work,
-  // not the last-chance flush on quit — no editor should drop your buffer).
-  useEffect(() => {
-    const onBeforeUnload = (): void => {
-      if (settingsOpen && settingsPath && configSaver.dirty) {
-        const c = configSaver.getContent()
-        if (c != null) window.nodebook.saveFileNow(settingsPath, c)
-      } else if (active && noteSaver.dirty) {
-        const c = noteSaver.getContent()
-        if (c != null) window.nodebook.saveFileNow(active.path, c)
-      }
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [settingsOpen, settingsPath, active, configSaver, noteSaver])
+  }, [saveCurrent])
 
   // Window title reflects unsaved state.
   const currentDirty = settingsOpen ? configSaver.dirty : noteSaver.dirty
@@ -398,25 +447,30 @@ export default function App() {
   }, [currentDirty])
 
   const enterVault = useCallback(
-    async (dir: string) => {
-      flushCurrent()
-      setVault(dir)
-      setActive(null)
-      setDoc(null)
-      setSettingsOpen(false)
-      setHelpOpen(false)
-      setGraphOpen(false)
-      setQuery('')
-      // openVault builds/refreshes the index and returns files + dirs.
-      const listing = await window.nodebook.openVault(dir)
-      setFiles(listing.files)
-      setDirs(listing.dirs)
-      setNoteNames(await window.nodebook.noteNames())
-      setDistillRun(null)
-      setStagedRuns(await window.nodebook.distillListRuns())
-      talk.onVaultOpened() // resume embedding for the newly-opened vault
-    },
-    [flushCurrent, talk]
+    (dir: string) => navigate(async () => {
+      try {
+        const listing = await window.nodebook.openVault(dir)
+        setVault(dir)
+        setActive(null)
+        setDoc(null)
+        setSettingsOpen(false)
+        setHelpOpen(false)
+        setAskOpen(false)
+        setGraphOpen(false)
+        setQuery('')
+        setFiles(listing.files)
+        setDirs(listing.dirs)
+        setNoteNames(await window.nodebook.noteNames())
+        setDistillRun(null)
+        setStagedRuns(await window.nodebook.distillListRuns())
+        talk.onVaultOpened() // resume embedding for the newly-opened vault
+        return true
+      } catch (err) {
+        setError(`Couldn't open vault: ${String(err)}`)
+        return null
+      }
+    }),
+    [navigate, talk]
   )
 
   const openVault = useCallback(async () => {
@@ -458,13 +512,15 @@ export default function App() {
   // edit, or a relation typed from the map). Content is compared first, so our
   // own save echoing back through the watcher is a no-op. A dirty buffer is
   // left alone — that conflict is handled at save time (see noteSaver).
+  const { hasChanges: noteHasChanges, getContent: getNoteContent } = noteSaver
   useEffect(() => {
-    return window.nodebook.onFileChanged((path) => {
-      if (!active || path !== active.path || noteSaver.dirty) return
+    let ignore = false
+    const unsubscribe = window.nodebook.onFileChanged((path) => {
+      if (!active || path !== active.path || navigation.current || noteHasChanges()) return
       void window.nodebook
         .readFile(path)
         .then((content) => {
-          if (content === noteSaver.getContent()) return
+          if (ignore || navigation.current || noteHasChanges() || content === getNoteContent()) return
           setDoc(content)
           setNoteEpoch((e) => e + 1) // remount the editor on the fresh bytes
         })
@@ -472,28 +528,45 @@ export default function App() {
           // vanished mid-read — the vault:changed relist will reconcile
         })
     })
-  }, [active, noteSaver])
+    return () => {
+      ignore = true
+      unsubscribe()
+    }
+  }, [active, noteHasChanges, getNoteContent])
 
-  const openFile = useCallback(
+  const readAndOpen = useCallback(
     async (f: MarkdownFile) => {
-      flushCurrent() // save the editor we're leaving
       try {
         const content = await window.nodebook.readFile(f.path)
         setActive(f)
         setDoc(content)
+        setNoteEpoch((e) => e + 1)
         setSettingsOpen(false)
         setHelpOpen(false)
         setAskOpen(false)
         setError(null)
+        return content
       } catch {
         // The file was moved/deleted out from under us — surface it calmly and
         // refresh the tree rather than letting a raw rejection bubble up.
         setError(`Couldn't open "${f.name}" — it may have been moved or deleted.`)
         void relist()
+        return null
       }
     },
-    [flushCurrent, relist]
+    [relist]
   )
+
+  const openFile = useCallback(
+    (f: MarkdownFile) => navigate(() => readAndOpen(f)),
+    [navigate, readAndOpen]
+  )
+
+  const openSearchResult = async (file: MarkdownFile): Promise<void> => {
+    if ((await openFile(file)) == null) return
+    setGraphOpen(false)
+    setDistillRun(null)
+  }
 
   const { ready: talkReady, searchSemantic } = talk
   useEffect(() => {
@@ -514,24 +587,20 @@ export default function App() {
     }
   }, [query, talkReady, searchSemantic])
 
-  // Resolve a wikilink target to a vault file and open it. Match on bare name
-  // first, then on the extension-less relative path (e.g. [[projects/Roadmap]]).
+  const noteByPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files])
+  const resolveTarget = useMemo(() => targetResolver([...noteByPath.keys()]), [noteByPath])
+  const resolveFile = useCallback(
+    (target: string) => noteByPath.get(resolveTarget(target, active?.path ?? '').id),
+    [noteByPath, resolveTarget, active?.path]
+  )
   const openLink = useCallback(
     (target: string) => {
-      const f =
-        files.find((x) => x.name === target) ??
-        files.find((x) => x.rel.replace(/\.md$/i, '') === target)
-      if (f) void openFile(f)
+      const file = resolveFile(target)
+      if (file) void openFile(file)
     },
-    [files, openFile]
+    [resolveFile, openFile]
   )
-
-  // A wikilink resolves to a real note (same rule as openLink) → not a "ghost".
-  const linkExists = useCallback(
-    (target: string) =>
-      files.some((x) => x.name === target || x.rel.replace(/\.md$/i, '') === target),
-    [files]
-  )
+  const linkExists = useCallback((target: string) => !!resolveFile(target), [resolveFile])
 
   // Provenance: a distilled note carries `cite:` spans in its frontmatter.
   // Clicking one opens its source note scrolled to + selecting the cited range.
@@ -560,24 +629,38 @@ export default function App() {
   // from before quotes were captured (c.quote undefined) is trusted as-is.
   const openCitation = useCallback(
     (c: NoteCitation) => {
-      const f = files.find((x) => x.name === c.source)
+      const f = resolveFile(c.source)
       if (!f) return
-      void openFile(f).then(() =>
-        window.nodebook
-          .readFile(f.path)
-          .then((content) => {
-            const res = resolveCitationSpan(content, c)
-            if (res.status === 'not-found') {
-              setPendingReveal(null)
-              setError(`Couldn't locate the cited passage in "${f.name}" — the source may have changed.`)
-            } else {
-              setPendingReveal({ path: f.path, from: res.start, to: res.end })
-            }
-          })
-          .catch(() => {
-            // openFile already surfaced a read failure, if any — nothing more to do.
-          })
-      )
+      void openFile(f).then((content) => {
+        if (content === null) return
+        const res = resolveCitationSpan(content, c)
+        if (res.status === 'not-found') {
+          setPendingReveal(null)
+          setError(`Couldn't locate the cited passage in "${f.name}" — the source may have changed.`)
+        } else {
+          setPendingReveal({ path: f.path, from: res.start, to: res.end })
+        }
+      })
+    },
+    [resolveFile, openFile]
+  )
+  const openAskPassage = useCallback(
+    (c: Citation): void => {
+      const f = files.find((x) => x.path === c.path)
+      if (!f) {
+        setError(`Couldn't open "${c.title}" — it may have been moved or deleted.`)
+        return
+      }
+      void openFile(f).then((content) => {
+        if (content === null) return
+        const res = resolveAskPassage(content, c)
+        if (res) {
+          setPendingReveal({ path: c.path, from: res.start, to: res.end })
+        } else {
+          setPendingReveal(null)
+          setError(`Couldn't locate the cited passage in "${c.title}" — the source may have changed.`)
+        }
+      })
     },
     [files, openFile]
   )
@@ -589,19 +672,28 @@ export default function App() {
     [active, pendingReveal]
   )
 
-  const openSettings = useCallback(async () => {
-    flushCurrent() // save the note we're leaving
-    const p = await window.nodebook.settingsPath()
-    const content = await window.nodebook.readFile(p)
-    setSettingsPath(p)
-    setSettingsDoc(content)
-    setSettingsError(null) // fresh open — feedback comes from the next save
-    setDefaultsDoc(null) // start with the defaults reference hidden
-    setSettingsOpen(true)
-    setHelpOpen(false)
-    setGraphOpen(false)
-    setAskOpen(false)
-  }, [flushCurrent])
+  const openSettings = useCallback(() => {
+    if (settingsOpen) return
+    void navigate(async () => {
+      try {
+        const p = await window.nodebook.settingsPath()
+        const content = await window.nodebook.readFile(p)
+        setSettingsPath(p)
+        setSettingsDoc(content)
+        setSettingsEpoch((e) => e + 1)
+        setSettingsError(null) // fresh open — feedback comes from the next save
+        setDefaultsDoc(null) // start with the defaults reference hidden
+        setSettingsOpen(true)
+        setHelpOpen(false)
+        setGraphOpen(false)
+        setAskOpen(false)
+        return true
+      } catch (err) {
+        setError(`Couldn't open settings: ${String(err)}`)
+        return null
+      }
+    })
+  }, [navigate, settingsOpen])
 
   // Open a note clicked in the graph, keeping the map open so it recenters.
   const openPathInGraph = useCallback(
@@ -614,29 +706,31 @@ export default function App() {
 
   const openHelp = useCallback(
     (section?: string) => {
-      flushCurrent()
-      setGraphOpen(false)
-      setSettingsOpen(false)
-      setAskOpen(false)
-      // Help ▸ Keyboard Shortcuts opens the same doc scrolled to its section.
-      if (section === 'shortcuts') {
-        const at = HELP_DOC.indexOf('## Keyboard shortcuts')
-        setHelpReveal(at >= 0 ? { from: at, to: at } : null)
-      } else {
-        setHelpReveal(null)
-      }
-      setHelpOpen(true)
+      void navigate(() => {
+        setGraphOpen(false)
+        setSettingsOpen(false)
+        setAskOpen(false)
+        // Help ▸ Keyboard Shortcuts opens the same doc scrolled to its section.
+        if (section === 'shortcuts') {
+          const at = HELP_DOC.indexOf('## Keyboard shortcuts')
+          setHelpReveal(at >= 0 ? { from: at, to: at } : null)
+        } else {
+          setHelpReveal(null)
+        }
+        setHelpOpen(true)
+      })
     },
-    [flushCurrent]
+    [navigate]
   )
 
   const openAsk = useCallback(() => {
-    flushCurrent()
-    setGraphOpen(false)
-    setSettingsOpen(false)
-    setHelpOpen(false)
-    setAskOpen(true)
-  }, [flushCurrent])
+    void navigate(() => {
+      setGraphOpen(false)
+      setSettingsOpen(false)
+      setHelpOpen(false)
+      setAskOpen(true)
+    })
+  }, [navigate])
 
   const resetSettingsToDefaults = useCallback(() => {
     setConfirm({
@@ -701,6 +795,15 @@ export default function App() {
     target.kind === 'file'
       ? target.file.name
       : (target as { path: string }).path.split('/').pop() ?? ''
+  const activeRef = useRef(active)
+  activeRef.current = active
+  const activeWithin = (target: ContextTarget): MarkdownFile | null => {
+    const note = activeRef.current
+    if (!note) return null
+    if (target.kind === 'file' && target.file.path === note.path) return note
+    if (target.kind === 'folder' && note.rel.startsWith(`${target.path}/`)) return note
+    return null
+  }
 
   const newNoteIn = useCallback(
     (dir: string): void => {
@@ -740,20 +843,34 @@ export default function App() {
       confirmLabel: 'Rename',
       onConfirm: (name) => {
         setPrompt(null)
-        void window.nodebook.rename(oldPath, name).then(async (newPath) => {
-          if (!newPath) return
-          const files = await relist()
-          // Reconcile the open file: reopen if it was the renamed file; close if
-          // it moved under a renamed folder and its old path is gone.
-          if (!active) return
-          if (target.kind === 'file' && active.path === oldPath) {
-            const nf = files.find((f) => f.path === newPath)
-            if (nf) void openFile(nf)
-          } else if (!files.some((f) => f.path === active.path)) {
-            setActive(null)
-            setDoc(null)
+        const affected = activeWithin(target)
+        const rename = async (): Promise<true | null> => {
+          let movedActive = false
+          try {
+            const newPath = await window.nodebook.rename(oldPath, name)
+            if (!newPath || newPath === oldPath) return null
+            movedActive = affected !== null
+            const listed = await relist()
+            if (affected) {
+              const moved = `${newPath}${affected.path.slice(oldPath.length)}`
+              const file = listed.find((f) => f.path === moved)
+              if (!file || (await readAndOpen(file)) === null) {
+                setActive(null)
+                setDoc(null)
+              }
+            }
+            return true
+          } catch (err) {
+            if (movedActive) {
+              setActive(null)
+              setDoc(null)
+            }
+            setError(`Couldn't rename “${labelOf(target)}”: ${String(err)}`)
+            return null
           }
-        })
+        }
+        if (affected) void navigateRef.current(rename)
+        else void rename()
       }
     })
   }
@@ -761,22 +878,39 @@ export default function App() {
   const deleteTarget = (target: ContextTarget): void => {
     const path = pathOf(target)
     const label = labelOf(target)
+    const note = activeWithin(target)
+    const hasDraft = note !== null && noteHasChanges()
     setConfirm({
-      message: `Move “${label}” to the Trash?`,
+      message: hasDraft
+        ? `Move “${label}” to the Trash and discard unsaved changes to “${note.name}”?`
+        : `Move “${label}” to the Trash?`,
       confirmLabel: 'Move to Trash',
       onConfirm: () => {
         setConfirm(null)
-        void window.nodebook.deletePath(path).then(async (ok) => {
-          if (!ok) {
-            setError(`Couldn't move “${label}” to the Trash — nothing was deleted.`)
-            return
+        const affected = activeWithin(target)
+        if (affected && noteHasChanges() && affected.path !== (hasDraft ? note.path : null)) {
+          deleteTarget(target)
+          return
+        }
+        const remove = async (): Promise<true | null> => {
+          try {
+            if (!(await window.nodebook.deletePath(path))) {
+              setError(`Couldn't move “${label}” to the Trash.`)
+              return null
+            }
+            if (affected) {
+              setActive(null)
+              setDoc(null)
+            }
+            await relist()
+            return true
+          } catch (err) {
+            setError(`Couldn't finish moving “${label}” to the Trash: ${String(err)}`)
+            return null
           }
-          const files = await relist()
-          if (active && !files.some((f) => f.path === active.path)) {
-            setActive(null)
-            setDoc(null)
-          }
-        })
+        }
+        if (affected) void navigateRef.current(remove, 'discard-note')
+        else void remove()
       }
     })
   }
@@ -859,21 +993,16 @@ export default function App() {
           )
         if (s.failedWindows > 0)
           why.push(`${s.failedWindows} of ${s.windows} steps got an unusable model response`)
-        if (s.notes === 0) {
-          setDistillDoneNote(
-            `Distilled, but no notes survived verification${why.length ? ` (${why.join('; ')})` : ''} — a stronger chat model in Settings usually fixes this.`
-          )
-        } else {
-          // Coverage is the honesty number: the whole document unless it needed
-          // more steps than the call budget allows, in which case say how much.
-          const cov =
-            s.coverage >= 0.999
-              ? ' It read all of the text.'
-              : ` It read about ${Math.round(s.coverage * 100)}% of the text, in evenly spaced steps.`
-          setDistillDoneNote(
-            `Staged ${s.notes} note${s.notes === 1 ? '' : 's'} — nothing is in your vault until you press ⤓ Merge on this map.${cov}${why.length ? ` ${why.join('; ')}.` : ''}`
-          )
-        }
+        const read = s.coverage === 1 ? 'all' : `about ${Math.round(s.coverage * 100)}%`
+        const summary = s.notes === 0
+          ? 'No notes were staged with matching source quotes.'
+          : `Staged ${s.notes} note${s.notes === 1 ? '' : 's'}. Choose Merge to add them to your vault.`
+        setDistillDoneNote([
+          summary,
+          res.pdf && describePdfExtraction(res.pdf),
+          `The model read ${read} of the extracted text.`,
+          ...why
+        ].filter(Boolean).join(' '))
       } catch (e) {
         // Cancelling is a choice, not a fault — say what happened, don't alarm.
         // A cancelled run is PAUSED, not lost: what it already read is kept.
@@ -900,17 +1029,24 @@ export default function App() {
     async (docId: string, focus: string) => {
       // The estimate converts the document; the run reuses that same copy, so
       // this costs the conversion once and the toast can say what is coming.
-      const est = await window.nodebook.distillEstimate(docId, focus).catch(() => null)
+      let est: DistillEstimate
+      try {
+        est = await window.nodebook.distillEstimate(docId, focus)
+      } catch (err) {
+        setError(`Couldn’t prepare this import. ${err instanceof Error ? err.message : String(err)}`)
+        return
+      }
       setDistillEstimate(est)
       const go = (): Promise<void> =>
         startDistilling(() => window.nodebook.distillRun(docId, focus))
-      // Reading a long document in full can cost more calls than the budget
-      // allows. That is the user's money and quota, so ask BEFORE spending it —
-      // and say exactly what the cheaper answer reads.
-      if (est && est.totalWindows > est.maxCalls) {
+      const sampled = est.totalWindows > est.maxCalls
+      if (sampled || est.pdf?.missing.length) {
+        const steps = sampled
+          ? `This document needs ${est.totalWindows} steps. Your budget covers ${est.calls} evenly spaced steps, about ${Math.round(est.coverage * 100)}% of the extracted text.`
+          : `Read the extracted text in ${est.calls} step${est.calls === 1 ? '' : 's'}?`
         setConfirm({
-          message: `This document needs ${est.totalWindows} steps; your budget is ${est.maxCalls}. Read ${est.maxCalls} evenly spaced steps (about ${Math.round(est.coverage * 100)}% of the text), or raise [distill] maxCalls in Settings.`,
-          confirmLabel: `Read ${est.maxCalls} steps`,
+          message: [est.pdf && describePdfExtraction(est.pdf), steps].filter(Boolean).join(' '),
+          confirmLabel: sampled ? `Read ${est.calls} steps` : 'Continue with extracted text',
           onConfirm: () => {
             setConfirm(null)
             void go()
@@ -956,15 +1092,16 @@ export default function App() {
   // be unreachable — the run looked lost even though it was staged on disk).
   const openStagedRun = useCallback(
     (id: string) => {
-      flushCurrent()
-      setGraphOpen(false)
-      setAskOpen(false)
-      setHelpOpen(false)
-      setSettingsOpen(false)
-      setDistillOverlay(false)
-      setDistillRun({ runId: id })
+      void navigate(() => {
+        setGraphOpen(false)
+        setAskOpen(false)
+        setHelpOpen(false)
+        setSettingsOpen(false)
+        setDistillOverlay(false)
+        setDistillRun({ runId: id })
+      })
     },
-    [flushCurrent]
+    [navigate]
   )
 
   const discardStagedRun = useCallback(
@@ -1065,8 +1202,7 @@ export default function App() {
         fillPrint()
         window.print()
       } else if (cmd === 'save') {
-        if (settingsOpen) configSaver.saveNow()
-        else noteSaver.saveNow()
+        saveCurrent()
       } else if (cmd === 'settings') void openSettings()
       else if (cmd === 'new-vault') void newVault()
       else if (cmd === 'open-vault-dialog') void openVault()
@@ -1097,9 +1233,7 @@ export default function App() {
     enterVault,
     newNoteIn,
     openAsk,
-    settingsOpen,
-    configSaver,
-    noteSaver,
+    saveCurrent,
     vault,
     active,
     talk.canAsk,
@@ -1133,7 +1267,22 @@ export default function App() {
             className="search-box"
             placeholder={`Search notes…  ${navigator.platform.startsWith('Mac') ? '⌘K' : 'Ctrl+K'}`}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search notes"
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setResults([])
+            }}
+            onKeyDown={(e) => {
+              if (!results.length) return
+              const first = searchList.current?.querySelector<HTMLElement>('[role=button]')
+              if (e.key === 'ArrowDown' && first) {
+                e.preventDefault()
+                first.focus()
+              } else if (e.key === 'Enter') {
+                e.preventDefault()
+                first?.click()
+              }
+            }}
           />
         )}
         {vault && <TalkPanel talk={talk} distilling={distilling !== null} />}
@@ -1224,12 +1373,27 @@ export default function App() {
           </div>
         )}
         {query.trim() ? (
-          <ul className="search-results">
+          <ul className="search-results" ref={searchList}
+            onKeyDown={(e) => {
+              const row = (e.target as HTMLElement).closest('li')
+              if (!row) return
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                const next = row.nextElementSibling as HTMLElement | null
+                next?.focus()
+              } else if (e.key === 'ArrowUp' || e.key === 'Escape') {
+                e.preventDefault()
+                const prev = e.key === 'ArrowUp' ? row.previousElementSibling as HTMLElement | null : null
+                const target = prev ?? searchRef.current
+                target?.focus()
+              }
+            }}
+          >
             {results.length === 0 ? (
               <li className="search-empty">No matches.</li>
             ) : (
               results.map((hit) => {
-                const f = files.find((x) => x.path === hit.path)
+                const f = noteByPath.get(hit.path)
                 return (
                   <li
                     key={hit.path}
@@ -1238,12 +1402,12 @@ export default function App() {
                     tabIndex={0}
                     aria-current={active?.path === hit.path ? 'page' : undefined}
                     onClick={() => {
-                      if (f) void openFile(f)
+                      if (f) void openSearchResult(f)
                     }}
                     onKeyDown={(e) => {
                       if ((e.key === 'Enter' || e.key === ' ') && f) {
                         e.preventDefault()
-                        void openFile(f)
+                        void openSearchResult(f)
                       }
                     }}
                   >
@@ -1281,13 +1445,12 @@ export default function App() {
         </button>
       </aside>
 
-      <main className="editor-pane">
+      <main className="editor-pane" inert={navigating}>
         {askOpen ? (
           <AskPanel
+            key={vault}
             ask={talk.ask}
-            files={files}
-            onOpen={openFile}
-            openLink={openLink}
+            onOpenPassage={openAskPassage}
             openExternal={(url) => void window.nodebook.openExternal(url)}
             onClose={() => setAskOpen(false)}
           />
@@ -1369,7 +1532,8 @@ export default function App() {
             key={`distill-${distillRun.runId}`}
             loadGraph={distillLoad}
             defaultShowSources
-            emptyMessage="This run staged no notes — none of the model's claims could be verified against the source. Try a stronger chat model in Settings, then distill again."
+            initialLayout="elk"
+            emptyMessage="This run staged no notes with matching source quotes."
             focusPath={null}
             focusName=""
             vaultRoot={vault}
@@ -1422,10 +1586,9 @@ export default function App() {
             onOpen={openPathInGraph}
             onOpenInEditor={(path) => {
               const f = files.find((x) => x.path === path)
-              if (f) {
-                setGraphOpen(false)
-                void openFile(f)
-              }
+              if (f) void openFile(f).then((content) => {
+                if (content !== null) setGraphOpen(false)
+              })
             }}
             onClose={() => setGraphOpen(false)}
             reloadKey={graphEpoch}
@@ -1491,11 +1654,12 @@ export default function App() {
           )
         ) : (
           <div className="empty">
-            {!vault
-              ? 'Open a vault to begin'
-              : files.length === 0
-                ? 'This vault has no notes yet — right-click in the sidebar to create one.'
-                : 'Select a note'}
+            {vault && files.length === 0 ? (
+              <div className="empty-vault">
+                <p>This vault has no notes yet.</p>
+                <button className="open-btn" onClick={() => newNoteIn(vault)}>New note</button>
+              </div>
+            ) : vault ? 'Select a note' : 'Open a vault to begin'}
           </div>
         )}
       </main>
@@ -1505,6 +1669,7 @@ export default function App() {
           active={active}
           files={files}
           onOpen={openFile}
+          resolveTarget={resolveFile}
           citations={citations}
           document={sourceDocument}
           onOpenOriginal={openOriginal}
@@ -1538,7 +1703,19 @@ export default function App() {
           onConfirm={(sameAs) => confirmMerge(mergePlan.runId, sameAs)}
         />
       )}
-      {confirm && (
+      {savePrompt ? (
+        <Confirm
+          key={savePrompt.seq}
+          message={savePrompt.message}
+          confirmLabel={savePrompt.saveLabel}
+          secondaryAction={savePrompt.canDiscard ? {
+            label: 'Discard',
+            onClick: () => savePrompt.resolve('discard')
+          } : undefined}
+          onConfirm={() => savePrompt.resolve('save')}
+          onCancel={() => savePrompt.resolve('cancel')}
+        />
+      ) : confirm && (
         <Confirm
           message={confirm.message}
           confirmLabel={confirm.confirmLabel}

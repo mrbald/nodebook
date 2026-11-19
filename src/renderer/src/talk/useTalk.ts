@@ -25,8 +25,9 @@ export interface UseTalk {
   searchSemantic: (query: string) => Promise<SearchHit[]>
   /** An "Ask" chat provider is configured (provider ≠ none). */
   canAsk: boolean
+  refreshCanAsk: () => Promise<void>
   /** Ask a grounded question; answer tokens arrive via `onToken`. */
-  ask: (question: string, onToken: (t: string) => void) => Promise<AskResult>
+  ask: (question: string, onToken: (t: string) => void, signal: AbortSignal) => Promise<AskResult>
   /** Call after a vault is (re)opened to resume indexing for the new vault. */
   onVaultOpened: () => void
   /** Call when `[talk.embed]` settings changed while the app runs. Reloads the
@@ -46,7 +47,8 @@ export function useTalk(): UseTalk {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [modelProgress, setModelProgress] = useState<number | null>(null)
   const [canAsk, setCanAsk] = useState(false)
-  const embedderRef = useRef<Embedder | null>(null)
+  const embedderRef = useRef<{ embedder: Embedder; model: string } | null>(null)
+  const sessionRef = useRef<{ embedder: Embedder; generation: string; vaultId: string } | null>(null)
   const drainingRef = useRef(false)
   // A drain requested while one is already running (e.g. a talk:dirty poke
   // landing mid-loop, or an embedder swap) must not be lost — the running
@@ -57,44 +59,48 @@ export function useTalk(): UseTalk {
   // embedder — nor let its caller register the stale dims with main.
   const embedEpochRef = useRef(0)
 
-  const ensureEmbedder = useCallback(async (): Promise<Embedder> => {
+  const ensureEmbedder = useCallback(async () => {
     if (embedderRef.current) return embedderRef.current
     const epoch = embedEpochRef.current
     setPhase('loading-model')
     setModelProgress(null)
     const settings = await window.nodebook.readSettings()
+    if (epoch !== embedEpochRef.current) throw new Error(EMBEDDER_DISPOSED)
     const e = await getEmbedder(settings.talk.embed.model, {
       threads: settings.talk.embed.threads,
       onProgress: (f) => setModelProgress(f)
     })
     if (epoch !== embedEpochRef.current) throw new Error(EMBEDDER_DISPOSED) // superseded
-    embedderRef.current = e
+    embedderRef.current = { embedder: e, model: settings.talk.embed.model }
     setModelProgress(null)
-    return e
+    return embedderRef.current
   }, [])
 
-  // Pull pending chunks, embed them in batches, store the vectors — until dry.
+  // Keep the selected model and store generation together for the whole drain.
   const drain = useCallback(async (): Promise<void> => {
+    const session = sessionRef.current
+    if (!session) return
     if (drainingRef.current) {
       drainQueuedRef.current = true
       return
     }
+    const current = (st: TalkStatus): boolean =>
+      sessionRef.current === session && st.generation === session.generation
     drainingRef.current = true
     try {
-      const e = await ensureEmbedder()
       let st = await window.nodebook.talkStatus()
+      if (!current(st)) return
       if (st.pending > 0) setPhase('indexing')
       while (st.pending > 0) {
-        const batch = await window.nodebook.talkPending(32)
-        if (batch.length === 0) break
-        const vectors = await e.embed(batch.map((c) => c.text))
-        // A settings change may have swapped the embedder mid-batch; these
-        // vectors are from the old model's space — drop them, the swap's own
-        // enable/drain path re-embeds with the new embedder.
-        if (embedderRef.current !== e) return
+        const batch = await window.nodebook.talkPending(session.generation, 32)
+        if (batch.length === 0 || sessionRef.current !== session) return
+        const vectors = await session.embedder.embed(batch.map((c) => c.text))
+        if (sessionRef.current !== session) return
         st = await window.nodebook.talkPutEmbeddings(
+          session.generation,
           batch.map((c, i) => ({ id: c.id, vector: Array.from(vectors[i]) }))
         )
+        if (!current(st)) return
         setStatus(st)
         setProgress({ done: st.total - st.pending, total: st.total })
       }
@@ -102,9 +108,7 @@ export function useTalk(): UseTalk {
       setPhase('ready')
       setStatus(st)
     } catch (err) {
-      // A disposal is a swap in progress, not a failure — the swap's own
-      // enable/drain path finishes the indexing; don't flash the error state.
-      if (!isDisposedError(err)) {
+      if (sessionRef.current === session && !isDisposedError(err)) {
         console.error('[talk] indexing failed', err)
         setPhase('error')
       }
@@ -115,97 +119,109 @@ export function useTalk(): UseTalk {
         void drain()
       }
     }
-  }, [ensureEmbedder])
+  }, [])
 
   const enable = useCallback(async (): Promise<void> => {
+    const epoch = embedEpochRef.current
     try {
-      const e = await ensureEmbedder()
-      setStatus(await window.nodebook.talkEnable(e.dims))
+      const { vaultId } = await window.nodebook.talkStatus()
+      if (!vaultId || epoch !== embedEpochRef.current) return
+      const { embedder, model } = await ensureEmbedder()
+      if (epoch !== embedEpochRef.current) return
+      const st = await window.nodebook.talkEnable(vaultId, model, embedder.dims)
+      if (epoch !== embedEpochRef.current || st.vaultId !== vaultId || !st.ready || !st.generation)
+        return
+      sessionRef.current = { embedder, generation: st.generation, vaultId }
+      setStatus(st)
       await drain()
     } catch (err) {
-      if (isDisposedError(err)) return // superseded by a newer swap/enable
-      // e.g. the model download failed (offline, bad model id) — land on the
-      // error state so the panel offers Retry instead of sticking on
-      // "loading-model" forever.
+      if (epoch !== embedEpochRef.current || isDisposedError(err)) return
       console.error('[talk] enable failed', err)
       setPhase('error')
     }
   }, [ensureEmbedder, drain])
 
   const disable = useCallback(async (): Promise<void> => {
-    const st = await window.nodebook.talkDisable()
     embedEpochRef.current++
     disposeEmbedder()
     embedderRef.current = null
-    setStatus(st)
+    sessionRef.current = null
+    setStatus(await window.nodebook.talkDisable())
     setProgress(null)
     setPhase('off')
   }, [])
 
-  // A live [talk.embed] settings change. The embedder singleton is
-  // first-model-wins, so it must be dropped either way; when the MODEL changed
-  // and the feature is on, re-running enable() rebuilds the whole index (the
-  // store resets chunks+vectors on the model-id change — see
-  // VectorStore.setDims) and re-embeds in the new model's space. A
-  // threads-only change just reloads the worker: the vectors stay valid.
-  // Never enables a disabled feature: the new settings are picked up lazily
-  // by the next enable (or distill embed request).
+  // A threads-only change reloads the worker but retains the existing vector
+  // space. Main decides whether to rebuild from the model it registered.
   const onEmbedConfigChanged = useCallback(
-    async (modelChanged: boolean): Promise<void> => {
-      embedEpochRef.current++
+    async (): Promise<void> => {
+      const epoch = ++embedEpochRef.current
       disposeEmbedder()
       embedderRef.current = null
-      try {
-        const st = await window.nodebook.talkStatus()
-        if (!st.enabled) return
-        if (modelChanged) await enable()
-        else {
-          // Threads-only: same model, same vectors — reload the worker, then
-          // drain to restore the phase and pick up anything the interrupted
-          // drain left pending.
-          await ensureEmbedder()
-          await drain()
-        }
-      } catch (err) {
-        if (isDisposedError(err)) return // an even newer swap took over
-        // e.g. a half-typed model id that 404s on the Hub — surface the error
-        // state; the next settings save retries.
-        console.error('[talk] embed config change failed', err)
-        setPhase('error')
-      }
+      sessionRef.current = null
+      const st = await window.nodebook.talkStatus()
+      if (st.enabled && epoch === embedEpochRef.current) await enable()
     },
-    [enable, ensureEmbedder, drain]
+    [enable]
   )
 
   const searchSemantic = useCallback(async (query: string): Promise<SearchHit[]> => {
-    const e = embedderRef.current
-    if (!e) return window.nodebook.search(query)
-    const [vec] = await e.embed([query], 'query')
-    return window.nodebook.talkSearch(query, Array.from(vec))
+    const session = sessionRef.current
+    if (!session) return window.nodebook.search(query)
+    try {
+      const [vec] = await session.embedder.embed([query], 'query')
+      if (sessionRef.current === session)
+        return window.nodebook.talkSearch(query, session.generation, Array.from(vec))
+    } catch (err) {
+      if (!isDisposedError(err)) console.error('[talk] query embedding failed', err)
+    }
+    return window.nodebook.search(query)
   }, [])
 
   const ask = useCallback(
-    async (question: string, onToken: (t: string) => void): Promise<AskResult> => {
-      const e = embedderRef.current
-      let vec: number[] = []
-      if (e) {
-        const [v] = await e.embed([question], 'query')
-        vec = Array.from(v)
+    async (question: string, onToken: (t: string) => void, signal: AbortSignal): Promise<AskResult> => {
+      const { vaultId, generation } = await window.nodebook.talkStatus()
+      if (!vaultId) throw new Error('Open a vault first.')
+      signal.throwIfAborted()
+      const session = sessionRef.current
+      let vector: number[] = []
+      if (session && session.vaultId === vaultId && session.generation === generation) {
+        try {
+          const [v] = await session.embedder.embed([question], 'query')
+          if (sessionRef.current === session) vector = Array.from(v)
+        } catch (err) {
+          if (!isDisposedError(err)) console.error('[talk] question embedding failed', err)
+        }
       }
-      return window.nodebook.ask(question, vec, onToken)
+      signal.throwIfAborted()
+      const id = crypto.randomUUID()
+      const cancel = (): void => window.nodebook.cancelAsk(id)
+      signal.addEventListener('abort', cancel, { once: true })
+      try {
+        return await window.nodebook.ask({ id, vaultId, question, generation, vector }, onToken)
+      } finally {
+        signal.removeEventListener('abort', cancel)
+      }
     },
     []
   )
 
-  const resume = useCallback(async (): Promise<void> => {
+  const refreshCanAsk = useCallback(async (): Promise<void> => {
     setCanAsk(await window.nodebook.canAsk())
+  }, [])
+
+  const resume = useCallback(async (): Promise<void> => {
+    void refreshCanAsk()
     const st = await window.nodebook.talkStatus()
     setStatus(st)
     if (st.enabled) await enable()
     else setPhase('off')
-  }, [enable])
+  }, [enable, refreshCanAsk])
 
   const onVaultOpened = useCallback((): void => {
+    embedEpochRef.current++
+    sessionRef.current = null
+    setPhase('off')
     void resume()
   }, [resume])
 
@@ -213,7 +229,7 @@ export function useTalk(): UseTalk {
   useEffect(() => {
     void resume()
     const off = window.nodebook.onTalkDirty(() => {
-      if (embedderRef.current) void drain()
+      if (sessionRef.current) void drain()
     })
     return off
     // resume/drain are stable enough; we want this to run once on mount.
@@ -230,6 +246,7 @@ export function useTalk(): UseTalk {
     disable,
     searchSemantic,
     canAsk,
+    refreshCanAsk,
     ask,
     onVaultOpened,
     onEmbedConfigChanged

@@ -131,7 +131,7 @@ body {
 }
 
 .tree-file {
-  color: var(--muted);
+  color: var(--text);
 }
 
 .tree-file.active {
@@ -275,6 +275,10 @@ body {
   place-items: center;
   color: var(--muted);
   font-size: 14px;
+}
+
+.empty-vault {
+  text-align: center;
 }
 
 .note-pane {
@@ -968,6 +972,12 @@ body {
   stroke-width: 1.2;
   opacity: 0.5;
 }
+.graph-edge-path {
+  fill: none;
+  stroke-width: 1;
+  stroke-linejoin: round;
+  opacity: 0.8;
+}
 .graph-edge-related {
   stroke-dasharray: 5 4;
   opacity: 0.85;
@@ -976,6 +986,12 @@ body {
 .graph-edge-samename {
   stroke-dasharray: 2 5;
   opacity: 0.9;
+}
+.graph-edge-path.is-dim {
+  opacity: 0.16;
+}
+.graph-edge-path.is-incident {
+  opacity: 1;
 }
 .graph-ctl.is-on {
   color: var(--accent);
@@ -1012,6 +1028,28 @@ body {
 }
 .graph-node.is-ghost text {
   fill: var(--muted);
+}
+.graph-node .graph-note-box {
+  fill: var(--bg-elev);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.graph-node .graph-note-glyph {
+  fill: var(--accent);
+  stroke: none;
+}
+.graph-node.is-ghost .graph-note-glyph {
+  fill: var(--muted);
+}
+.graph-elk-node text {
+  text-anchor: start;
+}
+.graph-node:focus-visible {
+  outline: none;
+}
+.graph-node:focus-visible :is(.graph-note-box, circle, rect) {
+  stroke: var(--text);
+  stroke-width: 3;
 }
 .graph-empty {
   flex: 1;

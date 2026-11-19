@@ -22,8 +22,17 @@ house-voice writing, PRIORS.md for a reviewer.
 Before any delegation, choose three things explicitly — model tier,
 review-or-none, context mode — never defaulting to inherit. Tier follows
 judgment density: work fully forced by a spec drops a tier; semantic
-interpretation and house-voice writing stay top-tier. Adversarial review
-follows verification asymmetry: frozen contracts are always reviewed,
+interpretation and house-voice writing stay top-tier.
+
+Current Nodebook bindings (2026-11-18)
+
+- Lead and judgment-heavy work use `gpt-6.2-astra`.
+- Engineering, implementation, scouting and routine technical review use `gpt-6.2-sol`.
+- Use `claude-opus-5-5` through Claude CLI for an independent peer review when a decision needs a different model family's judgment or a second approach.
+
+Revisit these choices as new models are released.
+
+Adversarial review follows verification asymmetry: frozen contracts are always reviewed,
 being cheap to get wrong and expensive to notice — here the
 `.distill/<run>/` staging layout and checkpoint log (resume reads it),
 the merge plan, the vault note format (frontmatter, `[[wikilinks]]`, the
@@ -34,8 +43,7 @@ review; the gate is the review there. Context follows need: reviewers
 start fresh (independence beats context); rework resumes the
 implementing agent; a fork (full-context clone) is the third mode, for
 when writing the rulings down costs more than inheriting them — never
-for a reviewer. Codex (sol) is the orthogonal second opinion for
-contestable design and review calls, not an implementation channel.
+for a reviewer. Assign contestable design calls to a fresh reviewer.
 
 The implementing agent runs the gates and reports; the main session
 reads the diff against the spec and rules on disagreements — it does not

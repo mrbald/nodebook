@@ -27,6 +27,8 @@ import { mkdirSync, existsSync, readFileSync, statSync } from 'fs'
 import { createHash } from 'crypto'
 import { basename, extname, join } from 'path'
 import { atomicWrite, distillRoot } from './artifact'
+import { readPdfExtraction, type PdfExtraction } from '../../shared/pdfExtraction'
+import type { ConvertedDocument } from './convert'
 import { DOC_EXT_RE, sourceTitle } from './emit'
 
 /** A converted document's identity: sha1 of its text, lowercase hex. */
@@ -36,6 +38,8 @@ export function sha1(text: string): string {
 
 /** What the store knows about one converted document. */
 export interface SourceRecord {
+  pdf?: PdfExtraction
+  revision?: string
   /** Absolute path of the file it was converted from. */
   originalPath: string
   /** Short human title — the note name the book is written under. */
@@ -79,6 +83,8 @@ function asRecord(value: unknown): SourceRecord | null {
   const r = value as Record<string, unknown>
   if (typeof r.originalPath !== 'string' || typeof r.title !== 'string') return null
   return {
+    pdf: readPdfExtraction(r.pdf),
+    revision: typeof r.revision === 'string' ? r.revision : undefined,
     originalPath: r.originalPath,
     title: r.title,
     format: typeof r.format === 'string' ? r.format : '',
@@ -160,10 +166,14 @@ export interface StoredSource {
 }
 
 /** The original's size and mtime — the cache key, with its path. */
-function statOf(path: string): { size: number; mtime: number } | null {
+function statOf(path: string): { size: number; mtime: number; revision: string } | null {
   try {
-    const s = statSync(path)
-    return { size: s.size, mtime: Math.floor(s.mtimeMs) }
+    const s = statSync(path, { bigint: true })
+    return {
+      size: Number(s.size),
+      mtime: Number(s.mtimeNs / 1_000_000n),
+      revision: [s.dev, s.ino, s.mtimeNs, s.ctimeNs].join(':')
+    }
   } catch {
     return null
   }
@@ -177,10 +187,11 @@ function statOf(path: string): { size: number; mtime: number } | null {
  * reached from a new path (the user moved the file) and that is exactly what
  * "Open original" needs to know.
  */
-export function putSource(vaultRoot: string, originalPath: string, text: string): StoredSource {
+export function putSource(vaultRoot: string, originalPath: string, text: string, pdf?: PdfExtraction, stat = statOf(originalPath)): StoredSource {
   const hash = sha1(text)
-  const stat = statOf(originalPath)
   const record: SourceRecord = {
+    pdf,
+    revision: stat?.revision,
     originalPath,
     title: sourceTitle(basename(originalPath)),
     format: extname(originalPath).replace(/^\./, '').toLowerCase(),
@@ -190,7 +201,7 @@ export function putSource(vaultRoot: string, originalPath: string, text: string)
   }
   mkdirSync(sourcesDir(vaultRoot), { recursive: true })
   const file = sourceTextPath(vaultRoot, hash)
-  if (!existsSync(file)) atomicWrite(file, text)
+  if (!existsSync(file) || readSourceText(vaultRoot, hash) !== text) atomicWrite(file, text)
   const index = readSourceIndex(vaultRoot)
   index.set(hash, record)
   writeSourceIndex(vaultRoot, index)
@@ -209,12 +220,12 @@ export function cachedSource(vaultRoot: string, originalPath: string): StoredSou
   if (!stat) return null
   const matches = [...readSourceIndex(vaultRoot)]
     .filter(
-      ([, r]) => r.originalPath === originalPath && r.size === stat.size && r.mtime === stat.mtime
+      ([, r]) => r.originalPath === originalPath && r.size === stat.size && r.revision === stat.revision
     )
     .sort((a, b) => b[1].convertedAt.localeCompare(a[1].convertedAt))
   for (const [hash, record] of matches) {
     const text = readSourceText(vaultRoot, hash)
-    if (text !== null) return { hash, text, record, cached: true }
+    if (text !== null && sha1(text) === hash) return { hash, text, record, cached: true }
   }
   return null
 }
@@ -227,9 +238,15 @@ export function cachedSource(vaultRoot: string, originalPath: string): StoredSou
 export async function convertSource(
   vaultRoot: string,
   originalPath: string,
-  convert: (path: string) => Promise<string>
+  convert: (path: string) => Promise<ConvertedDocument>
 ): Promise<StoredSource> {
   const cached = cachedSource(vaultRoot, originalPath)
-  if (cached) return cached
-  return putSource(vaultRoot, originalPath, await convert(originalPath))
+  if (cached && (extname(originalPath).toLowerCase() !== '.pdf' || cached.record.pdf)) return cached
+  const before = statOf(originalPath)
+  const { text, pdf } = await convert(originalPath)
+  const after = statOf(originalPath)
+  if (!before || !after || before.revision !== after.revision || before.size !== after.size) {
+    throw new Error('The document changed during conversion. Pick it again.')
+  }
+  return putSource(vaultRoot, originalPath, text, pdf, before)
 }

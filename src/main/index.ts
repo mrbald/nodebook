@@ -7,6 +7,7 @@ import {
   fsyncSync,
   closeSync,
   renameSync,
+  rmSync,
   existsSync,
   realpathSync,
   statSync,
@@ -14,9 +15,10 @@ import {
   readFileSync
 } from 'fs'
 import { randomUUID } from 'crypto'
+import { setImmediate as yieldToLoop } from 'timers/promises'
 import { withinRoot, ignoredInVault } from './paths'
 import chokidar, { type FSWatcher } from 'chokidar'
-import type { MarkdownFile, MenuState, VaultListing } from '../shared/types'
+import type { MarkdownFile, MenuState, SaveFileResult, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
 import { overlayGraph, noteName } from './graph'
 import { noteVector, sameAsCandidatesYielding, type NoteVec } from './distill/sameAs'
@@ -24,8 +26,8 @@ import { chunkMarkdown, embedText } from './rag/chunk'
 import { distill, probeChat, estimateDistill, type DistillEmbedder } from './distill/run'
 import { normalizeFocus } from './distill/extract'
 import { StagedRunStore } from './distill/staged'
-import { convertDocument } from './distill/convert'
-import { convertSource, originalPathOf } from './distill/sources'
+import { convertDocumentWithCoverage } from './distill/convert'
+import { convertSource, originalPathOf, readSourceText, sha1 } from './distill/sources'
 import { distillRunId, uniqueRunId } from './distill/runId'
 import {
   mergeRun,
@@ -60,11 +62,13 @@ import {
   type ThemeMode
 } from './settings'
 import { makeChatModel } from './rag/chat'
+import { ASK_SYSTEM, NO_ASK_EVIDENCE, packAskContext } from './rag/ask'
 import { DEFAULT_INPUT_BUDGET, inputBudgetFor } from './rag/provider'
 import { buildAppMenu } from './menu'
 import { addRecent } from './recents'
 import type {
-  Citation,
+  AskRequest,
+  AskResult,
   TalkStatus,
   DistillEstimate,
   DistillRunResult,
@@ -99,9 +103,23 @@ if (process.env['NODEBOOK_USER_DATA']) {
 }
 
 let mainWindow: BrowserWindow | null = null
+let closeReady = false
+let pendingClose: { window: BrowserWindow; quit: boolean } | null = null
+let closeApproved: BrowserWindow | null = null
+
+function deferClose(window: BrowserWindow, quit: boolean): boolean {
+  if (!closeReady || closeApproved === window || window.webContents.isCrashed()) return false
+  if (pendingClose) {
+    pendingClose.quit ||= quit
+  } else {
+    pendingClose = { window, quit }
+    window.webContents.send('window:close-request')
+  }
+  return true
+}
 
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1100,
     height: 760,
     show: false,
@@ -114,6 +132,21 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false
     }
+  })
+  mainWindow = window
+
+  window.on('close', (event) => {
+    if (deferClose(window, false)) event.preventDefault()
+  })
+  window.on('closed', () => {
+    mainWindow = null
+    pendingClose = null
+    closeApproved = null
+    closeReady = false
+  })
+  window.webContents.on('did-start-loading', () => {
+    closeReady = false
+    pendingClose = null
   })
 
   // In e2e the window is driven over CDP and never needs OS focus, so show it
@@ -210,16 +243,40 @@ async function markdownUnder(dir: string): Promise<string[]> {
 // atomic, so a reader sees either the old file or the complete new one.
 // ---------------------------------------------------------------------------
 
-function atomicWrite(filePath: string, content: string): void {
-  const tmp = `${filePath}.tmp`
-  const fd = openSync(tmp, 'w')
+function atomicWrite(filePath: string, content: string, canReplace?: () => boolean): boolean {
+  const tmp = join(dirname(filePath), `.nodebook-write-${randomUUID()}.tmp`)
+  const fd = openSync(tmp, 'wx')
+  let replaced = false
   try {
-    writeSync(fd, content)
-    fsyncSync(fd)
+    try {
+      writeSync(fd, content)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    // Recheck after staging the write, immediately before replacing the file.
+    if (canReplace && !canReplace()) return false
+    renameSync(tmp, filePath)
+    replaced = true
+    return true
   } finally {
-    closeSync(fd)
+    if (!replaced) {
+      try {
+        rmSync(tmp, { force: true })
+      } catch {
+        // Keep the original save error if cleanup also fails.
+      }
+    }
   }
-  renameSync(tmp, filePath)
+}
+
+function readDiskVersion(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -234,13 +291,15 @@ let watcher: FSWatcher | null = null
 let vaultRoot: string | null = null
 let distillRuns: StagedRunStore | null = null
 const distillAbort = new Map<string, AbortController>()
+const askAbort = new Map<string, AbortController>()
 // Exactly one distill run at a time: a second would race the first on the same
 // run directory and clobber its AbortController. Claimed synchronously at the
 // top of `distill:run`, released in its finally.
 let activeRunId: string | null = null
 // Documents the user picked to distill: an opaque id → the absolute path. The
 // renderer only ever holds the id, so it cannot name a path of its own to run.
-const pickedDocs = new Map<string, string>()
+type PickedDocument = { path: string; estimated?: Omit<RunSource, 'text'> }
+const pickedDocs = new Map<string, PickedDocument>()
 const telemetry = new Telemetry()
 
 // Pending distill embed round-trips (the renderer WASM embedder answers main's
@@ -257,27 +316,14 @@ const pendingEmbeds = new Map<string, (err: Error) => void>()
 const shownCandidates = new Map<string, Map<string, string>>()
 const shownTwins = new Map<string, Map<string, string>>()
 
-// Staleness baseline for file:save — the mtime of each file as of the last
-// time the app knowingly read or wrote it. A save whose on-disk mtime differs
-// from the baseline would clobber someone else's bytes (an external edit, or a
-// relation typed from the map while the buffer was dirty), so it is refused
-// and the renderer surfaces the conflict. NOTE: index:typeRelation
-// deliberately does NOT update the baseline — that mismatch is exactly what
-// stops a stale editor buffer from overwriting the appended relation.
-const knownMtime = new Map<string, number>()
-
-/** Record `path`'s current mtime as the save-staleness baseline. */
-function trackMtime(path: string): void {
-  try {
-    knownMtime.set(path, Math.floor(statSync(path).mtimeMs))
-  } catch {
-    knownMtime.delete(path) // vanished — recreating it later is always allowed
-  }
-}
-
 async function closeVault(): Promise<void> {
-  if (watcher) await watcher.close()
+  const previousIndex = index
+  const previousWatcher = watcher
+  index = null
+  vaultRoot = null
   watcher = null
+  for (const ctrl of askAbort.values()) ctrl.abort()
+  askAbort.clear()
   for (const ctrl of distillAbort.values()) ctrl.abort()
   distillAbort.clear()
   // Fail any in-flight embed round-trip now — otherwise its `ipcMain.once`
@@ -290,21 +336,33 @@ async function closeVault(): Promise<void> {
   pickedDocs.clear()
   distillRuns?.close()
   distillRuns = null
-  index?.close()
-  index = null
-  vaultRoot = null
-  knownMtime.clear()
+  previousIndex?.close()
+  await previousWatcher?.close()
 }
 
 async function indexPath(path: string): Promise<void> {
-  if (!index) return
-  try {
-    const content = await fs.readFile(path, 'utf8')
-    const { mtimeMs } = await fs.stat(path)
-    index.indexFile(path, content, Math.floor(mtimeMs))
-  } catch {
-    // File vanished between event and read — treat as removal.
-    index.removeFile(path)
+  const target = index
+  if (!target) return
+  // A checked save can land between a watcher read and its final stat. Index a
+  // stable disk revision only, so old bytes never inherit the newer mtime.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let content: string
+    let mtimeMs: number
+    try {
+      const before = await fs.stat(path)
+      content = await fs.readFile(path, 'utf8')
+      if (target !== index) return
+      const after = statSync(path)
+      if (before.ino !== after.ino || before.dev !== after.dev || before.size !== after.size ||
+          before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) continue
+      mtimeMs = after.mtimeMs
+    } catch (err) {
+      if (target === index && !existsSync(path)) target.removeFile(path)
+      else if (target === index) console.error('[index] Could not read', path, err)
+      return
+    }
+    target.indexFile(path, content, Math.floor(mtimeMs))
+    return
   }
 }
 
@@ -324,36 +382,28 @@ function notifyIndexChanged(): void {
   mainWindow?.webContents.send('index:changed')
 }
 
-/** Wikilink targets referenced in `text` — `[[Target]]` / `[[Target|Display]]`
- *  — matching the renderer's wikilink markdown rule (target is before `|` and
- *  `#`). Used to tell which retrieved sources an "Ask" answer actually cites.
- *  (Duplicated in the renderer's citations.ts: main and renderer don't share a
- *  module boundary — see tsconfig.node.json / tsconfig.web.json.) */
-function wikilinkTargetsIn(text: string): string[] {
-  const out: string[] = []
-  for (const m of text.matchAll(/\[\[([^[\]]+)\]\]/g)) {
-    out.push(m[1].split('|')[0].split('#')[0].trim())
-  }
-  return out
-}
-
 function talkStatus(): TalkStatus {
-  const enabled = readSettings().talk.enabled
+  const { enabled, embed } = readSettings().talk
+  const generation = enabled ? index?.talkGenerationFor(embed.model) ?? null : null
   const counts = index?.talkCounts() ?? { total: 0, pending: 0 }
-  return { enabled, ready: !!index?.talkReady, total: counts.total, pending: counts.pending }
+  return {
+    vaultId: index?.id ?? null,
+    generation,
+    enabled,
+    ready: generation !== null,
+    total: counts.total,
+    pending: counts.pending
+  }
 }
 
-/** Read + chunk every vault note not already chunked (used on live enable; the
- *  open scan already chunks when talk was pre-enabled, so those are skipped). */
-async function chunkUnchunkedFiles(): Promise<void> {
-  if (!index || !vaultRoot) return
-  for (const p of await markdownUnder(vaultRoot)) {
-    if (index.isChunked(p)) continue
-    try {
-      index.chunkFile(p, await fs.readFile(p, 'utf8'))
-    } catch {
-      // unreadable / vanished — skip
-    }
+/** Fill a freshly enabled or rebuilt chunk index from its live note rows. */
+async function chunkUnchunkedFiles(target: VaultIndex): Promise<void> {
+  const generation = target.talkGeneration
+  for (const path of target.knownFiles().keys()) {
+    if (target !== index || target.talkGeneration !== generation) return
+    if (target.isChunked(path)) continue
+    target.chunkIndexedFile(path)
+    await yieldToLoop()
   }
 }
 
@@ -387,10 +437,7 @@ async function openVault(root: string): Promise<VaultListing> {
     }
     const stored = known.get(f.path)
     if (stored !== undefined && stored !== 0 && stored === mtime) {
-      if (!index.talkOn || index.isChunked(f.path)) {
-        knownMtime.set(f.path, mtime) // still the save-staleness baseline
-        continue
-      }
+      if (!index.talkOn || index.isChunked(f.path)) continue
     }
     await indexPath(f.path)
   }
@@ -414,7 +461,7 @@ async function openVault(root: string): Promise<VaultListing> {
         void indexPath(p).then(() => {
           notifyTalkDirty()
           notifyIndexChanged()
-        })
+        }).catch((err) => console.error('[index] Could not index', p, err))
       notifyVaultChanged()
     })
     .on('change', (p: string) => {
@@ -425,7 +472,7 @@ async function openVault(root: string): Promise<VaultListing> {
         void indexPath(p).then(() => {
           notifyTalkDirty()
           notifyIndexChanged()
-        })
+        }).catch((err) => console.error('[index] Could not index', p, err))
       }
     })
     .on('unlink', (p: string) => {
@@ -517,10 +564,11 @@ function rendererEmbedder(token: string, timeoutMs = 5 * 60_000): DistillEmbedde
  */
 async function convertPicked(filePath: string): Promise<RunSource> {
   if (!vaultRoot) throw new Error('Open a vault first.')
-  const stored = await convertSource(vaultRoot, filePath, convertDocument)
+  const stored = await convertSource(vaultRoot, filePath, convertDocumentWithCoverage)
   return {
     file: basename(filePath),
     text: stored.text,
+    pdf: stored.record.pdf,
     hash: stored.hash,
     originalPath: stored.record.originalPath
   }
@@ -571,13 +619,14 @@ async function runDistillPipeline(
     // BEFORE the expensive embedding, not half-way through the run. CLI backends
     // have multi-second cold starts (measured ~6.5s for a trivial codex round-trip).
     try {
-      await probeChat(chat, AbortSignal.timeout(30_000))
+      await probeChat(chat, AbortSignal.any([ctrl.signal, AbortSignal.timeout(30_000)]))
     } catch (err) {
       throw new Error(
         `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login, claude auth login). ${err instanceof Error ? err.message : ''}`.trim(),
         { cause: err }
       )
     }
+    ctrl.signal.throwIfAborted()
     if (!opts.resume)
       beginRun(root, runId, source, { provider: cfg.kind, model: cfg.model ?? '' }, opts.focus)
     const result = await distill(
@@ -593,6 +642,7 @@ async function runDistillPipeline(
     )
     // meta.json stores a flat map of numbers, so the drop reasons are
     // spread out of their nested shape here.
+    ctrl.signal.throwIfAborted()
     const { droppedByReason: why, ...flatStats } = result.stats
     runs.create(
       runId,
@@ -607,13 +657,27 @@ async function runDistillPipeline(
       result.themes,
       opts.focus
     )
-    return { runId, stats: result.stats }
+    return { runId, stats: result.stats, pdf: source.pdf }
   } finally {
     distillAbort.delete(runId)
   }
 }
 
 function registerIpc(): void {
+  ipcMain.on('window:close-ready', (event) => {
+    if (event.sender === mainWindow?.webContents) closeReady = true
+  })
+
+  ipcMain.on('window:close-response', (event, approved: boolean) => {
+    const request = pendingClose
+    if (!request || event.sender !== request.window.webContents) return
+    pendingClose = null
+    if (approved !== true) return
+    closeApproved = request.window
+    if (request.quit) app.quit()
+    else request.window.close()
+  })
+
   ipcMain.handle('vault:pick', async (): Promise<string | null> => {
     const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
       properties: ['openDirectory'],
@@ -710,7 +774,6 @@ function registerIpc(): void {
       await fs.rename(oldPath, newPath)
       await indexPath(newPath)
     }
-    knownMtime.delete(oldPath)
     notifyVaultChanged()
     return newPath
   })
@@ -735,46 +798,47 @@ function registerIpc(): void {
     }
     for (const p of under) {
       index?.removeFile(p)
-      knownMtime.delete(p)
     }
     notifyVaultChanged()
     return true
   })
 
-  ipcMain.handle('file:read', async (_e, path: string) => {
+  ipcMain.handle('file:read', (_e, path: string) => {
     if (!isAccessibleFile(path)) throw new Error('Access denied: path outside the vault')
-    const content = await fs.readFile(path, 'utf8')
-    trackMtime(path) // reading refreshes the save-staleness baseline
-    return content
+    return fs.readFile(path, 'utf8')
   })
 
-  ipcMain.handle('file:save', async (_e, path: string, content: string, force?: boolean) => {
-    if (!isAccessibleFile(path)) throw new Error('Access denied: path outside the vault')
-    // Refuse to clobber bytes the app didn't write: if the file changed on disk
-    // since we last read/wrote it, this save would silently drop that change.
-    // The renderer surfaces the conflict and may re-save with force.
-    if (!force) {
-      const known = knownMtime.get(path)
-      if (known !== undefined) {
-        let onDisk: number | null = null
-        try {
-          onDisk = Math.floor((await fs.stat(path)).mtimeMs)
-        } catch {
-          // vanished — recreating it preserves the user's work
-        }
-        if (onDisk !== null && onDisk !== known)
-          throw new Error('Conflict: the file changed on disk since it was opened.')
+  ipcMain.handle(
+    'file:save',
+    (_e, path: string, content: string, expected: string | null): SaveFileResult => {
+      if (!isAccessibleFile(path)) throw new Error('Access denied: path outside the vault')
+      if (typeof content !== 'string' || (expected !== null && typeof expected !== 'string')) {
+        throw new Error('A checked save requires the editor text and its disk baseline')
       }
+      // Check the editor's own baseline, so a separate read of the same note
+      // cannot authorize an overwrite. Keep check and write in one main turn.
+      let onDisk = readDiskVersion(path)
+      if (onDisk !== expected && onDisk !== content) return { status: 'conflict', content: onDisk }
+      if (onDisk !== content) {
+        const written = atomicWrite(path, content, () => {
+          onDisk = readDiskVersion(path)
+          return onDisk === expected
+        })
+        if (!written && onDisk !== content) return { status: 'conflict', content: onDisk }
+      }
+      if (index && withinVault(path)) {
+        try {
+          index.indexFile(path, content, Math.floor(statSync(path).mtimeMs))
+          notifyTalkDirty()
+          notifyIndexChanged()
+        } catch (err) {
+          // The save landed; the watcher can catch up with the derived index.
+          console.error('[index] Could not index saved file:', err)
+        }
+      }
+      return { status: 'saved' }
     }
-    atomicWrite(path, content)
-    trackMtime(path)
-    // Re-index synchronously from the bytes we just wrote (no fs round-trip).
-    if (index && withinVault(path)) {
-      index.indexFile(path, content, knownMtime.get(path) ?? 0)
-      notifyTalkDirty()
-      notifyIndexChanged()
-    }
-  })
+  )
 
   // Relation-typing bridge: name an untyped link by appending a `key:: value`
   // field to the *source note* (the source of truth), then re-index. Editing the
@@ -799,27 +863,9 @@ function registerIpc(): void {
     }
   )
 
-  // Synchronous save used on window close (beforeunload can't await async IPC).
-  // No staleness check: this is the last-chance flush on quit, where dropping
-  // the buffer is strictly worse than overwriting.
-  ipcMain.on('file:save-now', (e, path: string, content: string) => {
-    try {
-      if (!isAccessibleFile(path)) {
-        e.returnValue = false
-        return
-      }
-      atomicWrite(path, content)
-      if (index && withinVault(path)) {
-        index.indexFile(path, content, 0)
-        notifyIndexChanged()
-      }
-    } catch {
-      // best effort on the way out
-    }
-    e.returnValue = true
-  })
-
   ipcMain.handle('index:backlinks', (_e, target: string) => index?.backlinks(target) ?? [])
+
+  ipcMain.handle('index:backlinksToFile', (_e, path: string) => index?.backlinksToFile(path) ?? [])
 
   ipcMain.handle('index:outbound', (_e, sourceFile: string) => index?.outbound(sourceFile) ?? [])
 
@@ -852,100 +898,102 @@ function registerIpc(): void {
   // record the model's dims + configured model id (a model swap gates the
   // stored embeddings exactly like a dims change — see VectorStore.setDims),
   // and chunk any not-yet-chunked notes.
-  ipcMain.handle('talk:enable', async (_e, dims: number): Promise<TalkStatus> => {
-    const path = ensureSettingsFile()
-    atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), true))
-    trackMtime(path)
-    index?.enableTalk()
-    if (Number.isFinite(dims) && dims > 0) {
-      index?.setEmbedDims(dims, readSettings().talk.embed.model)
-    }
-    await chunkUnchunkedFiles()
-    return talkStatus()
-  })
-
-  // Turn off + drop the derived embeddings/chunks (rebuildable by re-enabling).
-  ipcMain.handle('talk:disable', (): TalkStatus => {
-    const path = ensureSettingsFile()
-    atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), false))
-    trackMtime(path)
-    index?.disableTalk()
-    return talkStatus()
-  })
-
-  ipcMain.handle('talk:pending', (_e, limit: number) => index?.talkPending(limit) ?? [])
-
   ipcMain.handle(
-    'talk:putEmbeddings',
-    (_e, rows: { id: number; vector: number[] }[]): TalkStatus => {
-      index?.putEmbeddings(rows.map((r) => ({ id: r.id, vector: Float32Array.from(r.vector) })))
+    'talk:enable',
+    async (_e, vaultId: string, model: string, dims: number): Promise<TalkStatus> => {
+      const target = index
+      if (!target || target.id !== vaultId) return talkStatus()
+      if (model !== readSettings().talk.embed.model)
+        throw new Error('The embedding model changed.')
+      if (!Number.isSafeInteger(dims) || dims <= 0) throw new Error('Invalid embedding dimension.')
+      target.enableTalk()
+      target.setEmbedDims(dims, model)
+      const path = ensureSettingsFile()
+      atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), true))
+      await chunkUnchunkedFiles(target)
       return talkStatus()
     }
   )
 
-  ipcMain.handle('talk:search', (_e, query: string, vector: number[]) =>
-    index?.talkSearch(query, vector?.length ? Float32Array.from(vector) : null) ?? []
+  // Turn off + drop the derived embeddings/chunks (rebuildable by re-enabling).
+  ipcMain.handle('talk:disable', (): TalkStatus => {
+    index?.disableTalk()
+    const path = ensureSettingsFile()
+    atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), false))
+    return talkStatus()
+  })
+
+  ipcMain.handle('talk:pending', (_e, generation: string, limit: number) => {
+    const { enabled, embed } = readSettings().talk
+    return enabled && generation === index?.talkGenerationFor(embed.model)
+      ? index.talkPending(generation, limit)
+      : []
+  })
+
+  ipcMain.handle(
+    'talk:putEmbeddings',
+    (_e, generation: string, rows: { id: number; vector: number[] }[]): TalkStatus => {
+      const { enabled, embed } = readSettings().talk
+      if (enabled && generation === index?.talkGenerationFor(embed.model))
+        index.putEmbeddings(generation, rows.map((r) => ({
+          id: r.id, vector: Float32Array.from(r.vector)
+        })))
+      return talkStatus()
+    }
   )
+
+  ipcMain.handle('talk:search', (_e, query: string, generation: string, vector: number[]) => {
+    const { enabled, embed } = readSettings().talk
+    const current = enabled && generation === index?.talkGenerationFor(embed.model)
+    return index?.talkSearch(query, current ? Float32Array.from(vector) : null) ?? []
+  })
 
   ipcMain.handle('talk:neighbors', (_e, focusPath: string, k?: number) =>
     index?.talkNeighbors(focusPath, k, readSettings().talk.relatedMinScore) ?? []
   )
 
-  // True when an "Ask" chat provider is configured (provider ≠ none).
   ipcMain.handle('talk:canAsk', () => chatProviderConfig() !== null)
 
-  // "Ask": retrieve grounding chunks → stream a cited answer. Only the retrieved
-  // passages are sent to the model (never the whole vault). Everything goes back
-  // as ordered events on the sender (tokens → done/error) so the answer can't
-  // race the completion signal.
-  ipcMain.on('talk:ask', async (e, question: string, vector: number[]) => {
-    const noteName = (f: string): string => f.split(/[/\\]/).pop()!.replace(/\.md$/i, '')
-    try {
-      const cfg = chatProviderConfig()
-      if (!cfg) throw new Error('Ask is off — set [talk.chat] provider in Settings.')
-      if (!index) throw new Error('Open a vault first.')
-      const chunks = index.talkRetrieve(
-        question,
-        vector?.length ? Float32Array.from(vector) : null,
-        8
-      )
-      const context = chunks
-        .map((c, i) => `[${i + 1}] (${noteName(c.file)})\n${c.text}`)
-        .join('\n\n')
-      const system =
-        "You answer the user's question using ONLY the notes provided below. Cite the" +
-        ' notes you draw on inline as [[Note Name]]. If the notes do not contain the' +
-        ` answer, say so plainly.\n\nNOTES:\n${context || '(no relevant notes found)'}`
+  ipcMain.on('talk:ask:cancel', (e, id: string) => {
+    askAbort.get(`${e.sender.id}:${id}`)?.abort()
+  })
 
+  ipcMain.handle('talk:ask', async (e, req: AskRequest): Promise<AskResult> => {
+    const target = index
+    if (!target || !vaultRoot || req.vaultId !== target.id) throw new Error('The vault changed.')
+    const cfg = chatProviderConfig()
+    if (!cfg) throw new Error('Set a chat provider in Settings to use Ask.')
+
+    const key = `${e.sender.id}:${req.id}`
+    if (askAbort.has(key)) throw new Error('This Ask request is already running.')
+    const controller = new AbortController()
+    askAbort.set(key, controller)
+    const send = (token: string): void => {
+      if (!e.sender.isDestroyed()) e.sender.send('talk:ask:token', req.id, token)
+    }
+    try {
+      const { enabled, embed } = readSettings().talk
+      const vector = enabled && req.generation === target.talkGenerationFor(embed.model) && req.vector.length
+        ? Float32Array.from(req.vector)
+        : null
+      const chunks = target.talkRetrieve(req.question, vector)
+      const { prompt, citations } = packAskContext(req.question, vaultRoot, chunks, inputBudgetFor(cfg))
+      if (!citations.length) return { answer: NO_ASK_EVIDENCE, citations }
       const model = makeChatModel(cfg)
       let answer = ''
       for await (const token of model.chat({
-        system,
-        messages: [{ role: 'user', content: question }]
+        system: ASK_SYSTEM,
+        messages: [{ role: 'user', content: prompt }],
+        signal: controller.signal
       })) {
+        controller.signal.throwIfAborted()
         answer += token
-        e.sender.send('talk:ask:token', token)
+        send(token)
       }
-
-      // "used" = the answer actually cites this note via [[wikilink]] — as
-      // opposed to being retrieved as context but never drawn on. Citations
-      // become attribution (what the answer leans on), not just a dump of
-      // whatever was sent to the model.
-      const usedNames = new Set(wikilinkTargetsIn(answer))
-      const seen = new Set<string>()
-      const citations: Citation[] = []
-      const sources: string[] = []
-      for (const c of chunks) {
-        if (!seen.has(c.file)) {
-          seen.add(c.file)
-          const title = noteName(c.file)
-          sources.push(title)
-          citations.push({ path: c.file, title, used: usedNames.has(title) })
-        }
-      }
-      e.sender.send('talk:ask:done', { citations, sources })
-    } catch (err) {
-      e.sender.send('talk:ask:error', err instanceof Error ? err.message : String(err))
+      controller.signal.throwIfAborted()
+      return { answer, citations }
+    } finally {
+      if (askAbort.get(key) === controller) askAbort.delete(key)
     }
   })
 
@@ -971,7 +1019,7 @@ function registerIpc(): void {
     if (res.canceled || res.filePaths.length === 0) return null
     const file = res.filePaths[0]
     const id = randomUUID()
-    pickedDocs.set(id, file)
+    pickedDocs.set(id, { path: file })
     return { id, name: basename(file) }
   })
 
@@ -980,7 +1028,7 @@ function registerIpc(): void {
   ipcMain.handle('distill:registerPath', (_e, absPath: string): string => {
     if (!process.env.NODEBOOK_E2E) throw new Error('Not available.')
     const id = randomUUID()
-    pickedDocs.set(id, absPath)
+    pickedDocs.set(id, { path: absPath })
     return id
   })
 
@@ -989,14 +1037,17 @@ function registerIpc(): void {
   ipcMain.handle(
     'distill:estimate',
     async (_e, docId: string, focus?: string): Promise<DistillEstimate> => {
-      const filePath = pickedDocs.get(docId)
-      if (!filePath) throw new Error('Unknown document — pick it again.')
+      const picked = pickedDocs.get(docId)
+      if (!picked) throw new Error('Unknown document — pick it again.')
+      const filePath = picked.path
       // The focus rides in every prompt, so it costs window room — the estimate
       // has to be made against the same budget the run will have.
-      return estimateDistill((await convertPicked(filePath)).text, {
-        ...distillBudget(),
-        focus: normalizeFocus(focus)
-      })
+      const source = await convertPicked(filePath)
+      const estimate = estimateDistill(source.text, { ...distillBudget(), focus: normalizeFocus(focus) })
+      if (pickedDocs.get(docId) !== picked) throw new Error('The vault changed. Pick the document again.')
+      const { file, hash, originalPath, pdf } = source
+      picked.estimated = { file, hash, originalPath, pdf }
+      return { ...estimate, pdf: source.pdf }
     }
   )
 
@@ -1011,8 +1062,9 @@ function registerIpc(): void {
         throw new Error(
           'A document is already being distilled — wait for it to finish or cancel it.'
         )
-      const filePath = pickedDocs.get(docId)
-      if (!filePath) throw new Error('Unknown document — pick it again.')
+      const picked = pickedDocs.get(docId)
+      if (!picked) throw new Error('Unknown document — pick it again.')
+      const filePath = picked.path
       // Normalised (and capped) here, before the id is spent: an over-long
       // focus must cost the user nothing but the message that says so.
       const asked = normalizeFocus(focus)
@@ -1028,7 +1080,19 @@ function registerIpc(): void {
       try {
         // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
         // rest of the pipeline is format-agnostic.
-        return await runDistillPipeline(runId, await convertPicked(filePath), {
+        const owner = distillRuns
+        let source: RunSource
+        if (picked.estimated?.hash) {
+          const text = readSourceText(vaultRoot, picked.estimated.hash)
+          if (text === null || sha1(text) !== picked.estimated.hash) {
+            throw new Error('The prepared text changed or is unavailable. Pick the document again.')
+          }
+          source = { ...picked.estimated, text }
+        } else {
+          source = await convertPicked(filePath)
+        }
+        if (owner !== distillRuns) throw new Error('The vault changed. Pick the document again.')
+        return await runDistillPipeline(runId, source, {
           resume: false,
           focus: asked || undefined
         })
@@ -1305,10 +1369,7 @@ function registerIpc(): void {
   ipcMain.handle('distill:unmerge', async (_e, runId: string): Promise<DistillUnmergeResult> => {
     if (!vaultRoot || !index) return { removed: 0, trashed: 0 }
     const { removed, trashed } = await unmergeRun(vaultRoot, runId, (p) => shell.trashItem(p))
-    for (const p of [...removed, ...trashed]) {
-      index.removeFile(p)
-      knownMtime.delete(p)
-    }
+    for (const p of [...removed, ...trashed]) index.removeFile(p)
     notifyVaultChanged()
     notifyIndexChanged()
     return { removed: removed.length, trashed: trashed.length }
@@ -1353,7 +1414,6 @@ function registerIpc(): void {
   ipcMain.handle('settings:setThemeMode', (_e, mode: ThemeMode) => {
     const path = ensureSettingsFile()
     atomicWrite(path, setThemeMode(readFileSync(path, 'utf8'), mode))
-    trackMtime(path)
     return readSettings()
   })
 
@@ -1361,7 +1421,6 @@ function registerIpc(): void {
   // TOML text so the open settings editor can refresh in place.
   ipcMain.handle('settings:reset', () => {
     atomicWrite(settingsFilePath(), DEFAULT_TOML)
-    trackMtime(settingsFilePath())
     return DEFAULT_TOML
   })
   // Read-only: the documented defaults for "Reveal defaults" (no file write).
@@ -1404,9 +1463,7 @@ function refreshAppMenu(): void {
 
 // One-shot settings migrations, applied at startup and recorded in a marker
 // file — so upgrading an old shipped default happens exactly once per install,
-// and a user who later deliberately picks that legacy value keeps it. Writes
-// go through atomicWrite + trackMtime like every other settings writer, so an
-// open settings editor never sees a phantom "changed on disk" conflict.
+// and a user who later deliberately picks that legacy value keeps it.
 function applySettingsMigrations(): void {
   const marker = join(app.getPath('userData'), '.migrations')
   const applied = existsSync(marker) ? readFileSync(marker, 'utf8').split('\n').filter(Boolean) : []
@@ -1414,10 +1471,7 @@ function applySettingsMigrations(): void {
   if (applied.includes(id)) return
   const path = ensureSettingsFile()
   const migrated = migrateEmbedModel(readFileSync(path, 'utf8'))
-  if (migrated !== null) {
-    atomicWrite(path, migrated)
-    trackMtime(path)
-  }
+  if (migrated !== null) atomicWrite(path, migrated)
   atomicWrite(marker, [...applied, id].join('\n') + '\n')
 }
 
@@ -1435,6 +1489,10 @@ app.whenReady().then(() => {
 
 // Quit when the window is closed, on every platform. (We override the macOS
 // "stay alive in the dock" convention — Nodebook is a single-window app.)
+app.on('before-quit', (event) => {
+  if (mainWindow && deferClose(mainWindow, true)) event.preventDefault()
+})
+
 app.on('window-all-closed', () => {
   app.quit()
 })

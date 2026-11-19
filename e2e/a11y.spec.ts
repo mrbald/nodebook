@@ -110,7 +110,9 @@ test('list rows are focusable and open with Enter (tree + search)', async () => 
   await page.locator('.search-box').fill('claim') // only welcome contains "claim"
   await expect(page.locator('.search-result-title')).toBeVisible() // a real result, not "No matches"
   const hit = page.locator('.search-results li').first()
-  await hit.press('Enter')
+  await page.locator('.search-box').press('ArrowDown')
+  await expect(hit).toBeFocused()
+  await page.keyboard.press('Enter')
   await expect(page.locator('.cm-content')).toContainText('claim')
   await page.locator('.search-box').fill('') // restore the tree
 })

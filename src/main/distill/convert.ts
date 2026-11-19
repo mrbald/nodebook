@@ -11,6 +11,7 @@
 
 import { readFileSync } from 'fs'
 import { extname } from 'path'
+import type { PdfExtraction } from '../../shared/pdfExtraction'
 import { cleanPdf } from './cleanPdf'
 
 /** One text item as pdf.js hands it back: the string, whether a line ends
@@ -162,7 +163,12 @@ function trimBlankLines(text: string): string {
  * as code. A document that is mostly monospace is prose set in a typewriter
  * face, not a listing; there the marking is switched off (`MONO_BODY_SHARE`).
  */
-export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
+export interface ConvertedDocument {
+  text: string
+  pdf?: PdfExtraction
+}
+
+async function convertPdf(data: Uint8Array): Promise<ConvertedDocument> {
   // Lazy + the *legacy* build (node-friendly, no DOM globals); loaded only when
   // a PDF is actually distilled, so it never costs startup.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
@@ -209,13 +215,21 @@ export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
   // One entry per page in and out, so the heading keeps the REAL page number
   // even when a page cleans down to nothing.
   const cleaned = cleanPdf(raw)
-    .map((text, i) => (text.trim() ? `## Page ${i + 1}\n\n${text}` : ''))
-    .filter(Boolean)
-  const md = cleaned.join('\n\n')
+  const missing: number[] = []
+  const sections: string[] = []
+  cleaned.forEach((text, i) => {
+    if (text.trim()) sections.push(`## Page ${i + 1}\n\n${text}`)
+    else missing.push(i + 1)
+  })
+  const md = sections.join('\n\n')
   if (!md.trim()) {
     throw new Error('No extractable text — this PDF looks scanned. Re-digitize (OCR) it first.')
   }
-  return md
+  return { text: md, pdf: { pages: pages.length, missing } }
+}
+
+export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
+  return (await convertPdf(data)).text
 }
 
 /** Read an attribute off an XML start-tag, order-independent. */
@@ -400,12 +414,16 @@ const HTML_EXT = new Set(['.html', '.htm', '.xhtml'])
 
 /** Convert a document at `filePath` into the markdown the distill pipeline reads. */
 export async function convertDocument(filePath: string): Promise<string> {
+  return (await convertDocumentWithCoverage(filePath)).text
+}
+
+export async function convertDocumentWithCoverage(filePath: string): Promise<ConvertedDocument> {
   const ext = extname(filePath).toLowerCase()
-  if (ext === '.pdf') return pdfToMarkdown(new Uint8Array(readFileSync(filePath)))
-  if (ext === '.epub') return epubToMarkdown(new Uint8Array(readFileSync(filePath)))
-  if (ext === '.docx') return docxToMarkdown(new Uint8Array(readFileSync(filePath)))
-  if (HTML_EXT.has(ext)) return htmlToMarkdown(readFileSync(filePath, 'utf8'))
-  if (TEXT_EXT.has(ext)) return readFileSync(filePath, 'utf8')
+  if (ext === '.pdf') return convertPdf(new Uint8Array(readFileSync(filePath)))
+  if (ext === '.epub') return { text: await epubToMarkdown(new Uint8Array(readFileSync(filePath))) }
+  if (ext === '.docx') return { text: await docxToMarkdown(new Uint8Array(readFileSync(filePath))) }
+  if (HTML_EXT.has(ext)) return { text: await htmlToMarkdown(readFileSync(filePath, 'utf8')) }
+  if (TEXT_EXT.has(ext)) return { text: readFileSync(filePath, 'utf8') }
   if (ext === '.doc') {
     throw new Error(
       'Legacy .doc isn’t supported — open it in Word or LibreOffice and save as .docx first.'

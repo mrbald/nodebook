@@ -14,6 +14,7 @@
  * it is durable staging: written atomically, migrated forward, backed up.
  */
 
+import { readPdfExtraction, type PdfExtraction } from '../../shared/pdfExtraction'
 import {
   mkdirSync,
   writeFileSync,
@@ -138,6 +139,7 @@ export function sourceNoteName(file: string): string {
 }
 
 export interface RunSource {
+  pdf?: PdfExtraction
   /** The document's raw file identifier (e.g. `Federalist.md`). Note names
    *  derive from it via `sourceNoteName`; `meta.json` keeps it as-is. */
   file: string
@@ -167,6 +169,7 @@ const META_FILE = 'meta.json'
 
 /** What `run.json` records: the run's identity, written at start. */
 export interface RunJson {
+  pdf?: PdfExtraction
   /** The document's raw file identifier, exactly as given to the run. */
   file: string
   /** ISO timestamp of the run's start. */
@@ -198,6 +201,7 @@ export function beginRun(
   mkdirSync(dir, { recursive: true })
   const run: RunJson = {
     file: source.file,
+    pdf: source.pdf,
     createdAt: new Date().toISOString(),
     ...(source.hash ? { hash: source.hash } : {}),
     ...(source.originalPath ? { originalPath: source.originalPath } : {}),
@@ -238,6 +242,7 @@ export function readRunSource(vaultRoot: string, runId: string): RunSource | nul
   try {
     return {
       file: run.file,
+      pdf: readPdfExtraction(run.pdf),
       text: readFileSync(join(runDir(vaultRoot, runId), SOURCE_FILE), 'utf8'),
       ...(run.hash ? { hash: run.hash } : {}),
       ...(run.originalPath ? { originalPath: run.originalPath } : {})

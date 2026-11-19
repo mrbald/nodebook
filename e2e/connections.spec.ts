@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron } from '@playwright/test'
 import type { ElectronApplication, Page } from '@playwright/test'
-import { cpSync, mkdtempSync, writeFileSync } from 'fs'
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve, sep } from 'path'
 
@@ -29,6 +29,11 @@ test.beforeAll(async () => {
     join(vaultDir, 'SelfRef.md'),
     '# SelfRef\n\nThis mentions [[SelfRef]] itself, plus [[Graph Model]].\n'
   )
+  for (const dir of ['alpha', 'beta']) {
+    mkdirSync(join(vaultDir, dir))
+    writeFileSync(join(vaultDir, dir, 'Twin.md'), `# Twin\n\nI live in ${dir}.\n`)
+    writeFileSync(join(vaultDir, dir, `From-${dir}.md`), `# From-${dir}\n\nSee [[Twin]].\n`)
+  }
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-conn-userdata-'))
   app = await electron.launch({
     args: [projectRoot],
@@ -55,4 +60,16 @@ test('the Connections panel hides self-references', async () => {
   // …but the [[SelfRef]] self-link is filtered out of both Links and Backlinks.
   await expect(panel.locator('.outbound-item', { hasText: 'SelfRef' })).toHaveCount(0)
   await expect(panel.locator('.backlinks-item', { hasText: 'SelfRef' })).toHaveCount(0)
+})
+
+test('links, outbound rows, and incoming backlinks agree for same-name notes', async () => {
+  const fromBeta = page.locator('.file-tree').getByRole('button', { name: 'From-beta', exact: true })
+  await fromBeta.click()
+  await page.locator('.cm-wikilink').filter({ hasText: 'Twin' }).click()
+  await expect(page.locator('.cm-content')).toContainText('I live in beta.')
+  const panel = page.locator('.backlinks')
+  await expect(panel.locator('.backlinks-item')).toHaveText(['From-beta'])
+  await fromBeta.click()
+  await panel.locator('.outbound-item.is-link').filter({ hasText: 'Twin' }).click()
+  await expect(page.locator('.cm-content')).toContainText('I live in beta.')
 })

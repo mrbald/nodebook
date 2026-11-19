@@ -1,83 +1,89 @@
+import type { ELK, ElkNode } from 'elkjs/lib/elk-api'
+import type { GraphEdge } from '@shared/types'
 import type { Point } from './layout'
 
-/**
- * Layered layout via ELK (the Eclipse Layout Kernel) — a second hierarchical
- * layout beside dagre's `tree`. Both rank nodes into layers; ELK's crossing
- * minimisation and edge routing untangle a dense map more often, which is why
- * it is offered as its own mode rather than replacing tree: sometimes one
- * reads better, sometimes the other, and the switch is a click.
- *
- * ELK is asynchronous (it is GWT-compiled Java and returns a Promise), so the
- * view computes this in an effect rather than a memo. Deterministic for a given
- * input, so it is golden-testable and stable. Output is centred and shrunk to
- * fit the W×H viewport, exactly like `dagreLayout`.
- */
-export async function elkLayout(
-  nodes: { id: string }[],
-  edges: { source: string; target: string }[],
-  opts: { width?: number; height?: number } = {}
-): Promise<Map<string, Point>> {
-  const W = opts.width ?? 800
-  const H = opts.height ?? 600
-  const pos = new Map<string, Point>()
-  const n = nodes.length
-  if (n === 0) return pos
-  if (n === 1) {
-    pos.set(nodes[0].id, { x: W / 2, y: H / 2 })
-    return pos
-  }
+export interface NodeSize {
+  width: number
+  height: number
+}
 
-  const present = new Set(nodes.map((x) => x.id))
+export interface ElkRequest {
+  nodes: ({ id: string } & NodeSize)[]
+  edges: GraphEdge[]
+  width: number
+  height: number
+  direction: 'UP' | 'DOWN'
+}
+
+export interface ElkLayout {
+  centres: Map<string, Point>
+  routes: Map<string, Point[][]>
+  scale: number
+}
+
+export type ElkReply = { layout: ElkLayout } | { error: string }
+
+export function edgeKey(edge: GraphEdge): string {
+  return JSON.stringify([edge.source, edge.relation, edge.target])
+}
+
+export async function elkLayout(elk: ELK, request: ElkRequest): Promise<ElkLayout> {
+  const { nodes, edges, width, height, direction } = request
+  const ids = new Map(nodes.map(({ id }, i) => [id, `n${i}`]))
+  const keys = new Map<string, string>()
+  const elkEdges: NonNullable<ElkNode['edges']> = []
   const seen = new Set<string>()
-  const elkEdges: { id: string; sources: string[]; targets: string[] }[] = []
-  for (const e of edges) {
-    if (e.source === e.target || !present.has(e.source) || !present.has(e.target)) continue
-    const key = `${e.source} ${e.target}`
+  for (const edge of edges) {
+    const source = ids.get(edge.source)
+    const target = ids.get(edge.target)
+    if (!source || !target) continue
+    const key = edgeKey(edge)
     if (seen.has(key)) continue
     seen.add(key)
-    elkEdges.push({ id: `e${elkEdges.length}`, sources: [e.source], targets: [e.target] })
+    const id = `e${elkEdges.length}`
+    keys.set(id, key)
+    elkEdges.push({ id, sources: [source], targets: [target] })
   }
-  // Loaded on first use, not at startup: the bundled kernel is ~1.4 MB and most
-  // sessions never pick this layout. Vite splits it into its own chunk.
-  const { default: ELK } = await import('elkjs/lib/elk.bundled.js')
-  const graph = await new ELK().layout({
+  const graph = await elk.layout<ElkNode>({
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
-      'elk.direction': 'DOWN',
-      'elk.spacing.nodeNode': '45',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '65',
-      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.direction': direction,
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.nodeNode': '38',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '26',
+      'elk.spacing.edgeNode': '10',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '10',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '7',
       'elk.padding': '[top=20,left=20,bottom=20,right=20]'
     },
-    children: nodes.map((node) => ({ id: node.id, width: 34, height: 34 })),
+    children: nodes.map(({ id, width, height }) => ({ id: ids.get(id)!, width, height })),
     edges: elkEdges
   })
+  const graphWidth = graph.width || 1
+  const graphHeight = graph.height || 1
+  const scale = Math.min(1, width / graphWidth, height / graphHeight)
+  const dx = (width - graphWidth * scale) / 2
+  const dy = (height - graphHeight * scale) / 2
+  const fit = ({ x, y }: Point): Point => ({ x: dx + x * scale, y: dy + y * scale })
 
   const centres = new Map<string, Point>()
-  for (const c of graph.children ?? []) {
-    if (typeof c.x !== 'number' || typeof c.y !== 'number') continue
-    centres.set(c.id, { x: c.x + (c.width ?? 34) / 2, y: c.y + (c.height ?? 34) / 2 })
+  const originalIds = new Map([...ids].map(([original, elkId]) => [elkId, original]))
+  for (const child of graph.children ?? []) {
+    const id = originalIds.get(child.id)
+    if (id === undefined || child.x === undefined || child.y === undefined) continue
+    centres.set(id, fit({
+      x: child.x + (child.width ?? 0) / 2,
+      y: child.y + (child.height ?? 0) / 2
+    }))
   }
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
-  for (const v of centres.values()) {
-    minX = Math.min(minX, v.x)
-    minY = Math.min(minY, v.y)
-    maxX = Math.max(maxX, v.x)
-    maxY = Math.max(maxY, v.y)
+  const routes = new Map<string, Point[][]>()
+  for (const edge of graph.edges ?? []) {
+    const key = keys.get(edge.id)
+    if (key === undefined || !edge.sections?.length) continue
+    routes.set(key, edge.sections.map(({ startPoint, bendPoints, endPoint }) =>
+      [startPoint, ...(bendPoints ?? []), endPoint].map(fit)
+    ))
   }
-  const bw = maxX - minX || 1
-  const bh = maxY - minY || 1
-  const cx = (minX + maxX) / 2
-  const cy = (minY + maxY) / 2
-  const scale = Math.min(1, (W - 80) / bw, (H - 80) / bh) // shrink to fit, never enlarge
-
-  for (const node of nodes) {
-    const v = centres.get(node.id)
-    if (v) pos.set(node.id, { x: W / 2 + (v.x - cx) * scale, y: H / 2 + (v.y - cy) * scale })
-  }
-  return pos
+  return { centres, routes, scale }
 }

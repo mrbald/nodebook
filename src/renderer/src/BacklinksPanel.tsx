@@ -7,6 +7,7 @@ interface Props {
   active: MarkdownFile
   files: MarkdownFile[]
   onOpen: (f: MarkdownFile) => void
+  resolveTarget: (name: string) => MarkdownFile | undefined
   /** Provenance citations from the note's frontmatter (distilled notes). */
   citations?: NoteCitation[]
   /** Open a citation's source note at the cited span. */
@@ -32,6 +33,7 @@ export function BacklinksPanel({
   active,
   files,
   onOpen,
+  resolveTarget,
   citations,
   onOpenCitation,
   document,
@@ -46,36 +48,19 @@ export function BacklinksPanel({
 
   useEffect(() => {
     let ignore = false
-    const relNoExt = active.rel.replace(/\.md$/i, '')
-
     Promise.all([
-      window.nodebook.backlinks(active.name),
-      window.nodebook.backlinks(relNoExt),
+      window.nodebook.backlinksToFile(active.path),
       window.nodebook.outbound(active.path)
-    ]).then(([byName, byRel, out]) => {
+    ]).then(([incoming, out]) => {
       if (ignore) return
-      const seen = new Set<string>()
-      const merged: Backlink[] = []
-      for (const item of [...byName, ...byRel]) {
-        // Drop self-references — a note linking to itself is noise, not navigation.
-        if (item.source_file === active.path) continue
-        const key = item.source_file + '|' + item.relation
-        if (!seen.has(key)) {
-          seen.add(key)
-          merged.push(item)
-        }
-      }
-      setBacklinks(merged)
-      // …and a self-link in the body (`[[Self]]`) or a self-targeting field.
-      setOutbound(out.filter((o) => o.object !== active.name && o.object !== relNoExt))
+      setBacklinks(incoming)
+      setOutbound(out.filter((o) => resolveTarget(o.object)?.path !== active.path))
     })
 
     return () => {
       ignore = true
     }
-    // active.name/.rel are derived from active.path, so path alone is sufficient.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active.path, reloadKey])
+  }, [active.path, reloadKey, resolveTarget])
 
   // What the note's confirmed twins say. Read fresh each time, because a twin is
   // an ordinary file the user can edit. The section is decoration: a twin that
@@ -114,38 +99,16 @@ export function BacklinksPanel({
     }
   }, [active.path, reloadKey])
 
-  // A triple object is a note name (navigable) or a literal value (e.g. a
-  // `key:: value` field). Resolve it the same way wikilink navigation does.
-  const resolveTarget = (name: string): MarkdownFile | undefined =>
-    files.find((f) => f.name === name) ??
-    files.find((f) => f.rel.replace(/\.md$/i, '') === name)
-
   const groupBy = <T,>(items: T[], key: (t: T) => string): [string, T[]][] => {
     const acc: Record<string, T[]> = {}
     for (const it of items) (acc[key(it)] ??= []).push(it)
     return Object.entries(acc)
   }
 
-  // A `same_as` that landed on a twin has its own section below, so it is not
-  // repeated among the ordinary links. One that resolved to nothing — a typo, a
-  // note not written yet — stays listed, so the broken link is still visible.
-  // The row's target is matched against the twins the MAP resolved (by name, or
-  // by path suffix for a `[[folder/Name]]` link), not re-resolved here: with two
-  // notes of one name the map prefers the linking note's folder, and this
-  // panel's own name-first lookup could pick the other one and list the same
-  // fact twice.
+  // Confirmed twins already have a dedicated section below.
   const twinPaths = new Set(twins.map((t) => t.path))
-  const namesATwin = (object: string): boolean => {
-    const key = object
-      .replace(/\\/g, '/')
-      .replace(/^\.?\//, '')
-      .replace(/\.md$/i, '')
-    return twins.some(
-      (t) => t.name === key || t.path.replace(/\\/g, '/').replace(/\.md$/i, '').endsWith(`/${key}`)
-    )
-  }
   const shownOutbound = outbound.filter(
-    (o) => !(o.relation === 'same_as' && namesATwin(o.object))
+    (o) => !(o.relation === 'same_as' && twinPaths.has(resolveTarget(o.object)?.path ?? ''))
   )
   const shownBacklinks = backlinks.filter(
     (b) => !(b.relation === 'same_as' && twinPaths.has(b.source_file))

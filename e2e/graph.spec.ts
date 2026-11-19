@@ -29,6 +29,13 @@ test.beforeAll(async () => {
   writeFileSync(join(vaultDir, 'right', 'Twin.md'), '# Twin\n\nThe right one.\n')
   writeFileSync(join(vaultDir, 'left', 'Leftward.md'), '# Leftward\n\nSee [[Twin]].\n')
   writeFileSync(join(vaultDir, 'right', 'Rightward.md'), '# Rightward\n\nSee [[Twin]].\n')
+  writeFileSync(join(vaultDir, 'Routing Lab.md'), [
+    '# Routing Lab', '', 'defines:: [[Routing Branch]]', 'supports:: [[Routing Branch]]',
+    'checks:: [[Routing Check]]'
+  ].join('\n'))
+  writeFileSync(join(vaultDir, 'Routing Branch.md'), '# Routing Branch\n\n[[Routing Lab]] · [[Routing Tail]]\n')
+  writeFileSync(join(vaultDir, 'Routing Check.md'), '# Routing Check\n\n[[Routing Branch]]\n')
+  writeFileSync(join(vaultDir, 'Routing Tail.md'), '# Routing Tail\n')
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-graph-userdata-'))
   app = await electron.launch({
     args: [projectRoot],
@@ -171,7 +178,8 @@ test('layout dropdown picks tree / elk / radial / groups / blocks; reset view re
   await sel.locator('.status-btn').click()
   await sel.locator('.status-menu-item', { hasText: 'elk' }).click()
   await expect(sel.locator('.status-btn')).toContainText('elk')
-  await expect(page.locator('.graph-node').first()).toBeVisible()
+  await expect(page.locator('.graph-canvas')).toHaveAttribute('data-layout', 'routed')
+  await expect(page.locator('path.graph-edge[data-automatic="true"]')).not.toHaveCount(0)
 
   await sel.locator('.status-btn').click()
   await sel.locator('.status-menu-item', { hasText: 'groups' }).click()
@@ -213,4 +221,133 @@ test('two notes with one name are two dots, and the panel admits the ambiguity',
   await expect(page.locator('.graph-insp-note')).toContainText(
     'could point to more than one note'
   )
+})
+
+async function openRoutingLab() {
+  const close = page.locator('.graph-close')
+  if (await close.isVisible()) await close.click()
+  await page.locator('.tree-file', { hasText: 'Routing Lab' }).click()
+  await page.locator('.graph-open-btn').click()
+  const layout = page.locator('.status-select-layout')
+  await layout.locator('.status-btn').click()
+  await layout.locator('.status-menu-item', { hasText: 'elk' }).click()
+}
+
+test('routed links stay distinct and attach to nodes through drag, pin and reset', async () => {
+  await openRoutingLab()
+  const canvas = page.locator('.graph-canvas')
+  await expect(canvas).toHaveAttribute('data-layout', 'routed')
+  const paths = (routes: Element[]) => routes.filter((path) => {
+    const [from, , to] = JSON.parse(path.getAttribute('data-edge-key')!)
+    return from.endsWith('/Routing Lab.md') && to.endsWith('/Routing Branch.md')
+  }).map((path) => path.getAttribute('d'))
+  const connectors = page.locator('path.graph-edge')
+  const automatic = await connectors.evaluateAll(paths)
+  expect(automatic).toHaveLength(2)
+  expect(new Set(automatic).size).toBe(2)
+
+  const lab = canvas.getByRole('button', { name: 'Routing Lab', exact: true })
+  const before = await lab.getAttribute('transform')
+  const box = await lab.locator('.graph-note-box').boundingBox()
+  if (!box) throw Error('Routing Lab has no visible box')
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 74, box.y + box.height / 2 + 30, { steps: 4 })
+  await page.mouse.up()
+  await expect(lab).not.toHaveAttribute('transform', before!)
+  await expect(canvas).toHaveAttribute('data-layout', 'manual')
+  const manual = await connectors.evaluateAll(paths)
+  expect(new Set(manual).size).toBe(2)
+  expect(manual).not.toEqual(automatic)
+
+  const detached = await connectors.evaluateAll((routes) => routes.filter((path) => {
+    const geometry = path as SVGPathElement
+    const [from, , to] = JSON.parse(path.getAttribute('data-edge-key')!)
+    return [from, to].some((id, i) => {
+      const node = path.ownerSVGElement!.querySelector<SVGGElement>(`[data-node-id="${CSS.escape(id)}"]`)!
+      const box = node.querySelector<SVGRectElement>('.graph-note-box')!.getBBox()
+      const p = geometry.getPointAtLength(i ? geometry.getTotalLength() : 0)
+        .matrixTransform(node.transform.baseVal.consolidate()!.matrix.inverse())
+      const dx = Math.abs(p.x) - box.width / 2
+      const dy = Math.abs(p.y) - box.height / 2
+      return Math.abs(Math.max(dx, dy)) > 0.1
+    })
+  }).length)
+  expect(detached).toBe(0)
+
+  await lab.click()
+  await page.getByRole('button', { name: 'Pin', exact: true }).click()
+  const moved = await lab.getAttribute('transform')
+  await page.locator('.graph-depth').getByRole('button', { name: '+' }).click()
+  await expect(canvas.getByRole('button', { name: 'Routing Tail' })).toBeVisible()
+  await expect(lab).toHaveAttribute('class', /is-pinned/)
+  // The centre stays pinned. Fitting the larger scene may scale the box.
+  expect((await lab.getAttribute('transform'))!.split(' scale')[0]).toBe(moved!.split(' scale')[0])
+  await page.getByRole('button', { name: /reset view/i }).click()
+  await expect(canvas).toHaveAttribute('data-layout', 'routed')
+  await expect(canvas.locator('.is-pinned')).toHaveCount(0)
+})
+
+test('the latest routed graph follows link filters and supports keyboard inspect and open', async () => {
+  await openRoutingLab()
+  const canvas = page.locator('.graph-canvas')
+  await expect(canvas).toHaveAttribute('data-layout', 'routed')
+  const defines = page.locator('.graph-legend-item', { hasText: 'defines' })
+  const supports = page.locator('.graph-legend-item', { hasText: 'supports' })
+  // Block one layout to ensure that filtering during a live request actually
+  // cancels that worker, regardless of machine speed.
+  const pause = await page.evaluateHandle(() => {
+    const postMessage = Worker.prototype.postMessage
+    const terminate = Worker.prototype.terminate
+    const state = { paused: null as Worker | null, cancelled: false }
+    Worker.prototype.postMessage = function (this: Worker, ...args: unknown[]) {
+      const [message] = args
+      if (!state.paused && (message as { cmd?: string })?.cmd === 'layout') {
+        state.paused = this
+        return
+      }
+      Reflect.apply(postMessage, this, args)
+    }
+    Worker.prototype.terminate = function (this: Worker) {
+      if (state.paused === this) state.cancelled = true
+      terminate.call(this)
+    }
+    return {
+      state,
+      restore() {
+        Worker.prototype.postMessage = postMessage
+        Worker.prototype.terminate = terminate
+      }
+    }
+  })
+  try {
+    await defines.click()
+    await expect(page.getByText('Arranging map…')).toBeVisible()
+    await supports.click()
+    await expect(canvas).toHaveAttribute('data-layout', 'routed')
+    expect(await pause.evaluate(({ state }) => state.cancelled)).toBe(true)
+  } finally {
+    await pause.evaluate((paused) => paused.restore())
+    await pause.dispose()
+  }
+  const edgeKeys = (await canvas.locator('path.graph-edge').evaluateAll(
+    (edges) => edges.map((e) => e.getAttribute('data-edge-key'))
+  )).map((key) => JSON.parse(key!)[1])
+  expect(edgeKeys).not.toContain('defines')
+  expect(edgeKeys).not.toContain('supports')
+  expect(edgeKeys).toContain('checks')
+
+  const lab = canvas.getByRole('button', { name: 'Routing Lab', exact: true })
+  await expect(canvas.locator('.graph-node[tabindex="0"]')).toHaveCount(1)
+  await lab.focus()
+  await page.keyboard.press('ArrowRight')
+  const focused = canvas.locator('.graph-node:focus')
+  const title = await focused.getAttribute('aria-label')
+  expect(title).not.toBe('Routing Lab')
+  await page.keyboard.press('Space')
+  await expect(page.locator('.graph-insp-title')).toContainText(title!)
+  await expect(focused).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Enter')
+  await expect(canvas).toHaveCount(0)
+  await expect(page.locator('.cm-content')).toContainText(title!)
 })
