@@ -166,11 +166,11 @@ describe('resolveCommand', () => {
   })
 
   it('tries Windows executable extensions', () => {
-    const want = join('C:\\bin', 'codex.cmd')
+    const want = 'C:\\bin\\codex.cmd'
     expect(
       resolveCommand('codex', {
         platform: 'win32',
-        env: { PATH: 'C:\\bin' },
+        env: { PATH: 'C:\\tools;C:\\bin' },
         canRun: (p) => p === want
       })
     ).toBe(want)
