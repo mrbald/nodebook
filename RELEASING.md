@@ -11,10 +11,10 @@ Windows optionally uses `WIN_CSC_LINK` (base64-encoded `.pfx`) and
 ## Cut and verify a release
 
 1. Choose an unused version matching `package.json` and the root entries of
-   `package-lock.json`. Put the intended release commit on GitHub and check its
-   CI and Security results.
+   `package-lock.json`. Open a pull request from a `release/` branch in this
+   repository. Check CI, Security and all four platform builds before merging.
 2. Tag that commit and push only its release tag. For example, for version
-   `0.1.0`, use `git tag v0.1.0 <commit>` and `git push origin refs/tags/v0.1.0`.
+   `1.2.3`, use `git tag v1.2.3 <commit>` and `git push origin refs/tags/v1.2.3`.
 3. Wait for the **Release** workflow. It verifies the ad-hoc signature and
    native architecture, then opens a disposable vault with semantic search
    in the app from **both** Mac formats.

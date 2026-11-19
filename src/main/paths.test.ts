@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest'
+import { realpathSync } from 'fs'
+import { join, parse } from 'path'
+import { tmpdir } from 'os'
 import { withinRoot, ignoredInVault } from './paths'
 
-describe('withinRoot', () => {
-  const root = '/Users/x/vault'
+const parent = realpathSync(tmpdir())
+const root = join(parent, 'vault')
 
+describe('withinRoot', () => {
   it('accepts the root itself and files inside it', () => {
     expect(withinRoot(root, root)).toBe(true)
     expect(withinRoot(root, `${root}/a.md`)).toBe(true)
@@ -24,29 +28,35 @@ describe('withinRoot', () => {
   })
 
   it('rejects unrelated absolute paths', () => {
-    expect(withinRoot(root, '/etc/passwd')).toBe(false)
+    expect(withinRoot(root, join(parent, 'other', 'note.md'))).toBe(false)
+  })
+
+  it('accepts descendants when the vault is the volume root', () => {
+    const volume = parse(root).root
+    expect(withinRoot(volume, root)).toBe(true)
   })
 })
 
 describe('ignoredInVault', () => {
   it('ignores dot-dirs inside the vault', () => {
-    const ig = ignoredInVault('/Users/x/vault')
-    expect(ig('/Users/x/vault/.nodebook/index.db')).toBe(true)
-    expect(ig('/Users/x/vault/.git/HEAD')).toBe(true)
-    expect(ig('/Users/x/vault/sub/.hidden')).toBe(true)
+    const ig = ignoredInVault(root)
+    expect(ig(join(root, '.nodebook', 'index.db'))).toBe(true)
+    expect(ig(join(root, '.git', 'HEAD'))).toBe(true)
+    expect(ig(join(root, 'sub', '.hidden'))).toBe(true)
   })
 
   it('does not ignore normal notes', () => {
-    const ig = ignoredInVault('/Users/x/vault')
-    expect(ig('/Users/x/vault')).toBe(false)
-    expect(ig('/Users/x/vault/note.md')).toBe(false)
-    expect(ig('/Users/x/vault/sub/note.md')).toBe(false)
+    const ig = ignoredInVault(root)
+    expect(ig(root)).toBe(false)
+    expect(ig(join(root, 'note.md'))).toBe(false)
+    expect(ig(join(root, 'sub', 'note.md'))).toBe(false)
   })
 
   it('still watches a vault that lives under a dotted ancestor', () => {
-    const ig = ignoredInVault('/home/u/.local/share/notes')
-    expect(ig('/home/u/.local/share/notes')).toBe(false)
-    expect(ig('/home/u/.local/share/notes/note.md')).toBe(false)
-    expect(ig('/home/u/.local/share/notes/.nodebook/index.db')).toBe(true)
+    const dottedRoot = join(parent, '.local', 'share', 'notes')
+    const ig = ignoredInVault(dottedRoot)
+    expect(ig(dottedRoot)).toBe(false)
+    expect(ig(join(dottedRoot, 'note.md'))).toBe(false)
+    expect(ig(join(dottedRoot, '.nodebook', 'index.db'))).toBe(true)
   })
 })

@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { accessSync, constants, existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { join, posix, win32 } from 'path'
 import { homedir, tmpdir } from 'os'
 import {
   ContextLengthError,
@@ -33,7 +33,7 @@ import { tagError, isAuthMessage } from '../distill/retry'
  *  app inherits the login PATH, not the shell PATH, so Homebrew/npm dirs are
  *  usually missing from it. */
 function extraDirs(): string[] {
-  return ['/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local/bin'), join(homedir(), 'bin')]
+  return ['/opt/homebrew/bin', '/usr/local/bin', posix.join(homedir(), '.local/bin'), posix.join(homedir(), 'bin')]
 }
 
 interface ResolveOpts {
@@ -49,6 +49,7 @@ interface ResolveOpts {
 export function resolveCommand(cmd: string, opts: ResolveOpts = {}): string | null {
   const platform = opts.platform ?? process.platform
   const win = platform === 'win32'
+  const path = win ? win32 : posix
   const canRun =
     opts.canRun ??
     ((p: string): boolean => {
@@ -62,12 +63,11 @@ export function resolveCommand(cmd: string, opts: ResolveOpts = {}): string | nu
     })
   if (cmd.includes('/') || (win && cmd.includes('\\'))) return canRun(cmd) ? cmd : null
   const env = opts.env ?? process.env
-  // PATH delimiter follows the *target* platform (injectable in tests), not the host.
-  const dirs = [...(env.PATH ?? '').split(win ? ';' : ':'), ...(win ? [] : extraDirs())].filter(Boolean)
+  const dirs = [...(env.PATH ?? '').split(path.delimiter), ...(win ? [] : extraDirs())].filter(Boolean)
   const names = win ? [`${cmd}.exe`, `${cmd}.cmd`, `${cmd}.bat`, cmd] : [cmd]
   for (const dir of [...new Set(dirs)]) {
     for (const name of names) {
-      const candidate = join(dir, name)
+      const candidate = path.join(dir, name)
       if (canRun(candidate)) return candidate
     }
   }

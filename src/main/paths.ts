@@ -1,5 +1,4 @@
-import { resolve, relative } from 'path'
-import { sep } from 'path'
+import { resolve, relative, sep } from 'path'
 
 /**
  * True only if `p` — after resolving `.`/`..` segments — is `root` or strictly
@@ -9,7 +8,8 @@ import { sep } from 'path'
  */
 export function withinRoot(root: string, p: string): boolean {
   const r = resolve(p)
-  return r === root || r.startsWith(root + sep)
+  const prefix = root.endsWith(sep) ? root : root + sep
+  return r === root || r.startsWith(prefix)
 }
 
 /**
