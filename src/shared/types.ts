@@ -1,3 +1,4 @@
+import type { PdfExtraction } from './pdfExtraction'
 /** Default local embedding model (a transformers.js/HF Hub repo id):
  *  multilingual-e5-base — ~100 languages in one vector space, so notes retrieve
  *  by meaning whatever language they (or the query) are written in. Asymmetric:
@@ -115,6 +116,9 @@ export interface SearchHit {
 
 /** State of the "talk to docs" semantic layer, for the UI. */
 export interface TalkStatus {
+  vaultId: string | null
+  /** Changes when a vector store is replaced or moves to a new embedding space. */
+  generation: string | null
   /** The user-facing toggle (settings `[talk] enabled`). */
   enabled: boolean
   /** The embedding width is known and the vector table exists. */
@@ -131,26 +135,28 @@ export interface TalkChunk {
   text: string
 }
 
-/** A note an "Ask" answer was grounded in (the retrieved sources). */
+/** A passage sent to the Ask model. Its ID belongs to this answer only. */
 export interface Citation {
+  id: string
   path: string
   title: string
-  /** True when the answer text actually cites this note via an inline
-   *  `[[wikilink]]` — as opposed to being retrieved as context but never drawn
-   *  on. Drives the "Cited" vs "Also sent to the model" split in the UI.
-   *  Optional so producers that predate the field stay type-compatible;
-   *  absent reads as "not cited". */
-  used?: boolean
+  start: number
+  end: number
+  quote: string
 }
 
 /** Returned when an "Ask" stream completes (the answer itself streams as tokens). */
 export interface AskResult {
+  answer: string
   citations: Citation[]
-  /** Every retrieved note's name (unique), regardless of whether the answer
-   *  cited it. Used to gate which `[[wikilink]]`s in the answer are real
-   *  citations — a name outside this list is a hallucination and must not
-   *  render as a clickable link. */
-  sources: string[]
+}
+
+export interface AskRequest {
+  id: string
+  vaultId: string
+  question: string
+  generation: string | null
+  vector: number[]
 }
 
 /** Enabled-state inputs the renderer reports to the main process so the app menu
@@ -346,6 +352,7 @@ export interface DistillDocument {
 }
 
 export interface DistillRunResult {
+  pdf?: PdfExtraction
   runId: string
   stats: DistillStats
 }
@@ -372,6 +379,7 @@ export interface DistillRunInfo {
 
 /** What a run will cost, worked out from the document before it starts. */
 export interface DistillEstimate {
+  pdf?: PdfExtraction
   /** Passages the document splits into. */
   chunks: number
   /** Reading steps the run will take — one model call each. */
@@ -440,3 +448,6 @@ export interface DistillMergeStatus {
   folder?: string
   count?: number
 }
+
+/** A checked write can report the current disk version for an overwrite decision. */
+export type SaveFileResult = { status: 'saved' } | { status: 'conflict'; content: string | null }

@@ -1,14 +1,10 @@
-import { useState } from 'react'
-import type { AskResult, Citation, MarkdownFile } from '@shared/types'
-import { renderMarkdown } from './markdownRender'
-import { gateAnswerCitations } from './citations'
+import { useEffect, useRef, useState } from 'react'
+import type { AskResult, Citation } from '@shared/types'
+import { renderAskMarkdown } from './markdownRender'
 
 interface Props {
-  ask: (question: string, onToken: (t: string) => void) => Promise<AskResult>
-  files: MarkdownFile[]
-  onOpen: (f: MarkdownFile) => void
-  /** Resolve + open a `[[wikilink]]` citation inside the answer. */
-  openLink: (target: string) => void
+  ask: (question: string, onToken: (t: string) => void, signal: AbortSignal) => Promise<AskResult>
+  onOpenPassage: (citation: Citation) => void
   /** Open an external URL in the answer. */
   openExternal: (url: string) => void
   onClose: () => void
@@ -19,16 +15,16 @@ interface Props {
  * notes it drew on (clickable). Only the retrieved passages are sent to the
  * model; the answer streams in token-by-token.
  */
-export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }: Props) {
+export function AskPanel({ ask, onOpenPassage, openExternal, onClose }: Props) {
   const [question, setQuestion] = useState('')
   const [asked, setAsked] = useState<string | null>(null)
   const [answer, setAnswer] = useState('')
   const [citations, setCitations] = useState<Citation[]>([])
-  // Every retrieved note's name — gates which answer [[wikilink]]s are real
-  // citations vs. a hallucinated/misremembered name (see gateAnswerCitations).
-  const [sources, setSources] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const request = useRef<AbortController | null>(null)
+  useEffect(() => () => request.current?.abort(), [])
+  const rendered = busy ? null : renderAskMarkdown(answer, citations)
 
   // The rendered answer is markdown (html:false → safe). Delegate clicks:
   // a [[wikilink]] citation opens the note; an external link opens in the OS.
@@ -36,9 +32,10 @@ export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }
     const a = (e.target as HTMLElement).closest('a')
     if (!a) return
     e.preventDefault()
-    const target = a.getAttribute('data-target')
-    if (a.classList.contains('wikilink') && target) openLink(target)
-    else {
+    if (a.classList.contains('ask-citation')) {
+      const citation = citations.find((c) => c.id === a.getAttribute('data-target'))
+      if (citation) onOpenPassage(citation)
+    } else {
       const href = a.getAttribute('href')
       if (href) openExternal(href)
     }
@@ -46,21 +43,27 @@ export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }
 
   const submit = async (): Promise<void> => {
     const q = question.trim()
-    if (!q || busy) return
+    if (!q || request.current) return
+    const controller = new AbortController()
+    request.current = controller
     setBusy(true)
     setAsked(q)
     setAnswer('')
     setCitations([])
-    setSources([])
     setError(null)
     try {
-      const res = await ask(q, (t) => setAnswer((a) => a + t))
+      const res = await ask(q, (t) => {
+        if (!controller.signal.aborted) setAnswer((a) => a + t)
+      }, controller.signal)
+      if (controller.signal.aborted) return
+      setAnswer(res.answer)
       setCitations(res.citations)
-      setSources(res.sources)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ask failed.')
+      if (!controller.signal.aborted)
+        setError(e instanceof Error ? e.message : 'Ask failed.')
     } finally {
-      setBusy(false)
+      request.current = null
+      if (!controller.signal.aborted) setBusy(false)
     }
   }
 
@@ -105,32 +108,28 @@ export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }
               // render badly mid-stream). Settles into rendered markdown on done.
               <div className="ask-answer">{answer || '…'}</div>
             ) : (
-              answer && (
+              rendered && answer && (
                 <div
                   className="ask-answer ask-answer-rendered md-rendered"
                   onClick={onAnswerClick}
                   dangerouslySetInnerHTML={{
-                    __html: renderMarkdown(gateAnswerCitations(answer, sources))
+                    __html: rendered.html
                   }}
                 />
               )
             )}
             {(() => {
-              const renderSource = (c: Citation): React.ReactNode => {
-                const f = files.find((x) => x.path === c.path)
-                return (
+              const renderSource = (c: Citation): React.ReactNode => (
                   <button
-                    key={c.path}
+                    key={c.id}
                     className="ask-source"
-                    disabled={!f}
-                    onClick={() => f && onOpen(f)}
+                    onClick={() => onOpenPassage(c)}
                   >
                     {c.title}
                   </button>
-                )
-              }
-              const cited = citations.filter((c) => c.used)
-              const other = citations.filter((c) => !c.used)
+              )
+              const cited = citations.filter((c) => rendered?.cited.has(c.id))
+              const other = citations.filter((c) => !rendered?.cited.has(c.id))
               return (
                 <>
                   {cited.length > 0 && (
@@ -152,8 +151,8 @@ export function AskPanel({ ask, files, onOpen, openLink, openExternal, onClose }
         )}
         {!asked && (
           <p className="ask-hint">
-            Answers are grounded in your notes — only the most relevant passages are sent
-            to the model, and the notes it used are listed as sources.
+            Ask sends relevant passages to the configured chat provider. Click a citation
+            to see its passage in the note.
           </p>
         )}
       </div>

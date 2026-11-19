@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AskRequest,
   AskResult,
   Backlink,
   DistillDocument,
@@ -15,6 +16,7 @@ import type {
   MenuState,
   Outbound,
   SameAsTwin,
+  SaveFileResult,
   SearchHit,
   Settings,
   TalkChunk,
@@ -23,6 +25,8 @@ import type {
   TelemetrySnapshot,
   VaultListing
 } from '../shared/types'
+
+const askRequestIds = new Set<string>()
 
 const api = {
   pickVault: (): Promise<string | null> => ipcRenderer.invoke('vault:pick'),
@@ -37,14 +41,21 @@ const api = {
     ipcRenderer.invoke('fs:rename', path, newName),
   deletePath: (path: string): Promise<boolean> => ipcRenderer.invoke('fs:delete', path),
   readFile: (path: string): Promise<string> => ipcRenderer.invoke('file:read', path),
-  /** Save; rejects on a disk conflict unless `force` (see main's file:save). */
-  saveFile: (path: string, content: string, force?: boolean): Promise<void> =>
-    ipcRenderer.invoke('file:save', path, content, force),
-  /** Synchronous save for window-close flush (blocks until written). */
-  saveFileNow: (path: string, content: string): void => {
-    ipcRenderer.sendSync('file:save-now', path, content)
+  saveFile: (path: string, content: string, expected: string | null): Promise<SaveFileResult> =>
+    ipcRenderer.invoke('file:save', path, content, expected),
+  onCloseRequested: (cb: () => Promise<boolean>): (() => void) => {
+    const listener = (): void => {
+      void cb().then(
+        (approved) => ipcRenderer.send('window:close-response', approved),
+        () => ipcRenderer.send('window:close-response', false)
+      )
+    }
+    ipcRenderer.on('window:close-request', listener)
+    ipcRenderer.send('window:close-ready')
+    return () => ipcRenderer.removeListener('window:close-request', listener)
   },
   backlinks: (target: string): Promise<Backlink[]> => ipcRenderer.invoke('index:backlinks', target),
+  backlinksToFile: (path: string): Promise<Backlink[]> => ipcRenderer.invoke('index:backlinksToFile', path),
   outbound: (sourceFile: string): Promise<Outbound[]> =>
     ipcRenderer.invoke('index:outbound', sourceFile),
   /** The notes a confirmed `same_as::` made one thing with this one. */
@@ -61,13 +72,15 @@ const api = {
   // Talk to docs (semantic search). The embedder lives in the renderer (WASM);
   // main owns the vector store + retrieval.
   talkStatus: (): Promise<TalkStatus> => ipcRenderer.invoke('talk:status'),
-  talkEnable: (dims: number): Promise<TalkStatus> => ipcRenderer.invoke('talk:enable', dims),
+  talkEnable: (vaultId: string, model: string, dims: number): Promise<TalkStatus> =>
+    ipcRenderer.invoke('talk:enable', vaultId, model, dims),
   talkDisable: (): Promise<TalkStatus> => ipcRenderer.invoke('talk:disable'),
-  talkPending: (limit: number): Promise<TalkChunk[]> => ipcRenderer.invoke('talk:pending', limit),
-  talkPutEmbeddings: (rows: { id: number; vector: number[] }[]): Promise<TalkStatus> =>
-    ipcRenderer.invoke('talk:putEmbeddings', rows),
-  talkSearch: (query: string, vector: number[]): Promise<SearchHit[]> =>
-    ipcRenderer.invoke('talk:search', query, vector),
+  talkPending: (generation: string, limit: number): Promise<TalkChunk[]> =>
+    ipcRenderer.invoke('talk:pending', generation, limit),
+  talkPutEmbeddings: (generation: string, rows: { id: number; vector: number[] }[]): Promise<TalkStatus> =>
+    ipcRenderer.invoke('talk:putEmbeddings', generation, rows),
+  talkSearch: (query: string, generation: string, vector: number[]): Promise<SearchHit[]> =>
+    ipcRenderer.invoke('talk:search', query, generation, vector),
   talkNeighbors: (focusPath: string, k?: number): Promise<TalkNeighbor[]> =>
     ipcRenderer.invoke('talk:neighbors', focusPath, k),
   talkSemanticEdges: (
@@ -77,30 +90,19 @@ const api = {
     ipcRenderer.invoke('talk:semanticEdges', paths, k),
   /** True when an "Ask" chat provider is configured. */
   canAsk: (): Promise<boolean> => ipcRenderer.invoke('talk:canAsk'),
-  /** Ask a grounded question: answer tokens arrive via `onToken`; resolves with
-   *  the source citations on completion. Tokens + done/error are ordered events
-   *  on one channel, so the answer never races the completion signal. */
-  ask: (question: string, vector: number[], onToken: (t: string) => void): Promise<AskResult> =>
-    new Promise<AskResult>((resolve, reject) => {
-      const onTok = (_e: unknown, token: string): void => onToken(token)
-      const onDone = (_e: unknown, res: AskResult): void => {
-        cleanup()
-        resolve(res)
-      }
-      const onErr = (_e: unknown, message: string): void => {
-        cleanup()
-        reject(new Error(message))
-      }
-      const cleanup = (): void => {
-        ipcRenderer.removeListener('talk:ask:token', onTok)
-        ipcRenderer.removeListener('talk:ask:done', onDone)
-        ipcRenderer.removeListener('talk:ask:error', onErr)
-      }
-      ipcRenderer.on('talk:ask:token', onTok)
-      ipcRenderer.once('talk:ask:done', onDone)
-      ipcRenderer.once('talk:ask:error', onErr)
-      ipcRenderer.send('talk:ask', question, vector)
-    }),
+  ask: (request: AskRequest, onToken: (t: string) => void): Promise<AskResult> => {
+    if (askRequestIds.has(request.id)) return Promise.reject(new Error('This Ask request is already running.'))
+    askRequestIds.add(request.id)
+    const onTok = (_e: unknown, id: string, token: string): void => {
+      if (id === request.id) onToken(token)
+    }
+    ipcRenderer.on('talk:ask:token', onTok)
+    return ipcRenderer.invoke('talk:ask', request).finally(() => {
+      askRequestIds.delete(request.id)
+      ipcRenderer.removeListener('talk:ask:token', onTok)
+    })
+  },
+  cancelAsk: (id: string): void => ipcRenderer.send('talk:ask:cancel', id),
   /** Notifies the renderer that saved/changed notes need (re)embedding. */
   onTalkDirty: (cb: () => void): (() => void) => {
     const listener = (): void => cb()

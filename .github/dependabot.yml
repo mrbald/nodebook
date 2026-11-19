@@ -1,10 +1,12 @@
 version: 2
 updates:
-  # npm dependencies — weekly PRs (security updates also arrive automatically).
+  # Weekly npm version updates.
   - package-ecosystem: npm
     directory: '/'
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 5
     groups:
       # Keep the noise down: batch routine minor/patch bumps into one PR.
@@ -15,3 +17,5 @@ updates:
     directory: '/'
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 5

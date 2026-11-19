@@ -65,7 +65,8 @@ A **vault** is just a folder of Markdown files. Open one with **File ▸ Open
 Vault** (⌘O); ones you've opened before are under **File ▸ Open Recent**. Start a
 fresh one with **File ▸ New Vault…**.
 
-- **New note** — **File ▸ New Note** (⌘N), or right-click a folder in the tree.
+- **New note** — click **New note** in an empty vault, choose **File ▸ New Note** (⌘N), or right-click a folder in the tree.
+- **Find a note** — press ⌘/Ctrl+K, type a search, use the arrow keys to choose a result, and press Enter to open it.
 - **Organise** — right-click any file or folder in the sidebar tree to **rename**
   or **delete** it, or make a **new note/folder** inside it. Deleting moves the
   files to the system **Trash**, so you can get them back. Edits made on disk
@@ -88,15 +89,16 @@ small **TOML** file you edit in place; changes apply as soon as you save (⌘S).
 
 ## Knowledge map
 
-Click **⊹ Map** in the bottom bar to see the current note as a dot, with lines to
-the notes it links to. The map is drawn for you from your links — you never arrange
-it by hand, and nothing here changes your notes.
+Click **⊹ Map** in the bottom bar to see the current note and the notes it links
+to. Nodebook arranges the map from the links in your notes.
 
 - **Getting around** — **drag a note to arrange it**, drag the empty space to move
   the whole map, scroll to zoom. **Click a note** to see its details in the panel on
   the right; **double-click** to recentre the map on it, or use **Open ↗** in the
-  panel to open it in the editor. **−/+** show fewer or more steps out from the note;
-  **Global** shows the whole vault instead of just this note's neighbourhood;
+  panel to open it in the editor. Tab to the map, use arrow keys to move between
+  notes, press Space to inspect a note, or Enter to open it.
+  **−/+** change how many steps out from the note the map shows.
+  **Global** switches to a vault-wide map.
   **⟲ reset view** undoes your zoom, pan, and any drags or pins.
 - **The panel on the right** — with nothing selected it shows the map's totals and the
   colour legend. **Click a note** and it shows that note's links — out and in, plus
@@ -108,13 +110,15 @@ it by hand, and nothing here changes your notes.
   you label the relationship (say `cites` or `author`). It's written straight back into
   the note as a `key:: value` field, so the map and your notes never disagree — and the
   link is redrawn in its new colour.
-- **Layout** — the **layout** dropdown chooses an **organic web** (force), a tidy
-  **hierarchical tree** that reads like a mind map, **elk** — another layered layout,
-  from the Eclipse Layout Kernel, that sometimes untangles a dense map better than
-  tree, so try both — a **radial** view that rings notes around the one in focus,
+- **Layout** — vault maps open in **force**. Staged book maps open in
+  **routed (elk)**, which draws directed links between layered notes.
+  The **layout** dropdown also offers a **hierarchical tree**, a **radial**
+  view that rings notes around the one in focus,
   **groups**, which gathers each cluster of related notes into its own area, or
   **blocks**, which keeps tightly-linked notes together by repeatedly splitting the
-  map into halves with the fewest links crossing the divide.
+  map into halves with the fewest links crossing the divide. When you move a
+  routed note, its links follow your placement. **Reset view** restores automatic
+  routing. Use **Zoom to titles** on large routed maps.
 - **What the picture means** — **bigger dots are more connected** (your hub notes);
   **line colour is the link type** (a plain `[[link]]` vs. a `key:: value`); a
   **dashed outline** is a note you've linked to but haven't created yet.
@@ -199,11 +203,9 @@ Settings (`[talk.chat]`).
 
   Prefer the environment variable for keys; you *can* put one in the settings
   file, but it's stored in plain text.
-- **Grounded + cited** — only the most relevant passages from your notes are sent to
-  the model (never your whole vault); the answer streams in, and under it you can see
-  exactly which notes it **cited** and which were merely **sent to the model** — click
-  either to open the note.
-- Best with Talk-to-docs **on** (its embeddings power the retrieval).
+- **Sources** — Ask finds passages by keyword and, when search by meaning is on,
+  by meaning too. Click a citation to open its passage in the correct note.
+  If no passage matches, Ask tells you before contacting the provider.
 
 ## Distill a document
 
@@ -213,22 +215,23 @@ original**. Start it with **File ▸ Distill a Document…** (it needs a chat
 provider, same as Ask). Legacy binary `.doc` isn't readable — save it as `.docx`
 first.
 
-- **What happens** — Nodebook reads the whole document from start to finish, in
+- **What happens** — Nodebook reads the extracted text in order, in
   steps, and asks the model to write one short note per concept. Each step is told
   which concepts the earlier steps already named, so the same idea keeps one name
-  and notes link across the document. Every claim in a note carries a **citation**:
-  a real quote from the document. If the model can't back a point with a verbatim
-  quote, that point is dropped — not guessed.
+  and notes link across the document. Each staged concept note includes a **citation** to a passage in the extracted text.
 - **Give the reading a focus** — starting a run asks what the notes should focus on:
   leave it empty for the usual reading, press one of **Arguments**, **Timeline** or
   **People**, or type your own line. The run keeps that focus for every step, remembers
   it if you pause and resume, and shows it under **Distilled runs** — so the same book
   read two ways gives you two runs you can tell apart.
-- **Quotes are checked against the whole document** — a point is kept only when its
-  quote is found **exactly once** in the document (if the model pointed at the wrong
-  passage, Nodebook finds the right one and corrects it); a quote that isn't there, or
-  that could be in two different places, is dropped rather than guessed at. The banner
-  after a run says how many were dropped and why.
+- **PDF coverage** — before reading a PDF, Nodebook lists any pages that yielded
+  no usable text. You can continue with the extracted pages or cancel and supply
+  a text or OCR edition. The completion message reports how much of the
+  extracted text the model read.
+- **Check a claim** — each staged concept note has at least one quote Nodebook located in
+  the source. Open the cited passage to check the interpretation and its links.
+  If a quote points to the wrong passage, Nodebook looks for a unique match.
+  The completion message counts missing and ambiguous quotes.
 - **Themes** — a distilled run groups its notes under a handful of theme notes, so
   the map reads book → themes → notes; the sidebar lists a run's themes under it. A
   theme is named by the model; if it picks a name one of the run's notes already
@@ -246,8 +249,8 @@ first.
   reopen its map; **✕** discards it. A run that hasn't been merged yet lives only in
   the vault's `.distill/` folder — keep that folder and back it up if your unmerged
   runs matter. (`.nodebook/` beside it is just a cache and is safe to delete.)
-- **Read a run before you merge it** — click a note on the run's map to read it, with
-  its quotes, without adding anything to your vault. Click one of its **Sources** and
+- **Read a run before you merge it** — double-click a note on the run's map or
+  focus it and press Enter to read it with its quotes. Click one of its **Sources** and
   the run's own copy of the document opens at that passage, with the quote
   highlighted, so you can check it. **← Back to map** returns.
 - **Cancel any time** — the **Cancel** button on the progress toast stops a run.

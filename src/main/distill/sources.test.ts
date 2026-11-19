@@ -120,11 +120,11 @@ describe('cachedSource', () => {
 describe('convertSource', () => {
   it('converts once and reuses the result for an unchanged file', async () => {
     const v = tmpVault()
-    const original = document(v, 'Book.pdf')
+    const original = document(v, 'Book.md')
     let calls = 0
-    const convert = async (): Promise<string> => {
+    const convert = async () => {
       calls++
-      return 'converted text'
+      return { text: 'converted text' }
     }
 
     const first = await convertSource(v, original, convert)
@@ -135,14 +135,48 @@ describe('convertSource', () => {
     expect(second.hash).toBe(first.hash)
   })
 
-  it('converts again once the file changes', async () => {
+  it('refreshes a legacy PDF conversion once and caches page accounting', async () => {
     const v = tmpVault()
     const original = document(v, 'Book.pdf')
+    putSource(v, original, 'old text')
+    const pdf = { pages: 3, missing: [2] }
+    const convert = async () => ({ text: 'new text', pdf })
+    expect((await convertSource(v, original, convert)).cached).toBe(false)
+    const again = await convertSource(v, original, convert)
+    expect(again.cached).toBe(true)
+    expect(again.record.pdf).toEqual(pdf)
+  })
+
+  it('recovers from an edited or corrupt cached document when picked again', async () => {
+    const v = tmpVault()
+    const original = document(v, 'Book.md')
+    const convert = async () => ({ text: 'original text' })
+    const stored = await convertSource(v, original, convert)
+    writeFileSync(sourceTextPath(v, stored.hash), 'incorrect text')
+    expect(cachedSource(v, original)).toBeNull()
+    expect((await convertSource(v, original, convert)).cached).toBe(false)
+    expect(cachedSource(v, original)?.text).toBe('original text')
+  })
+
+  it('rejects a source replaced during conversion', async () => {
+    const v = tmpVault()
+    const original = document(v, 'Book.pdf')
+    const convert = async () => {
+      writeFileSync(original, 'replacement document with different pages')
+      return { text: 'previous document', pdf: { pages: 1, missing: [] } }
+    }
+    await expect(convertSource(v, original, convert)).rejects.toThrow('changed during conversion')
+    expect(cachedSource(v, original)).toBeNull()
+  })
+
+  it('converts again once the file changes', async () => {
+    const v = tmpVault()
+    const original = document(v, 'Book.md')
     let text = 'first conversion'
     let calls = 0
-    const convert = async (): Promise<string> => {
+    const convert = async () => {
       calls++
-      return text
+      return { text }
     }
 
     const first = await convertSource(v, original, convert)

@@ -1,4 +1,5 @@
 import type {
+  AskRequest,
   AskResult,
   Backlink,
   DistillDocument,
@@ -14,6 +15,7 @@ import type {
   MenuState,
   Outbound,
   SameAsTwin,
+  SaveFileResult,
   SearchHit,
   Settings,
   TalkChunk,
@@ -33,9 +35,10 @@ export interface NodebookApi {
   rename: (path: string, newName: string) => Promise<string | null>
   deletePath: (path: string) => Promise<boolean>
   readFile: (path: string) => Promise<string>
-  saveFile: (path: string, content: string, force?: boolean) => Promise<void>
-  saveFileNow: (path: string, content: string) => void
+  saveFile: (path: string, content: string, expected: string | null) => Promise<SaveFileResult>
+  onCloseRequested: (cb: () => Promise<boolean>) => () => void
   backlinks: (target: string) => Promise<Backlink[]>
+  backlinksToFile: (path: string) => Promise<Backlink[]>
   outbound: (sourceFile: string) => Promise<Outbound[]>
   sameAs: (path: string) => Promise<SameAsTwin[]>
   search: (query: string) => Promise<SearchHit[]>
@@ -46,15 +49,16 @@ export interface NodebookApi {
   ) => Promise<GraphData>
   typeRelation: (sourcePath: string, relation: string, target: string) => Promise<boolean>
   talkStatus: () => Promise<TalkStatus>
-  talkEnable: (dims: number) => Promise<TalkStatus>
+  talkEnable: (vaultId: string, model: string, dims: number) => Promise<TalkStatus>
   talkDisable: () => Promise<TalkStatus>
-  talkPending: (limit: number) => Promise<TalkChunk[]>
-  talkPutEmbeddings: (rows: { id: number; vector: number[] }[]) => Promise<TalkStatus>
-  talkSearch: (query: string, vector: number[]) => Promise<SearchHit[]>
+  talkPending: (generation: string, limit: number) => Promise<TalkChunk[]>
+  talkPutEmbeddings: (generation: string, rows: { id: number; vector: number[] }[]) => Promise<TalkStatus>
+  talkSearch: (query: string, generation: string, vector: number[]) => Promise<SearchHit[]>
   talkNeighbors: (focusPath: string, k?: number) => Promise<TalkNeighbor[]>
   talkSemanticEdges: (paths: string[], k?: number) => Promise<{ source: string; target: string }[]>
   canAsk: () => Promise<boolean>
-  ask: (question: string, vector: number[], onToken: (t: string) => void) => Promise<AskResult>
+  ask: (request: AskRequest, onToken: (t: string) => void) => Promise<AskResult>
+  cancelAsk: (id: string) => void
   onTalkDirty: (cb: () => void) => () => void
   telemetryApply: (enabled: boolean) => Promise<void>
   telemetrySnapshot: () => Promise<TelemetrySnapshot | null>

@@ -1,8 +1,11 @@
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { basename, dirname } from 'path'
+import { randomUUID } from 'crypto'
+import { targetResolver } from '../shared/markdown/resolveTarget'
 import { harvest, frontmatterKind } from './harvest'
-import { VectorStore, type PendingChunk } from './rag/store'
+import { VectorStore, dropTalkTables, ftsMatch, type PendingChunk } from './rag/store'
+import { chunkMarkdown, type Chunk } from './rag/chunk'
 import { rrfRank } from './rag/rrf'
 import {
   buildGraph,
@@ -19,6 +22,10 @@ import type { Backlink, GraphData, Outbound, SameAsTwin, SearchHit } from '../sh
  *  (`PRAGMA user_version`). Bump only if a future backfill needs to rerun. */
 const KIND_BACKFILL_VERSION = 1
 
+export interface RetrievedPassage extends Chunk {
+  file: string
+}
+
 /**
  * The per-vault index: FTS5 full text + a triple store, in a single SQLite DB
  * under `<vault>/.nodebook/` (gitignored — it is rebuildable and must never
@@ -26,6 +33,8 @@ const KIND_BACKFILL_VERSION = 1
  * in one transaction, so it is idempotent no matter how often it fires.
  */
 export class VaultIndex {
+  readonly id = randomUUID()
+  private incoming: Map<string, Backlink[]> | null = null
   private db: Database.Database
   /** Vector/semantic layer — null until "talk to docs" is enabled. */
   private vec: VectorStore | null = null
@@ -59,6 +68,9 @@ export class VaultIndex {
     `)
     this.addKindColumn()
     this.backfillKinds()
+    // Earlier builds dropped chunks but left a copy of the text in chunk FTS.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'chunks'").get())
+      this.db.exec('DROP TABLE IF EXISTS chunks_fts')
   }
 
   /**
@@ -127,10 +139,9 @@ export class VaultIndex {
         'INSERT INTO triples (subject, relation, object, source_file) VALUES (?, ?, ?, ?)'
       )
       for (const t of triples) insert.run(t.subject, t.relation, t.object, path)
+      this.vec?.chunkFile(path, content)
     })()
-    // When talk-to-docs is on, (re)chunk for embedding too (content-hash gated,
-    // so an unchanged file on reopen is a no-op and never re-embeds).
-    this.vec?.chunkFile(path, content)
+    this.incoming = null
   }
 
   /** Drop a file's rows (external delete). */
@@ -143,8 +154,9 @@ export class VaultIndex {
       this.db.prepare('DELETE FROM notes_fts WHERE rowid = ?').run(row.id)
       this.db.prepare('DELETE FROM files WHERE id = ?').run(row.id)
       this.db.prepare('DELETE FROM triples WHERE source_file = ?').run(path)
+      this.vec?.removeFile(path)
     })()
-    this.vec?.removeFile(path)
+    this.incoming = null
   }
 
   /** Files that link to (or otherwise reference) `target`, with the relation. */
@@ -155,6 +167,30 @@ export class VaultIndex {
          WHERE object = ? ORDER BY relation, source_file`
       )
       .all(target) as Backlink[]
+  }
+
+  /** Resolve incoming links by their source folder, exactly as the editor does. */
+  backlinksToFile(path: string): Backlink[] {
+    if (!this.incoming) {
+      const files = this.db.prepare('SELECT path FROM files').all() as { path: string }[]
+      const resolve = targetResolver(files.map((file) => file.path))
+      const links = this.db.prepare(
+        'SELECT source_file, relation, object FROM triples ORDER BY source_file, relation'
+      ).iterate() as Iterable<Pick<TripleRow, 'source_file' | 'relation' | 'object'>>
+      const incoming = new Map<string, Backlink[]>()
+      for (const { source_file, relation, object } of links) {
+        const target = resolve(object, source_file).id
+        if (source_file === target || target.startsWith('ghost:')) continue
+        const rows = incoming.get(target)
+        const last = rows?.at(-1)
+        if (last?.source_file === source_file && last.relation === relation) continue
+        const link = { source_file, relation }
+        if (rows) rows.push(link)
+        else incoming.set(target, [link])
+      }
+      this.incoming = incoming
+    }
+    return this.incoming.get(path) ?? []
   }
 
   /** Outbound edges from one note: its `[[links]]` and `key:: value` fields. */
@@ -171,9 +207,8 @@ export class VaultIndex {
    * matching snippet. The `<mark>` markers are parsed into React elements by the
    * renderer (never innerHTML), so note content can't inject HTML. */
   search(query: string): SearchHit[] {
-    const tokens = query.match(/[\p{L}\p{N}]+/gu)
-    if (!tokens || tokens.length === 0) return []
-    const fts = tokens.map((t) => `${t}*`).join(' ')
+    const fts = ftsMatch(query, 'AND')
+    if (!fts) return []
     return this.db
       .prepare(
         `SELECT f.path AS path, f.title AS title,
@@ -275,6 +310,14 @@ export class VaultIndex {
     return !!this.vec?.ready
   }
 
+  get talkGeneration(): string | null {
+    return this.vec?.generation ?? null
+  }
+
+  talkGenerationFor(model: string): string | null {
+    return this.vec?.matchesModel(model) ? this.vec.generation : null
+  }
+
   /** Set the embedding dimensionality (+ model id, when known) reported by the
    *  loaded model. A model change is gated exactly like a dims change — see
    *  `VectorStore.setDims` / `needsEmbeddingReset`. */
@@ -282,9 +325,13 @@ export class VaultIndex {
     this.vec?.setDims(dims, modelId)
   }
 
-  /** (Re)chunk one file for embedding — content-hash gated. */
-  chunkFile(path: string, content: string): boolean {
-    return this.vec?.chunkFile(path, content) ?? false
+  /** Rebuild chunks from the note revision already committed to this index. */
+  chunkIndexedFile(path: string): void {
+    if (!this.vec || this.vec.hasChunks(path)) return
+    const row = this.db.prepare(
+      'SELECT body FROM files JOIN notes_fts ON notes_fts.rowid = files.id WHERE path = ?'
+    ).get(path) as { body: string } | undefined
+    if (row) this.vec.chunkFile(path, row.body)
   }
 
   /** Has this file already been chunked? (skip re-reading from disk on enable). */
@@ -292,16 +339,17 @@ export class VaultIndex {
     return this.vec?.hasChunks(path) ?? false
   }
 
-  talkPending(limit?: number): PendingChunk[] {
-    return this.vec?.pending(limit) ?? []
+  talkPending(generation: string, limit?: number): PendingChunk[] {
+    if (!this.vec?.ready || generation !== this.vec.generation) return []
+    return this.vec.pending(limit)
   }
 
   talkCounts(): { total: number; pending: number } {
     return this.vec?.counts() ?? { total: 0, pending: 0 }
   }
 
-  putEmbeddings(rows: { id: number; vector: Float32Array }[]): void {
-    this.vec?.putEmbeddings(rows)
+  putEmbeddings(generation: string, rows: { id: number; vector: Float32Array }[]): void {
+    if (this.vec?.ready && generation === this.vec.generation) this.vec.putEmbeddings(rows)
   }
 
   /** Notes semantically similar to the focus note (for the map's "related" overlay).
@@ -337,10 +385,7 @@ export class VaultIndex {
   /** Turn the feature off and drop all embeddings + chunks (reversible — the
    *  data is derived and re-creatable by re-enabling). */
   disableTalk(): void {
-    this.db.exec(`DROP TABLE IF EXISTS chunk_vec`)
-    this.db.exec(`DROP TABLE IF EXISTS chunks`)
-    this.db.exec(`DROP TABLE IF EXISTS chunk_file`)
-    this.db.exec(`DROP TABLE IF EXISTS talk_meta`)
+    if (this.vec) dropTalkTables(this.db)
     this.vec = null
   }
 
@@ -382,23 +427,68 @@ export class VaultIndex {
       .slice(0, 50)
   }
 
-  /** Top chunks (with their text) for grounding an "Ask" answer. Hybrid like the
-   *  search box: fuse vector (meaning) with chunk-level FTS (exact terms the
-   *  embeddings miss) via RRF, keyed by chunk id; returns full chunk text. */
+  /** Top source passages for Ask. Keyword grounding also works without Talk. */
   talkRetrieve(
     query: string,
     queryVec: Float32Array | null,
     k = 8
-  ): { file: string; text: string }[] {
-    if (!this.vec) return []
+  ): RetrievedPassage[] {
+    if (!this.vec) return this.keywordPassages(query, k)
     const vec = queryVec ? this.vec.vectorHits(queryVec, k) : []
     const fts = this.vec.chunkSearch(query, k)
-    if (vec.length === 0 && fts.length === 0) return []
-    const byId = new Map<number, { file: string; text: string }>()
-    for (const h of [...vec, ...fts]) if (!byId.has(h.id)) byId.set(h.id, { file: h.file, text: h.text })
+    if (vec.length === 0 && fts.length === 0) return this.keywordPassages(query, k)
+    const byId = new Map([...vec, ...fts].map((h) => [String(h.id), h]))
     return rrfRank([vec.map((v) => String(v.id)), fts.map((f) => String(f.id))])
       .slice(0, k)
-      .map((id) => byId.get(Number(id)) as { file: string; text: string })
+      .map((id) => {
+        const { file, heading, start, end, text } = byId.get(id)!
+        // Index text includes the heading prefix. The citation uses the exact
+        // Markdown span rather than the synthetic text passed to the embedder.
+        return { file, heading, start, end, text: text.slice(heading ? heading.length + 2 : 0) }
+      })
+  }
+
+  private keywordPassages(query: string, k: number): RetrievedPassage[] {
+    const match = ftsMatch(query, 'OR')
+    if (!match) return []
+    const open = `[${randomUUID()}]`
+    const close = `[/${open.slice(1)}`
+    const rows = this.db.prepare(
+      `SELECT f.path AS file, body, highlight(notes_fts, 1, ?, ?) AS marked
+       FROM notes_fts JOIN files f ON f.id = notes_fts.rowid
+       WHERE notes_fts MATCH ? ORDER BY rank, f.path LIMIT ?`
+    ).all(open, close, match, k) as { file: string; body: string; marked: string }[]
+    const passages: RetrievedPassage[] = []
+    for (const row of rows) {
+      // Recover offsets from FTS's own token matches. A title-only match can
+      // still supply the first nonempty body passage.
+      const offsets: number[] = []
+      let removed = 0
+      let at = row.marked.indexOf(open)
+      while (at !== -1) {
+        const end = row.marked.indexOf(close, at + open.length)
+        if (end === -1) break
+        offsets.push(at - removed)
+        removed += open.length + close.length
+        at = row.marked.indexOf(open, end + close.length)
+      }
+      let best: Chunk | undefined
+      let bestScore = -1
+      let first = 0
+      let last = 0
+      for (const chunk of chunkMarkdown(row.body)) {
+        while (first < offsets.length && offsets[first] < chunk.start) first++
+        last = Math.max(first, last)
+        while (last < offsets.length && offsets[last] < chunk.end) last++
+        const score = last - first
+        if (score > bestScore) {
+          best = chunk
+          bestScore = score
+        }
+      }
+      if (best) passages.push({ file: row.file, ...best })
+    }
+    return passages
   }
 
   stats(): { files: number; triples: number } {

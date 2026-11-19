@@ -32,4 +32,8 @@ test.afterAll(async () => {
 
 test('an empty vault shows a friendly, instructive empty state', async () => {
   await expect(page.locator('.empty')).toContainText('no notes yet')
+  await page.getByRole('button', { name: 'New note', exact: true }).click()
+  await page.locator('.modal-input').fill('First')
+  await page.locator('.modal-btn-primary').click()
+  await expect(page.locator('.tree-file.active')).toHaveText('First')
 })

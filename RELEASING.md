@@ -1,57 +1,47 @@
 # Releasing Nodebook
 
-## Cutting a release
+A version tag builds a draft GitHub Release. Each macOS job runs on the
+architecture it ships, Apple silicon or Intel. The same ad-hoc signing hook
+signs the app for local packages and GitHub releases. macOS releases use a
+per-app first-launch exception and require no Apple Developer credentials.
 
-1. Bump the version in `package.json` (e.g. `0.1.0`).
-2. Commit, then tag and push the tag:
-   ```sh
-   git commit -am "release: v0.1.0"
-   git tag v0.1.0
-   git push origin main --tags
-   ```
-3. `.github/workflows/release.yml` fans out across macOS, Windows and Linux,
-   builds with `electron-builder`, and publishes every artifact to a single
-   **GitHub Release** for the tag.
+Windows optionally uses `WIN_CSC_LINK` (base64-encoded `.pfx`) and
+`WIN_CSC_KEY_PASSWORD`.
 
-Artifacts per OS: macOS `.dmg` + `.zip` (x64 & arm64), Windows NSIS installer +
-portable `.exe`, Linux `AppImage` + `.deb`.
+## Cut and verify a release
 
-`CI` (`.github/workflows/ci.yml`) runs typecheck + unit + Electron e2e (under
-xvfb) on every push/PR to `main`.
+1. Choose an unused version matching `package.json` and the root entries of
+   `package-lock.json`. Put the intended release commit on GitHub and check its
+   CI and Security results.
+2. Tag that commit and push only its release tag. For example, for version
+   `0.1.0`, use `git tag v0.1.0 <commit>` and `git push origin refs/tags/v0.1.0`.
+3. Wait for the **Release** workflow. It verifies the ad-hoc signature and
+   native architecture, then opens a disposable vault with semantic search
+   in the app from **both** Mac formats.
+4. The workflow downloads the draft's GitHub assets and compares their bytes
+   with the tested build outputs. Review the draft in GitHub Releases. Expect
+   `Nodebook-<version>-arm64.dmg` and `.zip` for Apple silicon, the `x64` pair
+   for Intel, Windows `-setup.exe` and `-portable.exe`, an AppImage and a
+   Debian package. Keep the macOS first-launch instructions beside the assets.
+5. Download the draft DMG in Safari while signed in to GitHub. On a fresh Mac
+   or macOS VM, drag Nodebook to Applications and try to open it. If macOS
+   says it can't verify Nodebook, dismiss the alert and select **Open Anyway**
+   for Nodebook in **System Settings → Privacy & Security**. Confirm the prompt
+   and open a test vault. Record the macOS version and first-launch prompts.
+   A damaged-app or malware alert is a release failure. [Apple’s first-launch instructions](https://support.apple.com/en-us/102445)
+6. Publish the verified draft and confirm the installer downloads from the
+   public release while signed out of GitHub.
 
-## Code signing (optional but recommended)
+If a draft upload was interrupted, rerun the draft job to verify a complete
+upload. If the asset set differs, inspect that draft, discard the incomplete
+draft while keeping its tag, then rerun the job using the original build
+artifacts. A published tag gets a new version for a replacement release.
 
-Without the secrets below, releases build **unsigned** and the pipeline still
-succeeds — macOS users right-click → Open once, Windows shows a SmartScreen
-warning. Add the secrets to enable signing; no workflow edits needed.
+## Check a local package
 
-### macOS — sign + notarize
-Requires an Apple Developer account ($99/yr). Export a **Developer ID
-Application** certificate as a `.p12`, then add repo secrets:
+Run the packaged search test against the executable inside the bundle. This
+loads the real SQLite extension using an isolated profile and fixture vault.
 
-| Secret | Value |
-| --- | --- |
-| `MAC_CSC_LINK` | `base64 -i cert.p12` (the cert, base64-encoded) |
-| `MAC_CSC_KEY_PASSWORD` | the `.p12` export password |
-| `APPLE_ID` | your Apple ID email |
-| `APPLE_APP_SPECIFIC_PASSWORD` | an app-specific password (appleid.apple.com) |
-| `APPLE_TEAM_ID` | your 10-char Apple Team ID |
-
-Then flip `mac.notarize: true` in `electron-builder.yml` to enable
-notarization (leave it `false` until the Apple secrets exist, or the build
-fails on a missing credential).
-
-### Windows — sign
-Requires a code-signing certificate (OV/EV from a CA, exported as `.pfx`):
-
-| Secret | Value |
-| --- | --- |
-| `WIN_CSC_LINK` | `base64 -i cert.pfx` |
-| `WIN_CSC_KEY_PASSWORD` | the `.pfx` password |
-
-Linux needs no signing.
-
-## TODO before a polished 1.0
-- Add app icons under `build/`: `icon.icns` (mac), `icon.ico` (win),
-  `icon.png` 512×512 (linux). Until then electron-builder uses a default icon.
-- Optional: `electron-updater` + the GitHub Releases feed for in-app auto-update.
+```sh
+NODEBOOK_SMOKE_BINARY="$PWD/dist/mac-arm64/Nodebook.app/Contents/MacOS/Nodebook" npx playwright test e2e/talk.spec.ts
+```

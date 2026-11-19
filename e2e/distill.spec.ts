@@ -187,12 +187,13 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await focusModal.getByRole('button', { name: 'Distill' }).click()
   // The run map renders via the reused GraphView, with nodes + a source edge.
   await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
+  await expect(page.locator('.graph-canvas')).toHaveAttribute('data-layout', 'routed')
   await expect(page.locator('.graph-node').first()).toBeVisible()
   expect(await page.locator('.graph-node').count()).toBeGreaterThan(1)
   // Not `toBeVisible`: a two-node map can lay its nodes out exactly level, and
   // a horizontal SVG line has a zero-height box Playwright calls hidden. So ask
   // the geometry instead — an edge that is really drawn has a length.
-  const edge = page.locator('.graph-edge').first()
+  const edge = page.locator('path.graph-edge[data-automatic="true"]').first()
   await expect(edge).toBeAttached()
   const edgeLength = await edge.evaluate((el) => (el as SVGGeometryElement).getTotalLength())
   expect(edgeLength).toBeGreaterThan(0)
@@ -221,7 +222,7 @@ test('a closed run map is reachable again from the sidebar "Distilled runs" list
 
   // Clicking the row reopens the staged run's map (the graph loads async).
   await row.click()
-  await expect(page.locator('.graph-view')).toBeVisible()
+  await expect(page.locator('.graph-canvas')).toHaveAttribute('data-layout', 'routed')
   await expect.poll(() => page.locator('.graph-node').count()).toBeGreaterThan(1)
 })
 
@@ -239,9 +240,8 @@ test('the run map groups the notes under theme nodes, drawn as diamonds', async 
   const themeIds = new Set(themes.map((n) => n.id))
   for (const e of partOf) expect(themeIds).toContain(e.target)
 
-  // The map draws a theme as a diamond (a rotated square, not a circle) and
-  // says so in the key beside it.
-  await expect.poll(() => page.locator('.graph-node rect').count()).toBeGreaterThan(0)
+  // The routed map draws diamond glyphs for themes inside their node boxes.
+  await expect(page.locator('.graph-node path.graph-note-glyph')).toHaveCount(themes.length)
   await expect(page.locator('.graph-shape-key')).toContainText('theme')
 
   // The sidebar says what the run turned out to be about.
@@ -341,10 +341,11 @@ test('UNDO never destroys your edits: an edited merged note goes to the Trash', 
   const merged = readdirSync(folder).filter((n) => n.endsWith('.md'))
   expect(merged.length).toBeGreaterThan(1)
   const edited = join(folder, merged[0])
-  await page.evaluate(
-    (a) => window.nodebook.saveFile(a.path, a.content),
-    { path: edited, content: readFileSync(edited, 'utf8') + '\n\nMy own note.\n' }
-  )
+  const saved = await page.evaluate(async (path) => {
+    const content = await window.nodebook.readFile(path)
+    return window.nodebook.saveFile(path, content + '\n\nMy own note.\n', content)
+  }, edited)
+  expect(saved.status).toBe('saved')
 
   await page.locator('.distill-undo').click()
   // The banner says what happened to the edited note…
@@ -373,8 +374,47 @@ test('a staged note opens READ-ONLY before merge, and its citation shows the quo
   const id = runs[0].id
   const concept = stagedNames(id).find((n) => n !== 'on-government')!
 
-  await page.locator('.graph-node', { hasText: concept }).first().click()
-  await page.locator('.graph-ctl', { hasText: 'Open ↗' }).click()
+  // A narrow overview uses the same label treatment as a dense run. Activate
+  // the title zoom from the keyboard, then inspect and open a note by keyboard.
+  const canvas = page.locator('.graph-canvas')
+  await expect(canvas).toHaveAttribute('data-layout', 'routed')
+  const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize())
+  try {
+    const resize = async (width: number): Promise<void> => {
+      await app.evaluate(({ BrowserWindow }, [w, h]) =>
+        BrowserWindow.getAllWindows()[0].setContentSize(w, h), [width, size[1]]
+      )
+      await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width)
+    }
+    await resize(850)
+    const zoom = page.getByRole('button', { name: 'Zoom to titles' })
+    await expect(zoom).toBeVisible()
+    await zoom.press('Enter')
+    const book = canvas.getByRole('button', { name: 'on-government', exact: true })
+    await expect(book).toBeFocused()
+    await expect(book.locator('text')).toBeVisible()
+
+    // Resize again while the book has focus. Its title should stay readable as
+    // the canvas shrinks, with no second activation.
+    await resize(730)
+    await expect(book).toBeFocused()
+    await expect(book.locator('text')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => {
+      const title = document.activeElement?.querySelector('text')
+      const matrix = title?.getScreenCTM()
+      if (!title || !matrix) return 0
+      return parseFloat(getComputedStyle(title).fontSize) * Math.hypot(matrix.a, matrix.b)
+    })).toBeGreaterThanOrEqual(9)
+
+    const node = canvas.getByRole('button', { name: concept, exact: true })
+    await node.press('Space')
+    await expect(page.locator('.graph-insp-title')).toContainText(concept)
+    await node.press('Enter')
+  } finally {
+    await app.evaluate(({ BrowserWindow }, [width, height]) =>
+      BrowserWindow.getAllWindows()[0].setContentSize(width, height), size
+    )
+  }
 
   // A read-only pane — never the editor, so there is no dirty/save state at all.
   await expect(page.locator('.staged-note')).toBeVisible()
@@ -667,4 +707,54 @@ test('a run can be told what to focus on, and the runs list says what it was', a
   )
   expect(focused).toHaveLength(1)
   await expect(page.locator('.run-item-focus').first()).toContainText(TIMELINE)
+})
+
+test('a mixed PDF shows its missing page before spending a call and again after reading', async () => {
+  const pdf = join(__dirname, 'fixtures', 'distill', 'attendance-chart.pdf')
+  const before = await page.evaluate(async () => (await window.nodebook.distillListRuns()).length)
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
+  }, pdf)
+  const start = async (): Promise<void> => {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill'))
+    await page.getByRole('dialog').getByRole('button', { name: 'Distill', exact: true }).click()
+    await expect(page.getByRole('dialog')).toContainText('No usable text on page 2')
+  }
+  await start()
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+  expect(await page.evaluate(async () => (await window.nodebook.distillListRuns()).length)).toBe(before)
+  await start()
+  await page.getByRole('button', { name: 'Continue with extracted text' }).click()
+  const banner = page.locator('.distill-coverage-banner')
+  await expect(banner).toContainText('Extracted text from 1 of 2 PDF pages.')
+  await expect(banner).toContainText('The model read all of the extracted text.')
+})
+
+test('a failed estimate gives the user the error before any run is started', async () => {
+  const before = await page.evaluate(async () => (await window.nodebook.distillListRuns()).length)
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
+  }, join(vaultDir, 'vanished.pdf'))
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill'))
+  await page.getByRole('dialog').getByRole('button', { name: 'Distill', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Couldn’t prepare this import')
+  expect(await page.evaluate(async () => (await window.nodebook.distillListRuns()).length)).toBe(before)
+})
+
+test('running one of two estimated documents uses its own prepared text', async () => {
+  const documents = mkdtempSync(join(tmpdir(), 'nodebook-estimates-'))
+  const first = join(documents, 'First.md')
+  const second = join(documents, 'Second.md')
+  writeFileSync(first, BOOK)
+  writeFileSync(second, '# Second\nAnother reading for comparison.')
+  const id = await page.evaluate(async ([a, b]) => {
+    const firstId = await window.nodebook.distillRegisterPath(a)
+    const secondId = await window.nodebook.distillRegisterPath(b)
+    await window.nodebook.distillEstimate(firstId)
+    await window.nodebook.distillEstimate(secondId)
+    return firstId
+  }, [first, second])
+  writeFileSync(first, '# Replacement\nThis text was never estimated.')
+  const run = await page.evaluate((picked) => window.nodebook.distillRun(picked), id)
+  expect(readFileSync(join(vaultDir, '.distill', run.runId, 'source.md'), 'utf8')).toBe(BOOK)
 })

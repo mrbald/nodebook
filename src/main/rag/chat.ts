@@ -8,6 +8,7 @@ import {
 } from './provider'
 import { claudeCliChat, codexCliChat, genericCliChat } from './cliChat'
 import { tagError } from '../distill/retry'
+import { ASK_SYSTEM } from './ask'
 
 /**
  * Chat adapters for "Ask" — each turns a grounded request into a token stream.
@@ -201,7 +202,7 @@ function stubThemeNames(prompt: string): unknown[] {
 }
 
 /** Deterministic, network-free chat for e2e. For "Ask" it echoes a short grounded
- *  answer with an inline `[[wikilink]]` citation; for a distill extraction prompt
+ *  answer with an inline passage citation; for a distill extraction prompt
  *  it returns valid JSON quoting the chunks shown, and for the theme-naming
  *  prompt a name per group — so the whole distill vertical is testable without a
  *  key or network.
@@ -228,11 +229,18 @@ function stubChat(): ChatModel {
         yield JSON.stringify({ themes: stubThemeNames(prompt) })
         return
       }
-      const q = req.messages[req.messages.length - 1]?.content ?? ''
+      if (system !== ASK_SYSTEM) {
+        yield 'pong'
+        return
+      }
+      const { question, passages } = JSON.parse(prompt) as {
+        question: string
+        passages: { id: string }[]
+      }
       for (const tok of [
         'Based on your notes, ',
-        `the answer to "${q}" `,
-        'is here. See [[welcome]].'
+        `the answer to "${question}" `,
+        `is here. See [[${passages[0].id}]].`
       ])
         yield tok
     }

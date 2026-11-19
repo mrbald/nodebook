@@ -12,6 +12,7 @@ import {
   epubNavTitles,
   htmlToMarkdown,
   docxToMarkdown,
+  convertDocumentWithCoverage,
   convertDocument
 } from './convert'
 
@@ -159,6 +160,16 @@ function rawPdf(pages: Op[][]): Uint8Array {
   out += `trailer\n<</Root 1 0 R/Size ${5 + 2 * pages.length}>>\n%%EOF\n`
   return new Uint8Array(Buffer.from(out, 'latin1'))
 }
+
+it('reports textless PDF pages separately and preserves the original page numbers', async () => {
+  tmp = mkdtempSync(join(tmpdir(), 'mixed-pages-'))
+  const file = join(tmp, 'Mixed.pdf')
+  writeFileSync(file, rawPdf([[prose(690, 'Opening statement.')], [], [prose(690, 'Conclusion.')]]))
+  const doc = await convertDocumentWithCoverage(file)
+  expect(doc.pdf).toEqual({ pages: 3, missing: [2] })
+  expect(doc.text).toContain('## Page 3')
+  expect(doc.text).not.toContain('## Page 2')
+})
 
 const prose = (y: number, text: string, x = 72): Op => ({ font: 'F1', size: 10, x, y, text })
 const code = (y: number, text: string, x = 89): Op => ({ font: 'F2', size: 9, x, y, text })

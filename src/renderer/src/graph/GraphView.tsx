@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { GraphData, GraphEdge, GraphNode, TalkNeighbor } from '@shared/types'
 import { forceLayout, type Point } from './layout'
-import { elkLayout } from './elkLayout'
+import { edgeKey } from './elkLayout'
+import { edgeLanes, LABEL_FONT_SIZE, LABEL_LINE_HEIGHT, manualEdgePath, sectionPath } from './graphGeometry'
+import { useRoutedLayout } from './useRoutedLayout'
 import { dagreLayout } from './dagreLayout'
 import { radialLayout } from './radialLayout'
 import { groupsLayout } from './groupsLayout'
@@ -80,7 +82,7 @@ function mergeGraphs(main: GraphData, extras: GraphData[]): GraphData {
   const edges: GraphEdge[] = []
   for (const g of [main, ...extras]) {
     for (const e of g.edges) {
-      const key = `${e.source} ${e.relation} ${e.target}`
+      const key = edgeKey(e)
       if (!seen.has(key)) {
         seen.add(key)
         edges.push(e)
@@ -98,6 +100,18 @@ type Gesture =
   | { kind: 'pan'; ox: number; oy: number; sx: number; sy: number }
   | { kind: 'node'; node: GraphNode; ox: number; oy: number; sx: number; sy: number }
 
+type CameraView = Point & { k: number }
+type Camera = CameraView | { titleAnchor: Point }
+const OVERVIEW: CameraView = { x: 0, y: 0, k: 1 }
+
+function cameraView(camera: Camera, fittedFontSize: number): CameraView {
+  if (!('titleAnchor' in camera)) return camera
+  if (fittedFontSize <= 0) return OVERVIEW
+  const k = 11 / fittedFontSize
+  const { x, y } = camera.titleAnchor
+  return { x: W / 2 - x * k, y: H / 2 - y * k, k }
+}
+
 /**
  * The knowledge map — a force-directed, read-only view of an index slice. Drag a
  * node to arrange it, drag the background to pan, wheel to zoom, click a node to
@@ -106,8 +120,7 @@ type Gesture =
  * With talk-to-docs on, an opt-in **✨ Related** overlay adds dashed edges to
  * similar-but-unlinked notes.
  */
-/** The map's layouts. `tree` and `elk` are both layered; ELK untangles a dense
- *  map more often and is the only asynchronous one. */
+/** The map's layouts. ELK calculates placement and connector routes in a worker. */
 type LayoutMode = 'force' | 'tree' | 'elk' | 'radial' | 'groups' | 'blocks'
 
 export function GraphView({
@@ -122,7 +135,8 @@ export function GraphView({
   statusSlot,
   loadGraph = window.nodebook.graph,
   emptyMessage,
-  defaultShowSources = false
+  defaultShowSources = false,
+  initialLayout = 'force'
 }: {
   focusPath: string | null
   focusName: string
@@ -150,6 +164,7 @@ export function GraphView({
    *  swallow the picture); distill views start with the book shown — it is the
    *  run's anchor, and a fresh run's notes may have no other edges yet. */
   defaultShowSources?: boolean
+  initialLayout?: LayoutMode
 }): React.JSX.Element {
   const [base, setBase] = useState<GraphData | null>(null)
   const [related, setRelated] = useState<TalkNeighbor[]>([])
@@ -162,23 +177,21 @@ export function GraphView({
   // Session-only; the default depends on the view (see defaultShowSources).
   const [showSources, setShowSources] = useState(defaultShowSources)
   const [colorMode, setColorMode] = useState<ColorMode>('links')
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('force')
-  // ELK lays out asynchronously (see elkLayout.ts): the result lands here, and
-  // until it does the tree layout stands in — the nearest shape, so the switch
-  // is a small settle rather than a blank map. A stale answer (the graph or
-  // the mode changed meanwhile) is dropped.
-  const [elkPos, setElkPos] = useState<Map<string, Point> | null>(null)
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(initialLayout)
   const [hiddenRels, setHiddenRels] = useState<Set<string>>(new Set())
   const [hiddenNodes, setHiddenNodes] = useState<Set<string>>(new Set())
   const [hiddenFolders, setHiddenFolders] = useState<Set<string>>(new Set())
   const [dragged, setDragged] = useState<Map<string, Point>>(new Map())
   const [pinned, setPinned] = useState<Map<string, Point>>(new Map())
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [keyboardId, setKeyboardId] = useState<string | null>(null)
   // Relation-typing: which outbound target is being named, and the typed-in name.
   const [typingTarget, setTypingTarget] = useState<string | null>(null)
   const [relInput, setRelInput] = useState('')
-  const [view, setView] = useState({ x: 0, y: 0, k: 1 })
+  const [camera, setCamera] = useState<Camera>(OVERVIEW)
+  const [canvasScale, setCanvasScale] = useState(1)
   const svgRef = useRef<SVGSVGElement>(null)
+  const markerPrefix = useId()
   const gesture = useRef<Gesture | null>(null)
   const movedRef = useRef(false)
   // Last computed force layout — seeds the next one so unchanged nodes barely move.
@@ -220,15 +233,18 @@ export function GraphView({
   }, [focusPath, talkReady, showRelated, global, reloadKey])
 
   useEffect(() => {
-    setView({ x: 0, y: 0, k: 1 })
+    setCamera(OVERVIEW)
     setHiddenNodes(new Set())
     setDragged(new Map())
     setSelectedId(null)
     setExpanded(new Set())
   }, [focusPath, global, depth])
 
-  // A new layout invalidates hand-placed positions.
-  useEffect(() => setDragged(new Map()), [layoutMode])
+  // A new layout starts at its own fit and clears unpinned hand placements.
+  useEffect(() => {
+    setDragged(new Map())
+    setCamera(OVERVIEW)
+  }, [layoutMode])
 
   // Selecting a different node closes any open relation-typing input.
   useEffect(() => {
@@ -269,11 +285,19 @@ export function GraphView({
     return { nodes, edges }
   }, [data, hiddenRels, hiddenNodes, hiddenFolders, vaultRoot])
 
+  // Stored member → theme → document links read with the book at the top.
+  const { labels, routed, failed, arranging } = useRoutedLayout(
+    layoutMode === 'elk' ? visible : null, W, H, defaultShowSources ? 'UP' : 'DOWN'
+  )
+
   const layout = useMemo(() => {
     if (!visible) return null
     const o = { width: W, height: H }
     if (layoutMode === 'tree') return dagreLayout(visible.nodes, visible.edges, o)
-    if (layoutMode === 'elk') return elkPos ?? dagreLayout(visible.nodes, visible.edges, o)
+    if (layoutMode === 'elk') {
+      if (routed) return routed.centres
+      return failed ? dagreLayout(visible.nodes, visible.edges, o) : null
+    }
     if (layoutMode === 'radial') return radialLayout(visible.nodes, visible.edges, o)
     if (layoutMode === 'groups') return groupsLayout(visible.nodes, visible.edges, o)
     if (layoutMode === 'blocks') return blocksLayout(visible.nodes, visible.edges, o)
@@ -286,21 +310,27 @@ export function GraphView({
       seed,
       fixed: new Set(pinned.keys())
     })
-  }, [visible, layoutMode, pinned, elkPos])
+  }, [visible, layoutMode, pinned, routed, failed])
 
-  useEffect(() => {
-    if (layoutMode !== 'elk' || !visible) {
-      setElkPos(null)
-      return
+  const hasCanvas = !!layout && !!visible?.nodes.length
+  useLayoutEffect(() => {
+    const svg = svgRef.current
+    if (!hasCanvas || !svg) return
+    const measure = (): void => {
+      const matrix = svg.getScreenCTM()
+      if (matrix) setCanvasScale(Math.hypot(matrix.a, matrix.b))
     }
-    let live = true
-    void elkLayout(visible.nodes, visible.edges, { width: W, height: H }).then((p) => {
-      if (live) setElkPos(p)
-    })
-    return () => {
-      live = false
-    }
-  }, [visible, layoutMode])
+    const observer = new ResizeObserver(measure)
+    observer.observe(svg)
+    measure()
+    return () => observer.disconnect()
+  }, [hasCanvas])
+
+  const paths = useMemo(
+    () => new Map([...(routed?.routes ?? [])].map(([key, sections]) => [key, sectionPath(sections)])),
+    [routed]
+  )
+  const lanes = useMemo(() => routed && visible ? edgeLanes(visible.edges) : null, [routed, visible])
 
   // Remember the force layout to seed the next relayout; a new graph or a new
   // layout algorithm starts fresh (depth changes keep the seed for stability).
@@ -336,6 +366,16 @@ export function GraphView({
   const radius = (id: string): number => 7 + Math.sqrt((pr.get(id) ?? 0) / maxPr) * 14
   const posOf = (id: string): Point | undefined =>
     pinned.get(id) ?? dragged.get(id) ?? layout?.get(id)
+  const manualRouting = !!routed && !!visible?.nodes.some(({ id }) => {
+    const placed = pinned.get(id) ?? dragged.get(id)
+    const automatic = routed.centres.get(id)
+    return placed && automatic && (placed.x !== automatic.x || placed.y !== automatic.y)
+  })
+  const markerIds = new Map([...colors.keys()].map((relation, i) => [relation, `${markerPrefix}-${i}`]))
+  const routingScale = routed?.scale ?? 1
+  const fittedFontSize = LABEL_FONT_SIZE * routingScale * canvasScale
+  const view = cameraView(camera, fittedFontSize)
+  const labelVisible = fittedFontSize * view.k >= 9
   const nodeFill = (node: GraphNode): string | undefined => {
     if (node.ghost) return undefined
     // Overlay view: every note carries a `source`, so colour by provenance — your
@@ -350,19 +390,18 @@ export function GraphView({
   const filtered = hiddenRels.size + hiddenNodes.size + hiddenFolders.size
   const modes: ColorMode[] = talkReady ? ['links', 'folder', 'meaning'] : ['links', 'folder']
 
-  const unitsPerPx = (): number => W / (svgRef.current?.clientWidth || W)
+  const fromScreen = (x: number, y: number): DOMPoint | undefined => {
+    const matrix = svgRef.current?.getScreenCTM()
+    return matrix ? new DOMPoint(x, y).matrixTransform(matrix.inverse()) : undefined
+  }
 
   const onWheel = (e: React.WheelEvent): void => {
-    const svg = svgRef.current
-    if (!svg) return
-    const pt = svg.createSVGPoint()
-    pt.x = e.clientX
-    pt.y = e.clientY
-    const m = svg.getScreenCTM()
-    if (!m) return
-    const p = pt.matrixTransform(m.inverse())
-    setView((v) => {
-      const k = clamp(v.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.25, 6)
+    const p = fromScreen(e.clientX, e.clientY)
+    if (!p) return
+    setCamera((camera) => {
+      const v = cameraView(camera, fittedFontSize)
+      const zoomLimit = Math.max(6, 16 / Math.max(0.1, fittedFontSize))
+      const k = clamp(v.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 0.25, zoomLimit)
       const r = k / v.k
       return { k, x: p.x - (p.x - v.x) * r, y: p.y - (p.y - v.y) * r }
     })
@@ -376,6 +415,7 @@ export function GraphView({
   const onNodePointerDown = (e: React.PointerEvent, node: GraphNode): void => {
     if (e.button !== 0) return
     e.stopPropagation()
+    setKeyboardId(node.id)
     const p = posOf(node.id)
     if (!p) return
     gesture.current = { kind: 'node', node, ox: p.x, oy: p.y, sx: e.clientX, sy: e.clientY }
@@ -385,16 +425,69 @@ export function GraphView({
   const onPointerMove = (e: React.PointerEvent): void => {
     const g = gesture.current
     if (!g) return
-    const dx = e.clientX - g.sx
-    const dy = e.clientY - g.sy
-    if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true
+    if (Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) > 3) movedRef.current = true
+    if (!movedRef.current) return
+    const start = fromScreen(g.sx, g.sy)
+    const current = fromScreen(e.clientX, e.clientY)
+    if (!start || !current) return
+    const dx = current.x - start.x
+    const dy = current.y - start.y
     if (g.kind === 'pan') {
-      const s = unitsPerPx()
-      setView((v) => ({ ...v, x: g.ox + dx * s, y: g.oy + dy * s }))
-    } else {
-      const s = unitsPerPx() / view.k
-      setDragged((m) => new Map(m).set(g.node.id, { x: g.ox + dx * s, y: g.oy + dy * s }))
+      setCamera({ k: view.k, x: g.ox + dx, y: g.oy + dy })
+    } else if (!pinned.has(g.node.id)) {
+      setDragged((m) => new Map(m).set(g.node.id, { x: g.ox + dx / view.k, y: g.oy + dy / view.k }))
     }
+  }
+
+  const showKeyboardNode = (id: string): void => {
+    const p = posOf(id)
+    if (!p) return
+    setCamera((camera) => {
+      const v = cameraView(camera, fittedFontSize)
+      const x = v.x + p.x * v.k
+      const y = v.y + p.y * v.k
+      if (x >= 35 && x <= W - 35 && y >= 35 && y <= H - 35) return camera
+      return { ...v, x: W / 2 - p.x * v.k, y: H / 2 - p.y * v.k }
+    })
+  }
+  const keyboardEntry = visible?.nodes.some((node) => node.id === keyboardId)
+    ? keyboardId
+    : visible?.nodes.find((node) => node.focus)?.id ?? visible?.nodes[0]?.id
+  const focusGraphNode = (id: string): void => {
+    setKeyboardId(id)
+    svgRef.current?.querySelector<SVGGElement>(`[data-node-id="${CSS.escape(id)}"]`)?.focus({
+      preventScroll: true
+    })
+  }
+  const zoomToTitles = (): void => {
+    const anchor = visible?.nodes.find((node) => node.id === selectedId)?.id
+      ?? visible?.nodes.find((node) => node.id === keyboardId)?.id
+      ?? visible?.nodes.find((node) => node.focus || node.kind === 'document')?.id
+      ?? visible?.nodes[0]?.id
+    if (!anchor) return
+    const p = posOf(anchor)
+    if (!p) return
+    focusGraphNode(anchor)
+    // Keep the title size as the window and toolbar settle after a resize.
+    setCamera({ titleAnchor: p })
+  }
+  const onNodeKeyDown = (event: React.KeyboardEvent, node: GraphNode): void => {
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault()
+      if (event.repeat) return
+      if (event.key === 'Enter' && node.path) onOpenInEditor(node.path)
+      else setSelectedId(node.id)
+      return
+    }
+    const next = event.key === 'ArrowRight' || event.key === 'ArrowDown'
+    if (!next && event.key !== 'ArrowLeft' && event.key !== 'ArrowUp') return
+    const nodes = visible?.nodes
+    if (!nodes?.length) return
+    event.preventDefault()
+    const at = nodes.findIndex(({ id }) => id === node.id)
+    const id = nodes[(at + nodes.length + (next ? 1 : -1)) % nodes.length].id
+    showKeyboardNode(id)
+    focusGraphNode(id)
   }
   const onPointerUp = (): void => {
     const g = gesture.current
@@ -470,7 +563,7 @@ export function GraphView({
   const nameOf = (id: string): string => labelOf.get(id) ?? id
 
   // The selected node's details (its edges in the current slice) for the inspector.
-  const selectedNode = selectedId ? (data?.nodes.find((n) => n.id === selectedId) ?? null) : null
+  const selectedNode = selectedId ? (visible?.nodes.find((n) => n.id === selectedId) ?? null) : null
   const selOut = selectedNode && data ? data.edges.filter((e) => e.source === selectedNode.id) : []
   const selIn = selectedNode && data ? data.edges.filter((e) => e.target === selectedNode.id) : []
 
@@ -501,6 +594,9 @@ export function GraphView({
           <svg
             ref={svgRef}
             className="graph-canvas"
+            role="group"
+            aria-label="Knowledge map notes"
+            data-layout={routed ? (manualRouting ? 'manual' : 'routed') : failed ? 'fallback' : layoutMode}
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="xMidYMid meet"
             onWheel={onWheel}
@@ -508,23 +604,53 @@ export function GraphView({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerLeave={onPointerUp}
+            onPointerCancel={() => { gesture.current = null }}
           >
+            {routed && (
+              <defs>
+                {[...markerIds].map(([relation, id]) => (
+                  <marker
+                    key={id} id={id} viewBox="0 0 6 6"
+                    markerWidth={6 * routingScale} markerHeight={6 * routingScale}
+                    markerUnits="userSpaceOnUse" refX="6" refY="3" orient="auto"
+                  >
+                    <path d="M0 0 L6 3 L0 6 Z" fill={colors.get(relation)} />
+                  </marker>
+                ))}
+              </defs>
+            )}
             <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
-              {visible.edges.map((e, i) => {
+              {visible.edges.map((e) => {
                 const a = posOf(e.source)
                 const b = posOf(e.target)
                 if (!a || !b) return null
-                return (
-                  <line
-                    key={i}
-                    className={`graph-edge${e.relation === RELATED ? ' graph-edge-related' : ''}${e.relation === SAME_NAME ? ' graph-edge-samename' : ''}`}
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
-                    stroke={colors.get(e.relation) ?? 'var(--muted)'}
-                  />
+                const key = edgeKey(e)
+                const related = e.relation === RELATED
+                const sameName = e.relation === SAME_NAME
+                const incident = selectedNode?.id === e.source || selectedNode?.id === e.target
+                const className = 'graph-edge'
+                  + (related ? ' graph-edge-related' : '')
+                  + (sameName ? ' graph-edge-samename' : '')
+                  + (routed && selectedNode ? (incident ? ' is-incident' : ' is-dim') : '')
+                const stroke = colors.get(e.relation) ?? 'var(--muted)'
+                if (!routed) {
+                  return <line key={key} className={className} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={stroke} />
+                }
+                const route = manualRouting ? undefined : paths.get(key)
+                const path = route ?? manualEdgePath(
+                  a, b, labels.get(e.source)!, labels.get(e.target)!, routingScale, lanes?.get(key) ?? 0
                 )
+                const arrow = !related && !sameName && (!selectedNode || incident) && markerIds.get(e.relation)
+                return <path
+                  key={key}
+                  className={`${className} graph-edge-path`}
+                  d={path}
+                  stroke={stroke}
+                  vectorEffect="non-scaling-stroke"
+                  markerEnd={arrow ? `url(#${arrow})` : undefined}
+                  data-edge-key={key}
+                  data-automatic={route ? 'true' : undefined}
+                />
               })}
               {visible.nodes.map((node) => {
                 const p = posOf(node.id)
@@ -532,41 +658,84 @@ export function GraphView({
                 const r = radius(node.id)
                 const cls = `graph-node${node.focus ? ' is-focus' : ''}${node.ghost ? ' is-ghost' : ''}${node.id === selectedId ? ' is-selected' : ''}${pinned.has(node.id) ? ' is-pinned' : ''}`
                 const fill = nodeFill(node)
+                const label = routed && labels.get(node.id)
                 // A theme is a group of notes, not a note — drawn as a diamond
                 // so the map's structure reads without clicking anything.
                 const side = r * 1.5
                 return (
                   <g
                     key={node.id}
-                    className={cls}
-                    transform={`translate(${p.x},${p.y})`}
+                    className={`${cls}${label ? ' graph-elk-node' : ''}`}
+                    transform={`translate(${p.x},${p.y})${label ? ` scale(${routingScale})` : ''}`}
+                    data-node-id={node.id}
+                    tabIndex={node.id === keyboardEntry ? 0 : -1}
+                    role="button"
+                    aria-label={node.label}
+                    aria-pressed={node.id === selectedId}
+                    onKeyDown={(ev) => onNodeKeyDown(ev, node)}
+                    onFocus={(ev) => {
+                      if (ev.currentTarget.matches(':focus-visible')) showKeyboardNode(node.id)
+                    }}
                     onPointerDown={(ev) => onNodePointerDown(ev, node)}
                     onContextMenu={(ev) => {
                       ev.preventDefault()
                       if (!node.focus) setHiddenNodes((s) => new Set(s).add(node.id))
                     }}
                   >
-                    {node.kind === 'theme' ? (
-                      <rect
-                        x={-side / 2}
-                        y={-side / 2}
-                        width={side}
-                        height={side}
-                        transform="rotate(45)"
-                        style={fill ? { fill } : undefined}
-                      />
+                    {label ? (
+                      <>
+                        <title>{node.label}</title>
+                        <rect
+                          className="graph-note-box"
+                          x={-label.width / 2} y={-label.height / 2}
+                          width={label.width} height={label.height} rx={3}
+                        />
+                        {node.kind === 'theme' ? (
+                          <path
+                            className="graph-note-glyph"
+                            d="M0 -5 L5 0 L0 5 L-5 0 Z"
+                            transform={`translate(${12 - label.width / 2},0)`}
+                            style={{ fill }}
+                          />
+                        ) : (
+                          <circle
+                            className="graph-note-glyph"
+                            cx={12 - label.width / 2} r={r * 0.32} style={{ fill }}
+                          />
+                        )}
+                        {labelVisible && label.lines.map((text, i) => (
+                          <text
+                            key={i} x={24 - label.width / 2}
+                            y={5 + LABEL_LINE_HEIGHT * (i - (label.lines.length - 1) / 2)}
+                            style={{ fontSize: LABEL_FONT_SIZE }}
+                          >{text}</text>
+                        ))}
+                      </>
                     ) : (
-                      <circle r={r} style={fill ? { fill } : undefined} />
+                      <>
+                        {node.kind === 'theme' ? (
+                          <rect
+                            x={-side / 2}
+                            y={-side / 2}
+                            width={side}
+                            height={side}
+                            transform="rotate(45)"
+                            style={fill ? { fill } : undefined}
+                          />
+                        ) : (
+                          <circle r={r} style={fill ? { fill } : undefined} />
+                        )}
+                        <text y={r + 13}>{node.label}</text>
+                      </>
                     )}
-                    <text y={r + 13}>{node.label}</text>
                   </g>
                 )
               })}
             </g>
           </svg>
         ) : (
-          <div className="graph-empty">
-            {data
+          <div className="graph-empty" role="status">
+            {arranging ? 'Arranging map…' : data
               ? (emptyMessage ??
                 'Nothing to show — clear the filters, or add a [[link]] to this note.')
               : 'Loading…'}
@@ -608,12 +777,12 @@ export function GraphView({
             <StatusSelect
               kind="layout"
               prefix="layout: "
-              title="Layout: organic web (force), hierarchical tree (dagre), layered elk (Eclipse Layout Kernel), focus-centric radial, community groups, or min-cut blocks"
+              title="Map layout"
               value={layoutMode}
               options={[
                 { value: 'force', label: 'force' },
                 { value: 'tree', label: 'tree' },
-                { value: 'elk', label: 'elk' },
+                { value: 'elk', label: 'routed (elk)' },
                 { value: 'radial', label: 'radial' },
                 { value: 'groups', label: 'groups' },
                 { value: 'blocks', label: 'blocks' }
@@ -655,13 +824,18 @@ export function GraphView({
               className="graph-ctl"
               title="Reset the view — zoom, pan, and any nodes you've dragged or pinned"
               onClick={() => {
-                setView({ x: 0, y: 0, k: 1 })
+                setCamera(OVERVIEW)
                 setDragged(new Map())
                 setPinned(new Map())
               }}
             >
               ⟲ reset view
             </button>
+            {failed && <span role="status">Routing unavailable. Showing tree layout.</span>}
+            {manualRouting && <span role="status">Manual placement</span>}
+            {routed && !labelVisible && (
+              <button className="graph-ctl" onClick={zoomToTitles}>Zoom to titles</button>
+            )}
           </div>
           <span className="graph-toolbar-right">
             {statusSlot}
@@ -852,7 +1026,8 @@ export function GraphView({
               </div>
             )}
             <p className="graph-insp-hint">
-              Click a note to inspect · double-click to focus · right-click to hide.
+              Click to inspect · double-click to focus · right-click to hide.
+              On the keyboard, use arrows to move, Space to inspect and Enter to open.
             </p>
           </>
         )}

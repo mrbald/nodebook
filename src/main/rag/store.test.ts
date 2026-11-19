@@ -1,5 +1,30 @@
 import { describe, it, expect } from 'vitest'
-import { topCosine, needsEmbeddingReset, ftsOrMatch } from './store'
+import { join } from 'node:path'
+import { topCosine, needsEmbeddingReset, ftsMatch, sqliteExtensionPath } from './store'
+
+describe('sqliteExtensionPath', () => {
+  const resources = join('install app.asar', 'Resources')
+  const library = join('node_modules', 'sqlite-vec-platform-arch', 'vec0')
+
+  it.each(['dylib', 'dll', 'so'])('points SQLite at the unpacked %s selected by sqlite-vec', (suffix) => {
+    const extension = `${library}.${suffix}`
+    expect(sqliteExtensionPath(join(resources, 'app.asar', extension), resources)).toBe(
+      join(resources, 'app.asar.unpacked', extension)
+    )
+  })
+
+  it('preserves paths outside the application archive', () => {
+    const plainNode = join(resources, 'app.asar', library)
+    expect(sqliteExtensionPath(plainNode)).toBe(plainNode)
+    for (const extension of [
+      join('dev', 'app.asar', library),
+      join(resources, 'app.asar.other', library),
+      join(resources, 'app.asar.unpacked', library)
+    ]) {
+      expect(sqliteExtensionPath(extension, resources)).toBe(extension)
+    }
+  })
+})
 
 // Note: VectorStore itself (the sqlite-vec/FTS5-backed class) is exercised
 // only by the e2e suite (talk-graph, ask), not here. `better-sqlite3` is
@@ -98,21 +123,26 @@ describe('needsEmbeddingReset', () => {
 /**
  * `chunkSearch` grounds "Ask": FTS5's implicit AND between tokens usually
  * matches nothing for a natural-language question, silently dropping the
- * keyword leg out of hybrid retrieval. `ftsOrMatch` is the fix — OR the
+ * keyword leg out of hybrid retrieval. `ftsMatch` is the fix — OR the
  * tokens instead (bm25 still ranks a chunk matching more of them higher).
  */
-describe('ftsOrMatch', () => {
-  it('ORs a natural-language question\'s tokens, prefix-matched', () => {
-    expect(ftsOrMatch('what is the capital of France')).toBe(
-      'what* OR is* OR the* OR capital* OR of* OR France*'
+describe('ftsMatch', () => {
+  it('ORs literal prefix matches for a natural-language question', () => {
+    expect(ftsMatch('what is the capital of France', 'OR')).toBe(
+      '"what"* OR "is"* OR "the"* OR "capital"* OR "of"* OR "France"*'
     )
   })
 
-  it('returns null for a query with no word/number tokens', () => {
-    expect(ftsOrMatch('   ---   ')).toBeNull()
+  it('quotes boolean operators in both keyword paths', () => {
+    expect(ftsMatch('AND OR NOT', 'AND')).toBe('"AND"* AND "OR"* AND "NOT"*')
+    expect(ftsMatch('AND OR NOT', 'OR')).toBe('"AND"* OR "OR"* OR "NOT"*')
   })
 
-  it('tokenizes unicode letters, not just ASCII', () => {
-    expect(ftsOrMatch('café résumé')).toBe('café* OR résumé*')
+  it('returns null for a query with no word/number tokens', () => {
+    expect(ftsMatch('   ---   ', 'OR')).toBeNull()
+  })
+
+  it('keeps Unicode letters and their combining marks', () => {
+    expect(ftsMatch('cafe\u0301 résumé', 'OR')).toBe('"cafe\u0301"* OR "résumé"*')
   })
 })
