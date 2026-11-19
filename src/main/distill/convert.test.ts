@@ -85,7 +85,8 @@ afterEach(() => {
 })
 
 describe('pdfToMarkdown', () => {
-  it('extracts text with a per-page heading (page = provenance)', async () => {
+  // This first conversion also loads pdf.js; the cold import exceeds five seconds on hosted Intel Macs.
+  it('extracts text with a per-page heading (page = provenance)', { timeout: 30_000 }, async () => {
     const md = await pdfToMarkdown(enc(PDF))
     expect(md).toContain('## Page 1')
     expect(md).toContain('Hello Faction world')
