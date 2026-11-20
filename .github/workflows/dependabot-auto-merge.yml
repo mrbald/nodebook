@@ -1,0 +1,126 @@
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '23 8 * * *'
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    # Look at the original run actor. A rerun keeps that actor and checked ref.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.repository == 'mrbald/nodebook' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.id == 49699333 &&
+      github.event.workflow_run.head_repository.id == github.event.repository.id &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enable auto-merge for the checked head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # Read GitHub metadata only. Completed runs can omit their PR association.
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls" --method GET \
+            -f state=open -f base=main -f head="$GITHUB_REPOSITORY_OWNER:$HEAD_BRANCH" \
+            | jq -r --argjson repo "$GITHUB_REPOSITORY_ID" --arg sha "$HEAD_SHA" '
+              map(select(.state == "open" and .draft == false and .auto_merge == null
+                and .user.id == 49699333 and .user.login == "dependabot[bot]" and .user.type == "Bot"
+                and .base.ref == "main" and .base.repo.id == $repo
+                and .head.repo.id == $repo and .head.sha == $sha))
+              | if length == 1 then .[0].number else empty end')
+          if [[ -z "$pr" ]]; then
+            echo 'No open Dependabot PR at this commit needs auto-merge enabled.'
+            exit 0
+          fi
+
+          # gh can merge immediately once the PR is mergeable. Require active,
+          # up-to-date checks on main before requesting a merge.
+          rules=$(gh api "repos/$GITHUB_REPOSITORY/rules/branches/main" --paginate --slurp)
+          if ! jq -e '
+            [ .[][] | select(.type == "required_status_checks"
+                and .parameters.strict_required_status_checks_policy == true)
+              | .parameters.required_status_checks[]
+              | select(.integration_id == 15368) | .context ] as $active_checks
+            | (["test", "npm-audit", "gitleaks", "osv-scanner / osv-scan", "Native package readiness"]
+               - $active_checks | length == 0)
+          ' <<< "$rules" > /dev/null; then
+            echo '::error::main is missing required GitHub Actions checks or up-to-date enforcement.'
+            exit 1
+          fi
+
+          gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --squash --auto --match-head-commit "$HEAD_SHA"
+
+  retry-release-age:
+    if: github.event_name == 'schedule' && github.repository == 'mrbald/nodebook'
+    permissions:
+      actions: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: dependabot-release-age-retry
+    steps:
+      - name: Retry Dependabot CI blocked at a release-age check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="repos/$GITHUB_REPOSITORY"
+          prs=$(gh api "$repo/pulls" --method GET --paginate --slurp -f state=open -f base=main \
+            | jq -r --argjson repo "$GITHUB_REPOSITORY_ID" '
+              .[][] | select(.state == "open" and .draft == false
+                and .user.id == 49699333 and .user.login == "dependabot[bot]" and .user.type == "Bot"
+                and .base.ref == "main" and .base.repo.id == $repo and .head.repo.id == $repo
+                and (.head.ref | startswith("dependabot/")))
+              | [.number, .head.ref, .head.sha] | @tsv')
+          while IFS=$'\t' read -r pr branch sha; do
+            [[ -n "$pr" ]] || continue
+            # Check the newest run before filtering for failure so a later success wins.
+            run=$(gh api "$repo/actions/workflows/ci.yml/runs" --method GET \
+              -f event=pull_request -f branch="$branch" -f head_sha="$sha" -F per_page=1 \
+              | jq -r --argjson repo "$GITHUB_REPOSITORY_ID" --arg sha "$sha" --arg branch "$branch" '
+                .workflow_runs[0] | select(.event == "pull_request" and .path == ".github/workflows/ci.yml"
+                  and .actor.id == 49699333 and .head_repository.id == $repo
+                  and .head_sha == $sha and .head_branch == $branch
+                  and .status == "completed" and .conclusion == "failure"
+                  and .run_attempt >= 1 and .run_attempt < 8
+                  and (.created_at | fromdateiso8601) >= (now - 7 * 86400))
+                | [.id, .run_attempt] | @tsv')
+            [[ -n "$run" ]] || continue
+            IFS=$'\t' read -r id attempt <<< "$run"
+
+            jobs=$(gh api "$repo/actions/runs/$id/attempts/$attempt/jobs" --paginate --slurp)
+            if ! jq -e '
+              [.[].jobs[] | select(.conclusion != "success" and .conclusion != "skipped")] as $failed_jobs
+              | ($failed_jobs | length == 1)
+                and ($failed_jobs[0] | .name == "test" and .conclusion == "failure"
+                  and ([.steps[] | select(.conclusion != "success" and .conclusion != "skipped")]
+                    | length == 1 and (.[0] | .conclusion == "failure"
+                      and (.name == "Check npm release age" or .name == "Check GitHub Actions and pre-commit release age"))))
+            ' <<< "$jobs" > /dev/null; then
+              continue
+            fi
+
+            current=$(gh api "$repo/pulls/$pr")
+            if jq -e --argjson repo "$GITHUB_REPOSITORY_ID" --arg sha "$sha" --arg branch "$branch" '
+              .state == "open" and .draft == false and .base.ref == "main" and .base.repo.id == $repo
+              and .head.repo.id == $repo and .head.ref == $branch and .head.sha == $sha
+            ' <<< "$current" > /dev/null; then
+              gh run rerun "$id" --repo "$GITHUB_REPOSITORY" --failed
+            fi
+          done <<< "$prs"

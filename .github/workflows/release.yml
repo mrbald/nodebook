@@ -14,7 +14,11 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name == 'push' || (startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository)
+    if: &native_required >-
+      ${{ github.event_name == 'push' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           (github.event.pull_request.user.login == 'dependabot[bot]' ||
+            startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'deps/'))) }}
     strategy:
       fail-fast: false
       matrix:
@@ -143,6 +147,22 @@ jobs:
           compression-level: 0
           overwrite: true
 
+  native-readiness:
+    name: Native package readiness
+    needs: build
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify packaging result
+        env:
+          REQUIRED: *native_required
+          RESULT: ${{ needs.build.result }}
+        run: |
+          case "$REQUIRED:$RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "::error::Native builds required=$REQUIRED, result=$RESULT"; exit 1 ;;
+          esac
+
   draft:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
@@ -189,6 +209,8 @@ jobs:
               notes="$RUNNER_TEMP/release-notes.md"
               cat > "$notes" <<'NOTES'
           ## Install on macOS
+
+          Requires macOS 13 (Ventura) or later.
 
           1. Download the `arm64` DMG for Apple silicon or the `x64` DMG for Intel.
           2. Open the DMG, drag Nodebook to Applications, then open it from Applications.

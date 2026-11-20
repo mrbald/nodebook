@@ -106,6 +106,8 @@ node node_modules/electron/install.js
 
 ## Downloads & releases
 
+The Electron 45 build requires macOS 13 (Ventura) or later on both Apple silicon and Intel Macs. For macOS 12 (Monterey), use [Nodebook v0.1.1](https://github.com/mrbald/nodebook/releases/tag/v0.1.1).
+
 On macOS, choose the **arm64 DMG** for an Apple silicon Mac or the **x64 DMG**
 for an Intel Mac. Open the DMG, drag Nodebook to Applications, then open it
 from Applications. The app is ad-hoc signed and Apple has not notarized it.
