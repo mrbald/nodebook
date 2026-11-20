@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { mkdtempSync, writeFileSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
@@ -37,7 +37,7 @@ test.beforeAll(async () => {
   writeFileSync(join(vaultDir, 'concept.md'), NOTE)
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-cite-userdata-'))
 
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -51,7 +51,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('a cited note shows its Sources, and clicking one opens the source at the span', async () => {
@@ -74,4 +74,7 @@ test('a cited note shows its Sources, and clicking one opens the source at the s
   await expect(page.locator('.cm-content')).toContainText('The quick brown fox')
   // ...scrolled to + selecting the cited span (a non-empty selection is drawn).
   await expect(page.locator('.cm-selectionBackground').first()).toBeVisible()
+  await page.getByRole('button', { name: '← Back to concept' }).click()
+  await expect(page.locator('.cm-content')).toContainText('A large republic dilutes faction.')
+  await expect(cite).toBeFocused()
 })

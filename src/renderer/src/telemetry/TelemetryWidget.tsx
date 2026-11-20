@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState, type RefObject } from 'react'
+import { useToolbarPopup } from '../useToolbarPopup'
 import type { TelemetrySnapshot } from '@shared/types'
 
 const PFW_URL = 'https://github.com/mrbald/pfw'
@@ -77,13 +78,13 @@ function Histogram({ buckets, big }: { buckets: number[]; big?: boolean }): Reac
   )
 }
 
-function Popover({ snap }: { snap: TelemetrySnapshot }): React.JSX.Element {
+function Popover({ snap, popupRef, id }: { snap: TelemetrySnapshot; popupRef: RefObject<HTMLDivElement | null>; id: string }): React.JSX.Element {
   const { lag } = snap
   const cpu = snap.cpu.at(-1) ?? 0
   const ram = snap.ram.at(-1) ?? 0
   const mins = Math.round(snap.windowMs / 60000)
   return (
-    <div className="telemetry-popover" onClick={(e) => e.stopPropagation()}>
+    <div className="telemetry-popover" ref={popupRef} id={id} role="region" aria-label="Performance details">
       <div className="telemetry-pop-title">Performance · last {mins} min</div>
 
       <div className="telemetry-row">
@@ -138,30 +139,43 @@ function Popover({ snap }: { snap: TelemetrySnapshot }): React.JSX.Element {
 export function TelemetryWidget({ enabled }: { enabled: boolean }): React.JSX.Element | null {
   const snap = useTelemetry(enabled)
   const [open, setOpen] = useState(false)
+  const id = useId()
+  const wrap = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const popup = useRef<HTMLDivElement>(null)
+  useToolbarPopup(open, wrap, popup)
   useEffect(() => {
     if (!open) return
-    const close = (): void => setOpen(false)
-    window.addEventListener('click', close)
-    return () => window.removeEventListener('click', close)
+    const outside = (e: PointerEvent): void => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
   }, [open])
 
   if (!enabled || !snap) return null
   const maxLag = snap.lag.max
   return (
-    <div className="telemetry">
-      <button
-        className="telemetry-mini"
-        title="Performance — event-loop lag, CPU, RAM"
-        onClick={(e) => {
+    <div className="telemetry" ref={wrap}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false) }}
+      onKeyDown={(e) => {
+        if (open && e.key === 'Escape') {
           e.stopPropagation()
-          setOpen((o) => !o)
-        }}
+          setOpen(false)
+          trigger.current?.focus()
+        }
+      }}>
+      <button
+        className="telemetry-mini" type="button" ref={trigger}
+        title="Performance — event-loop lag, CPU, RAM" aria-label="Performance"
+        aria-expanded={open} aria-controls={open ? id : undefined}
+        onClick={() => setOpen((value) => !value)}
       >
         <Spark values={snap.cpu} kind="cpu" />
         <Histogram buckets={snap.lag.buckets} />
         <span className={`telemetry-lag ${maxLag >= 8192 ? 'bad' : ''}`}>{fmtLag(maxLag)}</span>
       </button>
-      {open && <Popover snap={snap} />}
+      {open && <Popover snap={snap} id={id} popupRef={popup} />}
     </div>
   )
 }

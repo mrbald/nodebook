@@ -113,13 +113,21 @@ describe('parseSettings', () => {
 
   it('reads the [distill] reading budget and validates it', () => {
     const s = parseSettings('[distill]\nwindowSize = 9000\nmaxCalls = 40')
-    expect(s.distill).toEqual({ windowSize: 9000, maxCalls: 40 })
+    expect(s.distill).toEqual({ windowSize: 9000, maxCalls: 40, themeOverviewThreshold: 200 })
     // Defaults: derive the window from the model's context, 120 calls.
-    expect(parseSettings('').distill).toEqual({ windowSize: 0, maxCalls: 120 })
+    expect(parseSettings('').distill).toEqual({ windowSize: 0, maxCalls: 120, themeOverviewThreshold: 200 })
     expect(parseSettings('[distill]\nwindowSize = -5').distill.windowSize).toBe(0)
     expect(parseSettings('[distill]\nmaxCalls = "many"').distill.maxCalls).toBe(120)
     // A budget of zero calls would read nothing at all.
     expect(parseSettings('[distill]\nmaxCalls = 0').distill.maxCalls).toBe(1)
+  })
+
+  it('accepts a nonnegative whole-note threshold and defaults malformed values to 200', () => {
+    const threshold = (value: string): number =>
+      parseSettings(`[distill]\nthemeOverviewThreshold = ${value}`).distill.themeOverviewThreshold
+    expect(threshold('0')).toBe(0)
+    expect(threshold('100')).toBe(100)
+    for (const invalid of ['-1', '2.5', '"100"']) expect(threshold(invalid)).toBe(200)
   })
 
   it('upgrades an old shipped default embed model in place, and only that', () => {

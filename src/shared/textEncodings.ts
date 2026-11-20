@@ -1,0 +1,46 @@
+/** Canonical decoder IDs and labels for the text import menu. */
+export const IMPORT_TEXT_ENCODINGS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'utf-8', label: 'Unicode (UTF-8)' },
+  { id: 'utf-16le', label: 'Unicode (UTF-16 LE)' },
+  { id: 'utf-16be', label: 'Unicode (UTF-16 BE)' },
+  { id: 'windows-1252', label: 'Western European (Windows-1252 / Latin-1)' },
+  { id: 'iso-8859-15', label: 'Western European (ISO-8859-15)' },
+  { id: 'macintosh', label: 'Western European (Mac Roman)' },
+  { id: 'windows-1250', label: 'Central European (Windows-1250)' },
+  { id: 'iso-8859-2', label: 'Central European (ISO-8859-2)' },
+  { id: 'iso-8859-3', label: 'Southern European (ISO-8859-3)' },
+  { id: 'iso-8859-10', label: 'Nordic (ISO-8859-10)' },
+  { id: 'iso-8859-14', label: 'Celtic (ISO-8859-14)' },
+  { id: 'iso-8859-16', label: 'Southeastern European (ISO-8859-16)' },
+  { id: 'windows-1251', label: 'Cyrillic (Windows-1251)' },
+  { id: 'ibm866', label: 'Cyrillic (DOS CP866)' },
+  { id: 'ibm855', label: 'Cyrillic (DOS CP855)' },
+  { id: 'koi8-r', label: 'Cyrillic (KOI8-R)' },
+  { id: 'koi8-u', label: 'Cyrillic (KOI8-U)' },
+  { id: 'iso-8859-5', label: 'Cyrillic (ISO-8859-5)' },
+  { id: 'x-mac-cyrillic', label: 'Cyrillic (Mac)' },
+  { id: 'gb18030', label: 'Simplified Chinese (GB18030)' },
+  { id: 'gbk', label: 'Simplified Chinese (GBK / GB2312)' },
+  { id: 'big5', label: 'Traditional Chinese (Big5)' },
+  { id: 'shift_jis', label: 'Japanese (Shift JIS)' },
+  { id: 'euc-jp', label: 'Japanese (EUC-JP)' },
+  { id: 'iso-2022-jp', label: 'Japanese (ISO-2022-JP)' },
+  { id: 'euc-kr', label: 'Korean (EUC-KR / Windows-949)' },
+  { id: 'windows-1256', label: 'Arabic (Windows-1256)' },
+  { id: 'iso-8859-6', label: 'Arabic (ISO-8859-6)' },
+  { id: 'windows-1255', label: 'Hebrew (Windows-1255)' },
+  { id: 'iso-8859-8', label: 'Hebrew (ISO-8859-8)' },
+  { id: 'iso-8859-8-i', label: 'Hebrew (ISO-8859-8-I)' },
+  { id: 'windows-1253', label: 'Greek (Windows-1253)' },
+  { id: 'iso-8859-7', label: 'Greek (ISO-8859-7)' },
+  { id: 'windows-1254', label: 'Turkish (Windows-1254 / ISO-8859-9)' },
+  { id: 'windows-1257', label: 'Baltic (Windows-1257)' },
+  { id: 'iso-8859-4', label: 'Baltic (ISO-8859-4)' },
+  { id: 'iso-8859-13', label: 'Baltic (ISO-8859-13)' },
+  { id: 'windows-1258', label: 'Vietnamese (Windows-1258)' },
+  { id: 'windows-874', label: 'Thai (Windows-874 / TIS-620)' }
+]
+
+export function importTextEncodingLabel(id: string): string {
+  return IMPORT_TEXT_ENCODINGS.find((encoding) => encoding.id === id)?.label ?? id
+}

@@ -18,6 +18,8 @@ interface PromptProps {
   /** Whether confirming with an empty field means something. Off by default:
    *  a new note has to be named, but an optional answer is confirmable empty. */
   allowEmpty?: boolean
+  children?: React.ReactNode
+  confirmDisabled?: boolean
   onConfirm: (value: string) => void
   onCancel: () => void
 }
@@ -30,6 +32,8 @@ export function Prompt({
   presets,
   maxLength,
   allowEmpty,
+  children,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: PromptProps) {
@@ -46,7 +50,7 @@ export function Prompt({
 
   function handleConfirm() {
     const trimmed = value.trim()
-    if (trimmed || allowEmpty) {
+    if (!confirmDisabled && (trimmed || allowEmpty)) {
       onConfirm(trimmed)
     }
   }
@@ -54,8 +58,6 @@ export function Prompt({
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
       handleConfirm()
-    } else if (e.key === 'Escape') {
-      onCancel()
     }
   }
 
@@ -68,6 +70,7 @@ export function Prompt({
         aria-modal="true"
         aria-labelledby="prompt-title"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => { if (e.key === 'Escape' && !e.defaultPrevented) onCancel() }}
       >
         <div className="modal-title" id="prompt-title">
           {title}
@@ -95,14 +98,16 @@ export function Prompt({
           value={value}
           placeholder={placeholder}
           maxLength={maxLength}
+          aria-labelledby="prompt-title"
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
         />
+        {children}
         <div className="modal-actions">
           <button className="modal-btn" onClick={onCancel}>
             Cancel
           </button>
-          <button className="modal-btn modal-btn-primary" onClick={handleConfirm}>
+          <button className="modal-btn modal-btn-primary" disabled={confirmDisabled} onClick={handleConfirm}>
             {confirmLabel ?? 'Create'}
           </button>
         </div>

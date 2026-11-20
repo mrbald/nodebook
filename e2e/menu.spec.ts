@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -34,7 +34,7 @@ test.beforeAll(async () => {
   writeFileSync(join(vaultB, 'BetaNote.md'), '# BetaNote\n\nonly in vault B\n')
   userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-menu-ud-'))
 
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -48,7 +48,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('opening a vault records it in recents.json (powers Open Recent)', () => {

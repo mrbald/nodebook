@@ -35,6 +35,17 @@ describe('radialLayout', () => {
     expect(radialLayout(nodes, edges, {}).get('B')).toEqual({ x: 400, y: 300 })
   })
 
+  it('leaves space between first-hop neighbours even with a long tail', () => {
+    const neighbours = Array.from({ length: 72 }, (_, i) => ({ id: `near-${i}` }))
+    const tail = Array.from({ length: 5 }, (_, i) => ({ id: `tail-${i}` }))
+    const edges = neighbours.map(({ id }) => ({ source: 'centre', target: id }))
+    tail.forEach(({ id }, i) => edges.push({ source: i ? tail[i - 1].id : neighbours[0].id, target: id }))
+    const pos = radialLayout([{ id: 'centre', focus: true }, ...neighbours, ...tail], edges)
+    const adjacent = 2 * r(pos.get(neighbours[0].id)!) * Math.sin(Math.PI / neighbours.length)
+    expect(adjacent).toBeGreaterThan(8)
+    expect(r(pos.get(tail[4].id)!)).toBeGreaterThan(r(pos.get(neighbours[0].id)!))
+  })
+
   it('handles empty and single-node graphs', () => {
     expect(radialLayout([], []).size).toBe(0)
     expect(radialLayout([{ id: 'X' }], [])).toEqual(new Map([['X', { x: 400, y: 300 }]]))

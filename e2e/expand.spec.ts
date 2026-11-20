@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -19,7 +19,7 @@ test.beforeAll(async () => {
   writeFileSync(join(vaultDir, 'Leaf.md'), '# Leaf\n\nlinks [[Tip]]\n')
   writeFileSync(join(vaultDir, 'Tip.md'), '# Tip\n')
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-expand-userdata-'))
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -33,7 +33,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('expanding a node pulls in its neighbours; collapse removes them', async () => {

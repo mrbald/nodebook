@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { FigureSources, OpenFigure } from './Figures'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ReadingCopy, ReadingCopyPreview } from '../../shared/readingCopy'
+import { IMPORT_TEXT_ENCODINGS, importTextEncodingLabel } from '../../shared/textEncodings'
 import { parseCitations, resolveCitationSpan, type NoteCitation } from './citations'
+import { EncodingPreview } from './EncodingPreview'
 import { renderMarkdown } from './markdownRender'
 
 /**
@@ -22,140 +26,373 @@ const CONTEXT = 1200
 
 export function StagedNoteView({
   runId,
+  path,
   name,
-  onBack
+  backLabel,
+  onBack,
+  onOpenBook,
+  onOpenTheme
 }: {
   runId: string
+  path: string
   name: string
-  /** Leave the note and go back to the run's map. */
+  backLabel: string
   onBack: () => void
+  onOpenBook: (trigger: HTMLButtonElement) => void
+  onOpenTheme: (theme: { id: string; label: string }, trigger: HTMLButtonElement) => void
 }): React.JSX.Element {
-  const [content, setContent] = useState<string | null>(null)
+  const [file, setFile] = useState<Awaited<ReturnType<typeof window.nodebook.distillReadNote>> | undefined>(undefined)
   const [passage, setPassage] = useState<{
     source: string
     text: string
     start: number
     end: number
     exact: boolean
+    damaged: boolean
   } | null>(null)
-  const [note, setNote] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [showHistorical, setShowHistorical] = useState(false)
+  const citationOrigin = useRef<HTMLButtonElement | null>(null)
+  const passageBack = useRef<HTMLButtonElement>(null)
+  const citationRequest = useRef({ revision: 0 })
 
   useEffect(() => {
     let live = true
-    setContent(null)
-    setPassage(null)
-    setNote(null)
+    const requests = citationRequest.current
     void window.nodebook
-      .distillReadNote(runId, name)
+      .distillReadNote(runId, path)
       .then((r) => {
         if (!live) return
-        setContent(r?.content ?? '')
-        if (!r) setNote(`This run has no note called “${name}”.`)
+        setFile(r)
+        if (!r) setMessage(`This run has no note called “${name}”.`)
       })
-      .catch(() => live && setContent(''))
+      .catch(() => {
+        if (!live) return
+        setFile(null)
+        setMessage('Couldn’t read this staged note.')
+      })
     return () => {
       live = false
+      requests.revision++
     }
-  }, [runId, name])
+  }, [runId, path, name])
 
-  const citations = useMemo<NoteCitation[]>(() => parseCitations(content ?? ''), [content])
+  const openFigure = useContext(OpenFigure)
+  const content = file?.content ?? ''
+  const reading = file?.reading
+  const copy = reading?.kind === 'source' ? reading.copy : null
+  const display = !showHistorical && copy ? copy.text : content
+  const citations = useMemo<NoteCitation[]>(() => parseCitations(content), [content])
+  const markup = useMemo(() => renderMarkdown(display, { path, runId }), [display, path, runId])
+  const viewImage = (event: React.SyntheticEvent): void => {
+    const target = event.target
+    if (target instanceof HTMLImageElement && target.dataset.figureId) {
+      event.preventDefault()
+      openFigure({ path, runId, id: target.dataset.figureId, label: target.alt || 'Figure', occurrence: Number(target.dataset.occurrence ?? 0) })
+    }
+  }
 
-  const openCitation = useCallback(
-    (c: NoteCitation) => {
-      void window.nodebook
-        .distillReadNote(runId, c.source)
-        .then((r) => {
-          if (!r) {
-            setPassage(null)
-            setNote(`This run has no copy of “${c.source}” to check the quote against.`)
-            return
-          }
-          const res = resolveCitationSpan(r.content, c)
-          if (res.status === 'not-found') {
-            setPassage(null)
-            setNote(`Couldn't find that passage in “${c.source}”.`)
-            return
-          }
-          setNote(null)
-          setPassage({
-            source: c.source,
-            text: r.content,
-            start: res.start,
-            end: res.end,
-            exact: res.status !== 'relocated'
-          })
-        })
-        .catch(() => setNote("Couldn't read the run's copy of the document."))
-    },
-    [runId]
-  )
+  useLayoutEffect(() => {
+    if (passage) passageBack.current?.focus({ preventScroll: true })
+    else citationOrigin.current?.focus({ preventScroll: true })
+  }, [passage])
+
+  const openCitation = async (c: NoteCitation, trigger: HTMLButtonElement): Promise<void> => {
+    const requests = citationRequest.current
+    const request = ++requests.revision
+    try {
+      const source = await window.nodebook.distillReadNote(runId, c.source)
+      if (requests.revision !== request) return
+      if (!source) {
+        setMessage(`This run has no copy of “${c.source}” to check the quote against.`)
+        return
+      }
+      const location = resolveCitationSpan(source.content, c)
+      if (location.status === 'not-found') {
+        setMessage(source.reading?.kind === 'source'
+          ? `Couldn’t find that passage in the damaged run copy of “${c.source}”.`
+          : `Couldn’t find that passage in “${c.source}”.`)
+        return
+      }
+      citationOrigin.current = trigger
+      setMessage(null)
+      setPassage({
+        source: c.source,
+        text: source.content,
+        start: location.start,
+        end: location.end,
+        exact: location.status !== 'relocated',
+        damaged: source.reading?.kind === 'source'
+      })
+    } catch {
+      if (requests.revision === request) setMessage('Couldn’t read the run’s copy of the document.')
+    }
+  }
 
   return (
     <div className="staged-note" key="staged-note">
       <div className="settings-header">
-        <button className="settings-reset staged-note-back" onClick={onBack}>
-          ← Back to map
-        </button>
+        {!passage && (
+          <button className="settings-reset staged-note-back" onClick={onBack} data-book-entry>
+            ← {backLabel}
+          </button>
+        )}
         <span className="settings-title staged-note-title">
           {passage ? passage.source : name}
           <span className="staged-note-badge">staged · read-only</span>
         </span>
+        {!passage && (
+          <div className="staged-note-jumps">
+            <button className="graph-ctl" onClick={(event) => onOpenBook(event.currentTarget)}>Go to book</button>
+            {file?.themeId && file.themeLabel && (
+              <button
+                className="graph-ctl"
+                onClick={(event) => onOpenTheme({ id: file.themeId!, label: file.themeLabel! }, event.currentTarget)}
+              >Go to theme: {file.themeLabel}</button>
+            )}
+          </div>
+        )}
       </div>
-      {note && (
+      {message && (
         <div className="staged-note-msg" role="status">
-          {note}
+          {message}
         </div>
       )}
-      <div className="staged-note-body">
-        {passage ? (
-          <>
-            <button className="graph-ctl staged-note-back-note" onClick={() => setPassage(null)}>
-              ← Back to “{name}”
-            </button>
-            {!passage.exact && (
-              <div className="staged-note-msg">The passage moved; this is where it is now.</div>
-            )}
-            <Passage {...passage} />
-          </>
-        ) : content === null ? (
+      {passage && (
+        <div className="staged-note-body" onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation()
+            setPassage(null)
+          }
+        }}>
+          <button className="graph-ctl staged-note-back-note" ref={passageBack} onClick={() => setPassage(null)} data-book-entry>
+            ← Back to “{name}”
+          </button>
+          {passage.damaged && <p className="staged-reading-notice">This passage comes from the damaged source saved with the run.</p>}
+          {!passage.exact && <div className="staged-note-msg">The passage moved. The match is highlighted below.</div>}
+          <Passage {...passage} />
+        </div>
+      )}
+      <div className="staged-note-body" hidden={!!passage}>
+        {reading?.kind === 'source' && (
+          <ReadingCopyControls
+            key={`${runId}/${path}`}
+            runId={runId}
+            path={path}
+            copy={copy}
+            showHistorical={showHistorical}
+            onToggle={() => setShowHistorical(!showHistorical)}
+            onSave={(next) => {
+              setShowHistorical(false)
+              setFile((current) => current && { ...current, reading: { kind: 'source', copy: next } })
+            }}
+          />
+        )}
+        {reading?.kind === 'historical-note' && (
+          <p className="staged-reading-notice">This note was extracted from damaged text. Its citations point to the source saved with the run.</p>
+        )}
+        {file === undefined ? (
           <p className="staged-note-msg">Loading…</p>
         ) : (
           <div
             className="staged-note-rendered"
+            onClick={viewImage}
+            onKeyDown={(e) => {
+              if (e.target instanceof HTMLImageElement && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault()
+                viewImage(e)
+              }
+            }}
             // markdown-it runs with `html: false`, so the rendered string carries
             // no author HTML — the same renderer Print/Export-PDF already uses.
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+            dangerouslySetInnerHTML={{ __html: markup }}
           />
         )}
       </div>
-      {citations.length > 0 && !passage && (
-        <section className="sources staged-note-sources">
+      {!passage && <FigureSources path={path} runId={runId} />}
+      {citations.length > 0 && (
+        <section className="sources staged-note-sources" hidden={!!passage}>
           <h2>Sources</h2>
           {citations.map((c, i) => (
-            <div
+            <button
               key={i}
               className="outbound-item is-link source-cite"
-              role="button"
-              tabIndex={0}
+              type="button"
               title={`Show this quote in the run's copy of ${c.source}`}
-              onClick={() => openCitation(c)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  openCitation(c)
-                }
-              }}
+              onClick={(event) => { void openCitation(c, event.currentTarget) }}
             >
-              <div>
+              <span>
                 📄 {c.source}{' '}
-                <span className="source-span">{c.where ?? `${c.start}–${c.end}`}</span>
-              </div>
-            </div>
+                <span className="source-span">{c.where ?? `Passage ${i + 1}`}</span>
+              </span>
+              {c.quote && <span className="source-quote">{c.quote}</span>}
+            </button>
           ))}
         </section>
       )}
     </div>
   )
+}
+
+const encodingOptions = IMPORT_TEXT_ENCODINGS.map(({ id, label }) => ({ name: id, label }))
+
+function ReadingCopyControls({
+  runId,
+  path,
+  copy,
+  showHistorical,
+  onToggle,
+  onSave
+}: {
+  runId: string
+  path: string
+  copy: ReadingCopy | null
+  showHistorical: boolean
+  onToggle: () => void
+  onSave: (copy: ReadingCopy) => void
+}): React.JSX.Element {
+  const [preview, setPreview] = useState<ReadingCopyPreview | null>(null)
+  const [encoding, setEncoding] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const request = useRef({ revision: 0, previewId: '' })
+  const locateButton = useRef<HTMLButtonElement>(null)
+  const toggleButton = useRef<HTMLButtonElement>(null)
+  const previewHeading = useRef<HTMLHeadingElement>(null)
+  const hasPreview = preview !== null
+
+  useEffect(() => {
+    const active = request.current
+    return () => {
+      active.revision++
+      if (active.previewId) discardPreview(active.previewId)
+    }
+  }, [])
+
+  async function updatePreview(action: () => Promise<ReadingCopyPreview | null>): Promise<void> {
+    const active = request.current
+    const revision = ++active.revision
+    setBusy(true)
+    setError('')
+    try {
+      const next = await action()
+      if (active.revision !== revision) {
+        if (next) discardPreview(next.id)
+        return
+      }
+      active.previewId = next?.id ?? ''
+      setPreview(next)
+    } catch (err) {
+      if (active.revision !== revision) return
+      setPreview(null)
+      setError(recoveryMessage(err))
+    } finally {
+      if (active.revision === revision) setBusy(false)
+    }
+  }
+
+  useLayoutEffect(() => {
+    if (hasPreview) previewHeading.current?.focus({ preventScroll: true })
+  }, [hasPreview])
+
+  async function savePreview(id: string): Promise<void> {
+    const active = request.current
+    const revision = ++active.revision
+    setBusy(true)
+    setError('')
+    try {
+      const next = await window.nodebook.distillSaveReadingCopy(id)
+      if (active.revision !== revision) return
+      active.previewId = ''
+      setPreview(null)
+      onSave(next)
+    } catch (err) {
+      if (active.revision === revision) setError(recoveryMessage(err))
+    } finally {
+      if (active.revision === revision) setBusy(false)
+    }
+  }
+
+  useLayoutEffect(() => {
+    // Once saved, the preview controls disappear. Keep keyboard focus in view.
+    if (copy && request.current.revision > 0) toggleButton.current?.focus({ preventScroll: true })
+  }, [copy])
+
+  function cancel(): void {
+    const active = request.current
+    active.revision++
+    if (active.previewId) discardPreview(active.previewId)
+    active.previewId = ''
+    setPreview(null)
+    setBusy(false)
+    setError('')
+    locateButton.current?.focus()
+    toggleButton.current?.focus()
+  }
+
+  return (
+    <section className="staged-reading" aria-label="Reading copy">
+      <div className="staged-reading-toolbar">
+        <p className="staged-reading-notice">
+          {copy ? (
+            <>{showHistorical ? 'Showing damaged run text.' : `Reading copy from ${importTextEncodingLabel(copy.encoding)}.`}{' '}
+              The run’s notes and citations use the damaged source.</>
+          ) : 'This staged source contains damaged text. Locate the original to make a reading copy.'}
+        </p>
+        <div className="staged-reading-actions">
+          {copy && (
+            <button type="button" className="graph-ctl" ref={toggleButton} onClick={onToggle}>
+              {showHistorical ? 'Show reading copy' : 'Show run text'}
+            </button>
+          )}
+          {!preview && (
+            <button type="button" className="graph-ctl" ref={locateButton} disabled={busy} onClick={() => {
+              setEncoding('')
+              void updatePreview(() => window.nodebook.distillLocateReadingCopy(runId, path))
+            }}>
+              Locate original…
+            </button>
+          )}
+        </div>
+      </div>
+      {preview && (
+        <div className="staged-reading-preview">
+          <h2 ref={previewHeading} tabIndex={-1}>Reading copy preview</h2>
+          <EncodingPreview
+            options={encodingOptions}
+            selection={encoding}
+            onChange={(value) => {
+              setEncoding(value)
+              void updatePreview(() => window.nodebook.distillChooseReadingCopy(preview.id, value || undefined))
+            }}
+            detectedLabel={preview.encoding && importTextEncodingLabel(preview.encoding)}
+            preview={preview.preview}
+            uncertain={preview.uncertain}
+            pending={busy}
+            disabled={busy}
+            error={preview.error}
+          />
+          <div className="staged-reading-actions">
+            <button type="button" className="graph-ctl" disabled={busy} onClick={cancel}>Cancel</button>
+            <button type="button" className="graph-ctl" disabled={busy || !preview.encoding} onClick={() => {
+              void savePreview(preview.id)
+            }}>Use reading copy</button>
+          </div>
+        </div>
+      )}
+      {error && <p className="staged-reading-notice" role="alert">{error}</p>}
+    </section>
+  )
+}
+
+function discardPreview(id: string): void {
+  void window.nodebook.distillDiscardReadingCopy(id).catch(() => undefined)
+}
+
+function recoveryMessage(error: unknown): string {
+  if (!(error instanceof Error)) return 'Couldn’t prepare a reading copy.'
+  // Electron prefixes rejected handlers with the channel and Error class.
+  return error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
 }
 
 /** The cited span with some document either side, the quote marked. Plain text

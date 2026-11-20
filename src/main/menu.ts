@@ -111,10 +111,10 @@ export function menuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
     {
       label: 'View',
       submenu: [
-        { label: 'Code', accelerator: 'CmdOrCtrl+1', click: () => send('mode-code') },
-        { label: 'Live', accelerator: 'CmdOrCtrl+2', click: () => send('mode-live') },
-        { label: 'Reading', accelerator: 'CmdOrCtrl+3', click: () => send('mode-reading') },
-        { label: 'Toggle Reading', accelerator: 'CmdOrCtrl+E', click: () => send('toggle-read') },
+        { label: 'Code', accelerator: 'CmdOrCtrl+1', enabled: state.hasNote, click: () => send('mode-code') },
+        { label: 'Live', accelerator: 'CmdOrCtrl+2', enabled: state.hasNote, click: () => send('mode-live') },
+        { label: 'Reading', accelerator: 'CmdOrCtrl+3', enabled: state.hasNote, click: () => send('mode-reading') },
+        { label: 'Toggle Reading', accelerator: 'CmdOrCtrl+E', enabled: state.hasNote, click: () => send('toggle-read') },
         { type: 'separator' },
         { label: 'Knowledge Map', accelerator: 'CmdOrCtrl+G', enabled: state.hasNote, click: () => send('map') },
         { label: 'Ask Your Notes', enabled: state.canAsk, click: () => send('ask') },

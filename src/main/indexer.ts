@@ -1,10 +1,12 @@
+import { noteGist } from '../shared/markdown/noteGist'
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { basename, dirname } from 'path'
 import { randomUUID } from 'crypto'
+import { getLoadablePath } from 'sqlite-vec'
 import { targetResolver } from '../shared/markdown/resolveTarget'
 import { harvest, frontmatterKind } from './harvest'
-import { VectorStore, dropTalkTables, ftsMatch, type PendingChunk } from './rag/store'
+import { VectorStore, dropTalkTables, ftsMatch, sqliteExtensionPath, type PendingChunk } from './rag/store'
 import { chunkMarkdown, type Chunk } from './rag/chunk'
 import { rrfRank } from './rag/rrf'
 import {
@@ -12,11 +14,12 @@ import {
   noteName,
   sameAsTwins,
   SAME_AS,
-  type FileRow,
   type TripleRow,
   type GraphRows
 } from './graph'
-import type { Backlink, GraphData, Outbound, SameAsTwin, SearchHit } from '../shared/types'
+import type { Backlink, GraphData, Outbound, SameAsTwin, SearchHit, VaultThemesData } from '../shared/types'
+import { readGraphRows } from './graphRows'
+import type { VaultThemesWork } from './vaultThemes.worker'
 
 /** Schema revision the one-time `files.kind` backfill is recorded under
  *  (`PRAGMA user_version`). Bump only if a future backfill needs to rerun. */
@@ -24,6 +27,25 @@ const KIND_BACKFILL_VERSION = 1
 
 export interface RetrievedPassage extends Chunk {
   file: string
+}
+
+async function runVaultThemes(work: VaultThemesWork, signal: AbortSignal): Promise<VaultThemesData | null> {
+  const { default: makeVaultThemesWorker } = await import('./vaultThemes.worker?nodeWorker')
+  if (signal.aborted) return null
+  return new Promise((resolve, reject) => {
+    const worker = makeVaultThemesWorker({ workerData: work })
+    const abort = (): void => {
+      resolve(null)
+      void worker.terminate()
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    worker.once('message', (data: VaultThemesData) => resolve(data))
+    worker.once('error', reject)
+    worker.once('exit', (code) => {
+      signal.removeEventListener('abort', abort)
+      reject(new Error(`Themes worker exited without a result (${code}).`))
+    })
+  })
 }
 
 /**
@@ -35,11 +57,19 @@ export interface RetrievedPassage extends Chunk {
 export class VaultIndex {
   readonly id = randomUUID()
   private incoming: Map<string, Backlink[]> | null = null
+  private themesRevision = 0
+  private themesVectorRevision = 0
+  private themesCache: {
+    model: string | null
+    revision: number
+    vectorRevision: number
+    data: VaultThemesData
+  } | null = null
   private db: Database.Database
   /** Vector/semantic layer — null until "talk to docs" is enabled. */
   private vec: VectorStore | null = null
 
-  constructor(dbPath: string) {
+  constructor(private dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true })
     this.db = new Database(dbPath)
     this.db.pragma('journal_mode = WAL')
@@ -142,6 +172,7 @@ export class VaultIndex {
       this.vec?.chunkFile(path, content)
     })()
     this.incoming = null
+    this.themesRevision++
   }
 
   /** Drop a file's rows (external delete). */
@@ -157,6 +188,7 @@ export class VaultIndex {
       this.vec?.removeFile(path)
     })()
     this.incoming = null
+    this.themesRevision++
   }
 
   /** Files that link to (or otherwise reference) `target`, with the relation. */
@@ -219,20 +251,47 @@ export class VaultIndex {
       .all(fts) as SearchHit[]
   }
 
+  figureSourceCandidates(query: string): string[] {
+    const match = ftsMatch(query, 'AND')
+    if (!match) return []
+    const rows = this.db.prepare(
+      `SELECT f.path FROM notes_fts JOIN files f ON f.id = notes_fts.rowid
+       WHERE notes_fts MATCH ? AND f.kind = 'document' ORDER BY rank LIMIT 30`
+    ).all(match) as { path: string }[]
+    return rows.map((row) => row.path)
+  }
+
+  /** Read the opening prose of an indexed note without sending a whole book to the map. */
+  notePreview(path: string): string {
+    const row = this.db.prepare(
+      'SELECT substr(body, 1, 12000) AS text FROM notes_fts JOIN files ON files.id = notes_fts.rowid WHERE files.path = ?'
+    ).get(path) as { text: string } | undefined
+    if (!row) return ''
+    const { summary, quotes } = noteGist(row.text, 220)
+    return summary || quotes[0] || ''
+  }
+
+  /** Keep the indexed body and triples on the same revision for evidence checks. */
+  indexedNoteText(path: string): string | undefined {
+    return (this.db.prepare(
+      'SELECT body FROM notes_fts JOIN files ON files.id = notes_fts.rowid WHERE files.path = ?'
+    ).get(path) as { body: string } | undefined)?.body
+  }
+
+  /** File keys and all recorded relation sources, including orphaned rows. */
+  indexedPaths(): string[] {
+    const rows = this.db.prepare('SELECT path FROM files UNION SELECT source_file FROM triples').all() as {
+      path: string
+    }[]
+    return rows.map(({ path }) => path)
+  }
+
   /** The raw {files, triples} this index contributes to a graph. Saved `.map.md`
    *  views are *views*, not knowledge, so they're excluded (see
    *  docs/state-and-scopes.md). Exposed so an overlay can compose this index with
    *  another source. */
   graphRows(): GraphRows {
-    const files = this.db
-      .prepare("SELECT path, title, kind FROM files WHERE path NOT LIKE '%.map.md'")
-      .all() as FileRow[]
-    const triples = this.db
-      .prepare(
-        "SELECT subject, relation, object, source_file FROM triples WHERE source_file NOT LIKE '%.map.md'"
-      )
-      .all() as TripleRow[]
-    return { files, triples }
+    return readGraphRows(this.db)
   }
 
   /** The notes a confirmed `same_as::` has made one thing with `path` — the
@@ -261,6 +320,30 @@ export class VaultIndex {
   ): GraphData {
     const { files, triples } = this.graphRows()
     return buildGraph(files, triples, focusPath, opts)
+  }
+
+  /** Theme snapshots are read and grouped off the main thread. Retry a worker
+   * that raced an index edit or vector-space change. Partial embedding progress
+   * can be returned without caching it under a newer revision. */
+  async vaultThemes(root: string, model: string | null, signal: AbortSignal): Promise<VaultThemesData | null> {
+    while (!signal.aborted) {
+      const revision = this.themesRevision
+      const current = model && this.vec?.matchesModel(model) ? model : null
+      const vectorRevision = current ? this.themesVectorRevision : 0
+      const cached = this.themesCache
+      if (cached?.model === current && cached.revision === revision && cached.vectorRevision === vectorRevision) {
+        return cached.data
+      }
+      const semantic = current ? { model: current, extension: sqliteExtensionPath(getLoadablePath(), process.resourcesPath) } : null
+      const data = await runVaultThemes({ dbPath: this.dbPath, root, semantic }, signal)
+      if (!data || signal.aborted) return null
+      if (revision !== this.themesRevision) continue
+      if (!current || vectorRevision === this.themesVectorRevision) {
+        this.themesCache = { model: current, revision, vectorRevision, data }
+      }
+      return data
+    }
+    return null
   }
 
   /** path → stored mtime for every indexed file. The vault-open scan uses it
@@ -322,7 +405,9 @@ export class VaultIndex {
    *  loaded model. A model change is gated exactly like a dims change — see
    *  `VectorStore.setDims` / `needsEmbeddingReset`. */
   setEmbedDims(dims: number, modelId?: string): void {
+    const previous = this.vec?.generation
     this.vec?.setDims(dims, modelId)
+    if (previous !== this.vec?.generation) this.themesRevision++
   }
 
   /** Rebuild chunks from the note revision already committed to this index. */
@@ -348,8 +433,14 @@ export class VaultIndex {
     return this.vec?.counts() ?? { total: 0, pending: 0 }
   }
 
-  putEmbeddings(generation: string, rows: { id: number; vector: Float32Array }[]): void {
-    if (this.vec?.ready && generation === this.vec.generation) this.vec.putEmbeddings(rows)
+  putEmbeddings(generation: string, rows: { id: number; vector: Float32Array }[]): boolean {
+    if (this.vec?.ready && generation === this.vec.generation) {
+      if (this.vec.putEmbeddings(rows)) {
+        this.themesVectorRevision++
+        return true
+      }
+    }
+    return false
   }
 
   /** Notes semantically similar to the focus note (for the map's "related" overlay).
@@ -385,7 +476,10 @@ export class VaultIndex {
   /** Turn the feature off and drop all embeddings + chunks (reversible — the
    *  data is derived and re-creatable by re-enabling). */
   disableTalk(): void {
-    if (this.vec) dropTalkTables(this.db)
+    if (this.vec) {
+      dropTalkTables(this.db)
+      this.themesRevision++
+    }
     this.vec = null
   }
 

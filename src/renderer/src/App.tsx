@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { FigureSearchHit } from '@shared/figureSearch'
+import { FigureDialog, OpenFigure, type FigureTarget } from './Figures'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_EMBED_MODEL,
-  DISTILL_FOCUS_MAX,
+  DEFAULT_THEME_OVERVIEW_THRESHOLD,
+  type DistillDocument,
   type Citation,
   type DistillEstimate,
   type DistillMergePlan,
+  type DistillMergeStatus,
   type DistillRunInfo,
   type DistillRunResult,
   type MarkdownFile,
@@ -27,9 +31,9 @@ import { getTheme } from './editor/themes'
 import { FileTree, type ContextTarget } from './FileTree'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { Prompt, type PromptPreset } from './Prompt'
+import { ImportPrompt } from './ImportPrompt'
 import { Confirm } from './Confirm'
 import { MergeDialog } from './MergeDialog'
-import { StagedNoteView } from './StagedNoteView'
 import { StatusSelect } from './StatusSelect'
 import { renderMarkdown } from './markdownRender'
 import { useDirtyDoc } from './useDirtyDoc'
@@ -40,7 +44,9 @@ import { getEmbedder } from './talk/embedder'
 import { TalkPanel } from './talk/TalkPanel'
 import { AskPanel } from './AskPanel'
 import { TelemetryWidget } from './telemetry/TelemetryWidget'
+import { BookMap } from './graph/BookMap'
 import { GraphView } from './graph/GraphView'
+import { readMapLayout, saveMapLayout, type MapLayout } from './graph/mapLayoutPreference'
 import HELP_DOC from './help.md?raw'
 
 type ThemeMode = 'system' | 'dark' | 'light'
@@ -84,6 +90,20 @@ interface PromptRequest {
   onConfirm: (value: string) => void
 }
 
+interface ActiveDistill {
+  runId?: string
+  pausing: boolean
+  settled: boolean
+}
+
+function figureCoverageText(kept = 0, skipped = 0, uninspected = 0): string {
+  return [
+    kept && `Preserved ${kept} figure${kept === 1 ? '' : 's'}.`,
+    skipped && `Could not preserve ${skipped} figure candidate${skipped === 1 ? '' : 's'}.`,
+    uninspected && `Visuals were not inspected on ${uninspected} PDF page${uninspected === 1 ? '' : 's'}.`
+  ].filter(Boolean).join(' ')
+}
+
 /** Parse an FTS snippet's `<mark>` markers into safe React nodes (no innerHTML). */
 function renderSnippet(snippet: string): React.ReactNode {
   let inMark = false
@@ -101,8 +121,25 @@ function renderSnippet(snippet: string): React.ReactNode {
   })
 }
 
+/** Pick a meaningful return target if navigation began outside the map canvas. */
+function visibleMapControl(): HTMLElement | SVGElement | undefined {
+  const host = document.querySelector('.reader-map-host:not([hidden])')
+  if (!host) return undefined
+  for (const selector of ['[aria-pressed="true"]', '[tabindex="0"]', 'button:not(:disabled)']) {
+    const candidate = [...host.querySelectorAll<HTMLElement | SVGElement>(selector)]
+      .find((element) => element.getClientRects().length > 0)
+    if (candidate) return candidate
+  }
+  return undefined
+}
+
 export default function App() {
+  const printGeneration = useRef(0)
+  const [viewFigure, setViewFigure] = useState<FigureTarget | null>(null)
+  const [preparingImport, setPreparingImport] = useState<string | null>(null)
   const [vault, setVault] = useState<string | null>(null)
+  const currentVault = useRef<{ dir: string } | null>(null)
+  const switchingVault = useRef(false)
   const [files, setFiles] = useState<MarkdownFile[]>([])
   const [active, setActive] = useState<MarkdownFile | null>(null)
   const [doc, setDoc] = useState<string | null>(null)
@@ -115,24 +152,72 @@ export default function App() {
   )
   const [noteNames, setNoteNames] = useState<string[]>([])
   const [query, setQuery] = useState('')
+  const [figureHits, setFigureHits] = useState<FigureSearchHit[]>([])
   const [results, setResults] = useState<SearchHit[]>([])
   const [telemetryOn, setTelemetryOn] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
+  const [mapAnchor, setMapAnchor] = useState<MarkdownFile | null>(null)
+  const [startGlobal, setStartGlobal] = useState(false)
   const [graphEpoch, setGraphEpoch] = useState(0)
+  const [mapLayout, setMapLayout] = useState(readMapLayout)
+  const [themeOverviewThreshold, setThemeOverviewThreshold] = useState(DEFAULT_THEME_OVERVIEW_THRESHOLD)
+  const pickMapLayout = (layout: MapLayout): void => {
+    setMapLayout(layout)
+    saveMapLayout(layout)
+  }
   // A finished distill run, shown as its own map; and live progress while running.
-  const [distillRun, setDistillRun] = useState<{ runId: string } | null>(null)
-  // Overlay vs standalone for the run map (a reversible view; nothing written).
-  const [distillOverlay, setDistillOverlay] = useState(false)
-  // Set once a run has been merged into the vault, driving the Undo banner.
-  const [mergeInfo, setMergeInfo] = useState<{ runId: string; folder: string; count: number } | null>(
-    null
-  )
+  const [distillRun, setDistillRun] = useState<{
+    runId: string
+    opening: number
+  } | null>(null)
+  // Keep the originating map mounted while a reader follows notes in the editor.
+  const [readerOrigin, setReaderOrigin] = useState<{
+    book: typeof distillRun
+    trigger?: HTMLElement | SVGElement
+  } | null>(null)
+  const [graphOpening, setGraphOpening] = useState(0)
+  const mapLauncher = useRef<HTMLElement | SVGElement | null>(null)
+  const focusOnClose = useRef<(() => HTMLElement | SVGElement | null) | null>(null)
+  useLayoutEffect(() => {
+    const restore = focusOnClose.current
+    if (restore && !graphOpen && !distillRun) {
+      focusOnClose.current = null
+      restore()?.focus({ preventScroll: true })
+    }
+  }, [graphOpen, distillRun])
+  const closeMap = (): void => {
+    const run = distillRun
+    const launcher = mapLauncher.current
+    focusOnClose.current = () => {
+      if (run) {
+        const row = document.querySelector<HTMLElement>(`.run-item[data-run-id="${CSS.escape(run.runId)}"] .run-item-open`)
+        if (row && row.getClientRects().length) return row
+      } else if (launcher?.isConnected && launcher.getClientRects().length) return launcher
+      return document.querySelector<HTMLElement>('.graph-open-btn') ?? document.querySelector<HTMLElement>('.vault-map-link')
+    }
+    setDistillRun(null)
+    setGraphOpen(false)
+  }
+  const [citationOrigin, setCitationOrigin] = useState<{
+    note: MarkdownFile; citation: number; scrollTop: number
+  } | null>(null)
+  const restoreCitation = useRef<typeof citationOrigin>(null)
+  const returnFocus = useRef<{ trigger?: HTMLElement | SVGElement } | null>(null)
+  const bookOpening = useRef(0)
+  const currentDistillRun = useRef(distillRun)
+  currentDistillRun.current = distillRun
+  const [runMerge, setRunMerge] = useState<{
+    run: NonNullable<typeof distillRun>
+    status: DistillMergeStatus
+    dismissed: boolean
+  } | null>(null)
+  const mergeRead = useRef(0)
   // The merge dialog's plan: what merging this run would do, fetched before the
   // confirm so the user decides with the collisions in front of them.
-  const [mergePlan, setMergePlan] = useState<{ runId: string; plan: DistillMergePlan } | null>(null)
-  // A staged note being read (by name) instead of the run map — read-only, so
-  // you can check a run's notes and their quotes before merging.
-  const [stagedNote, setStagedNote] = useState<string | null>(null)
+  const [mergePlan, setMergePlan] = useState<{
+    run: NonNullable<typeof distillRun>
+    plan: DistillMergePlan
+  } | null>(null)
   // What just happened to the last distill run: how many notes were staged (and
   // why zero, when zero) plus the sampling-coverage honesty note — or that the
   // run was cancelled, or its merge undone.
@@ -140,14 +225,23 @@ export default function App() {
   // Staged (unmerged or merged) distill runs, listed in the sidebar so a run
   // is never lost once its map is closed.
   const [stagedRuns, setStagedRuns] = useState<DistillRunInfo[]>([])
+  const currentRuns = useRef<DistillRunInfo[]>([])
+  const runListRequest = useRef(0)
+  const discardingRuns = useRef(new Set<string>())
+  const activeDistill = useRef<ActiveDistill | null>(null)
   const [distilling, setDistilling] = useState<{
     runId?: string
     phase: string
     done: number
     total: number
+    pausing?: boolean
+    settled?: boolean
   } | null>(null)
   // What the run ahead will cost, worked out from the document before it starts
   // (shown on the progress toast, so "reading a book" is never a black box).
+  const pendingImport = useRef<string | null>(null)
+  const pickingImport = useRef(false)
+  const [importDocument, setImportDocument] = useState<DistillDocument | null>(null)
   const [distillEstimate, setDistillEstimate] = useState<DistillEstimate | null>(null)
   const talk = useTalk()
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -178,6 +272,8 @@ export default function App() {
   const [confirm, setConfirm] = useState<{
     message: string
     confirmLabel?: string
+    importId?: string
+    discardRunId?: string
     onConfirm: () => void
   } | null>(null)
   const [savePrompt, setSavePrompt] = useState<{
@@ -188,6 +284,7 @@ export default function App() {
     resolve: (decision: 'save' | 'discard' | 'cancel') => void
   } | null>(null)
   const navigation = useRef(false)
+  const navigationVersion = useRef(0)
   const [navigating, setNavigating] = useState(false)
   // The markdown view mode (Code / Live / Reading), persisted across file switches.
   const [editorMode, setEditorMode] = useState<ViewMode>('live')
@@ -222,6 +319,7 @@ export default function App() {
   const applySettings = (s: Settings): void => {
     const prev = settingsRef.current
     settingsRef.current = s
+    setThemeOverviewThreshold(s.distill.themeOverviewThreshold)
     if (prev?.talk.chat.provider !== s.talk.chat.provider) void talk.refreshCanAsk()
     applyTheme(resolveThemeName(s), s.editor.fontSize)
     setAutosave({ delayMs: s.editor.autosaveDelayMs, onSwitch: s.editor.autosaveOnSwitch })
@@ -238,7 +336,7 @@ export default function App() {
       pendingEmbedSwap.current = {
         modelChanged: modelChanged || pendingEmbedSwap.current?.modelChanged === true
       }
-      if (!distillingRef.current) runPendingEmbedSwap()
+      if (!activeDistill.current) runPendingEmbedSwap()
     }
   }
 
@@ -270,28 +368,24 @@ export default function App() {
   }, [])
 
   // A [talk.embed] settings change waiting to be applied. A ref (nothing
-  // renders it), checked against distillingRef so a change saved mid-distill
+  // renders it), checked against activeDistill so a change saved mid-distill
   // is deferred to the run's end — swapping the embedder inside one run would
   // cluster vectors from two different models. `modelChanged` is sticky across
   // coalesced changes: any model change in the batch means a full re-index.
   const pendingEmbedSwap = useRef<{ modelChanged: boolean } | null>(null)
-  const distillingRef = useRef(false)
-  // Set by the toast's Cancel button so the run's rejection is reported as a
-  // cancellation rather than an error banner.
-  const distillCancelled = useRef(false)
   const runPendingEmbedSwap = (): void => {
     const swap = pendingEmbedSwap.current
     if (!swap) return
     pendingEmbedSwap.current = null
     void talk.onEmbedConfigChanged(swap.modelChanged)
   }
+  const distillBusy = distilling !== null
   useEffect(() => {
-    distillingRef.current = distilling !== null
-    if (distilling === null) runPendingEmbedSwap()
+    if (!activeDistill.current) runPendingEmbedSwap()
     // runPendingEmbedSwap is stable enough (talk callbacks are memoized); this
     // must fire exactly on distill-run boundaries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [distilling])
+  }, [distillBusy])
 
   // Answer distill's embed requests with the renderer's WASM embedder (the same
   // one "talk" uses). Main bridges here because the embedder lives in the
@@ -372,11 +466,16 @@ export default function App() {
     },
     autosaveDelayMs: autosave.delayMs
   })
+  const { hasChanges: configHasChanges } = configSaver
+
+  const noteVisible =
+    active !== null && doc !== null && !settingsOpen && !helpOpen && !askOpen && !distillRun && !graphOpen
+  const canSave = noteVisible || (settingsOpen && settingsDoc !== null)
 
   const saveCurrent = useCallback(() => {
-    if (navigation.current) return
+    if (navigation.current || !canSave) return
     void (settingsOpen ? configSaver : noteSaver).saveNow()
-  }, [settingsOpen, configSaver, noteSaver])
+  }, [canSave, settingsOpen, configSaver, noteSaver])
 
   // Keep the current editor mounted and pause edits until the save decision
   // and the navigation complete. Cancel or a write failure leaves it intact.
@@ -384,6 +483,7 @@ export default function App() {
     async <T,>(action: () => T | Promise<T>, reason?: 'close' | 'discard-note'): Promise<T | null> => {
       if (navigation.current) return null
       navigation.current = true
+      navigationVersion.current += 1
       setNavigating(true)
       let approved = false
       try {
@@ -431,14 +531,14 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+      if (canSave && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         saveCurrent()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [saveCurrent])
+  }, [canSave, saveCurrent])
 
   // Window title reflects unsaved state.
   const currentDirty = settingsOpen ? configSaver.dirty : noteSaver.dirty
@@ -446,10 +546,44 @@ export default function App() {
     document.title = `${currentDirty ? '● ' : ''}Nodebook`
   }, [currentDirty])
 
+  const replaceRuns = useCallback((runs: DistillRunInfo[]) => {
+    currentRuns.current = runs
+    setStagedRuns(runs)
+  }, [])
+
+  const refreshRuns = useCallback(async (owner = currentVault.current) => {
+    if (!owner || currentVault.current !== owner || switchingVault.current) return
+    const request = ++runListRequest.current
+    const isCurrent = (): boolean =>
+      currentVault.current === owner && !switchingVault.current && runListRequest.current === request
+    try {
+      const runs = await window.nodebook.distillListRuns()
+      if (isCurrent()) replaceRuns(runs)
+    } catch (err) {
+      if (isCurrent()) setError(`Couldn't list distilled runs: ${String(err)}`)
+    }
+  }, [replaceRuns])
+
   const enterVault = useCallback(
     (dir: string) => navigate(async () => {
+      const switching = dir !== currentVault.current?.dir
+      switchingVault.current = switching
       try {
         const listing = await window.nodebook.openVault(dir)
+        if (switching) {
+          currentVault.current = { dir }
+          replaceRuns([])
+          discardingRuns.current = new Set()
+          setDistillDoneNote(null)
+        }
+        switchingVault.current = false
+        setReaderOrigin(null)
+        setCitationOrigin(null)
+        pendingImport.current = null
+        setImportDocument(null)
+        setViewFigure(null)
+        setPreparingImport(null)
+        setConfirm((request) => request?.importId || (switching && request?.discardRunId) ? null : request)
         setVault(dir)
         setActive(null)
         setDoc(null)
@@ -460,17 +594,21 @@ export default function App() {
         setQuery('')
         setFiles(listing.files)
         setDirs(listing.dirs)
-        setNoteNames(await window.nodebook.noteNames())
         setDistillRun(null)
-        setStagedRuns(await window.nodebook.distillListRuns())
+        await Promise.all([
+          window.nodebook.noteNames().then(setNoteNames),
+          refreshRuns()
+        ])
         talk.onVaultOpened() // resume embedding for the newly-opened vault
         return true
       } catch (err) {
+        switchingVault.current = false
+        if (switching) void refreshRuns()
         setError(`Couldn't open vault: ${String(err)}`)
         return null
       }
     }),
-    [navigate, talk]
+    [navigate, refreshRuns, replaceRuns, talk]
   )
 
   const openVault = useCallback(async () => {
@@ -540,6 +678,8 @@ export default function App() {
         const content = await window.nodebook.readFile(f.path)
         setActive(f)
         setDoc(content)
+        setPendingReveal(null)
+        setCitationOrigin(null)
         setNoteEpoch((e) => e + 1)
         setSettingsOpen(false)
         setHelpOpen(false)
@@ -558,28 +698,50 @@ export default function App() {
   )
 
   const openFile = useCallback(
-    (f: MarkdownFile) => navigate(() => readAndOpen(f)),
-    [navigate, readAndOpen]
+    (f: MarkdownFile, destination: 'editor' | 'graph' | 'new-map' = 'editor',
+      trigger?: HTMLElement | SVGElement) => navigate(async () => {
+      const content = await readAndOpen(f)
+      if (content === null) return null
+      if (destination === 'editor') {
+        if (distillRun || graphOpen) {
+          setReaderOrigin({ book: distillRun, trigger: trigger ?? visibleMapControl() })
+        }
+        setGraphOpen(false)
+      } else {
+        setReaderOrigin(null)
+        setMapAnchor(f)
+        setStartGlobal(false)
+        if (destination === 'new-map') {
+          mapLauncher.current = trigger ?? null
+          setGraphOpening((n) => n + 1)
+        }
+        setGraphOpen(true)
+      }
+      setDistillRun(null)
+      return content
+    }),
+    [navigate, readAndOpen, graphOpen, distillRun]
   )
-
-  const openSearchResult = async (file: MarkdownFile): Promise<void> => {
-    if ((await openFile(file)) == null) return
-    setGraphOpen(false)
-    setDistillRun(null)
-  }
 
   const { ready: talkReady, searchSemantic } = talk
   useEffect(() => {
     const q = query.trim()
     if (!q) {
       setResults([])
+      setFigureHits([])
       return
     }
     let ignore = false
     const t = setTimeout(async () => {
       // When semantic search is live, fuse keyword + meaning; else keyword only.
-      const hits = talkReady ? await searchSemantic(q) : await window.nodebook.search(q)
-      if (!ignore) setResults(hits)
+      const [hits, figures] = await Promise.all([
+        talkReady ? searchSemantic(q) : window.nodebook.search(q),
+        window.nodebook.searchFigures(q).catch(() => [])
+      ])
+      if (!ignore) {
+        setResults(hits)
+        setFigureHits(figures)
+      }
     }, 150)
     return () => {
       ignore = true
@@ -588,6 +750,31 @@ export default function App() {
   }, [query, talkReady, searchSemantic])
 
   const noteByPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files])
+  const openPathInEditor = useCallback((path: string, trigger?: HTMLElement | SVGElement): void => {
+    const file = noteByPath.get(path)
+    if (file) void openFile(file, 'editor', trigger)
+    else setError(`Couldn't open the selected note — it may have been moved or deleted.`)
+  }, [noteByPath, openFile])
+  const backToMap = (): void => {
+    if (!readerOrigin) return
+    void navigate(() => {
+      setCitationOrigin(null)
+      returnFocus.current = { trigger: readerOrigin.trigger }
+      setDistillRun(readerOrigin.book)
+      setGraphOpen(readerOrigin.book === null)
+      setReaderOrigin(null)
+      return true
+    })
+  }
+  useLayoutEffect(() => {
+    if (!returnFocus.current || navigating) return
+    const { trigger } = returnFocus.current
+    returnFocus.current = null
+    const target = trigger?.isConnected && !trigger.closest('[hidden]') ? trigger :
+      visibleMapControl()
+    target?.focus({ preventScroll: true })
+  }, [navigating, readerOrigin])
+
   const resolveTarget = useMemo(() => targetResolver([...noteByPath.keys()]), [noteByPath])
   const resolveFile = useCallback(
     (target: string) => noteByPath.get(resolveTarget(target, active?.path ?? '').id),
@@ -627,12 +814,34 @@ export default function App() {
   // content before revealing — relocate via the quote if it moved, or open
   // without a selection (and say so) if it can't be found at all. A citation
   // from before quotes were captured (c.quote undefined) is trusted as-is.
+  const backToCitingNote = (): void => {
+    if (!citationOrigin) return
+    void navigate(async () => {
+      if (await readAndOpen(citationOrigin.note) === null) return null
+      restoreCitation.current = citationOrigin
+      return true
+    })
+  }
+  useLayoutEffect(() => {
+    if (navigating || !restoreCitation.current) return
+    const entry = restoreCitation.current
+    const frame = requestAnimationFrame(() => {
+      restoreCitation.current = null
+      const scroller = document.querySelector('.note-content .cm-scroller')
+      if (scroller) scroller.scrollTop = entry.scrollTop
+      document.querySelectorAll<HTMLElement>('.sources .source-cite')[entry.citation]?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [navigating, active?.path])
   const openCitation = useCallback(
-    (c: NoteCitation) => {
+    (c: NoteCitation, citationIndex: number) => {
       const f = resolveFile(c.source)
-      if (!f) return
+      if (!f || !active) return
+      const scrollTop = document.querySelector('.note-content .cm-scroller')?.scrollTop ?? 0
+      const origin = { note: active, citation: citationIndex, scrollTop }
       void openFile(f).then((content) => {
         if (content === null) return
+        setCitationOrigin(origin)
         const res = resolveCitationSpan(content, c)
         if (res.status === 'not-found') {
           setPendingReveal(null)
@@ -642,7 +851,7 @@ export default function App() {
         }
       })
     },
-    [resolveFile, openFile]
+    [resolveFile, openFile, active]
   )
   const openAskPassage = useCallback(
     (c: Citation): void => {
@@ -695,13 +904,13 @@ export default function App() {
     })
   }, [navigate, settingsOpen])
 
-  // Open a note clicked in the graph, keeping the map open so it recenters.
+  // Explicitly recenter the vault map on a different note.
   const openPathInGraph = useCallback(
     (path: string) => {
-      const f = files.find((x) => x.path === path)
-      if (f) void openFile(f)
+      const f = noteByPath.get(path)
+      if (f) void openFile(f, 'graph')
     },
-    [files, openFile]
+    [noteByPath, openFile]
   )
 
   const openHelp = useCallback(
@@ -759,12 +968,20 @@ export default function App() {
   // print container. CodeMirror virtualizes off-screen lines, so we can't print
   // the editor directly — markdown-it gives us the whole document at once, and
   // setting innerHTML is synchronous so Print/printToPDF see it immediately.
-  const fillPrint = useCallback(() => {
-    if (printRef.current) printRef.current.innerHTML = renderMarkdown(noteSaver.getContent() ?? doc ?? '')
-  }, [noteSaver, doc])
+  const fillPrint = useCallback(async () => {
+    const container = printRef.current
+    if (!container || !active) return false
+    const generation = ++printGeneration.current
+    container.innerHTML = renderMarkdown(noteSaver.getContent() ?? doc ?? '', { path: active.path, print: true })
+    const figures = Array.from(container.querySelectorAll<HTMLImageElement>('img[src^="nodebook-figure:"]'))
+    await Promise.allSettled(figures.map((image) => image.decode()))
+    return printRef.current === container && printGeneration.current === generation
+  }, [noteSaver, doc, active])
+
+  useLayoutEffect(() => { printGeneration.current++ }, [active?.path])
 
   const exportPdf = useCallback(async () => {
-    fillPrint()
+    if (!await fillPrint()) return
     await window.nodebook.exportPdf(active?.name ?? 'note')
     // Empty the imperatively-filled container once the PDF is written — the
     // rendered HTML must not linger in the DOM (React doesn't know about it).
@@ -928,49 +1145,54 @@ export default function App() {
     setMenu({ x, y, items })
   }
 
-  // Report which actions apply so the menu can grey out the rest (Save/Export/
-  // Print need a note or the settings editor; New Note needs a vault; Map needs a
-  // note; Ask needs a chat provider). main rebuilds the menu only on real changes.
+  // The native menu follows the visible pane, since maps can keep a note open
+  // behind them. Main rebuilds it only when availability changes.
   useEffect(() => {
     window.nodebook.setMenuState({
       hasVault: vault !== null,
-      hasNote: active !== null,
-      canSave: active !== null || settingsOpen,
+      hasNote: noteVisible,
+      canSave,
       canAsk: talk.canAsk,
-      distilling: distilling !== null
+      distilling: distillBusy
     })
-  }, [vault, active, settingsOpen, talk.canAsk, distilling])
+  }, [vault, noteVisible, canSave, talk.canAsk, distillBusy])
 
-  // Application-menu commands (also drive the ⌘E/⌘P/⌘S/⌘O/⌘N/⌘G/⌘, accelerators).
-  // Defined after the handlers it dispatches to so their identities are in scope.
-  // Distill a document: pick a file → run the pipeline (with live progress) →
-  // show the resulting staged run as its own map.
-  // Refresh the sidebar's staged-runs list (after a run, a delete, vault open).
-  const refreshRuns = useCallback(async () => {
-    setStagedRuns(await window.nodebook.distillListRuns())
-  }, [])
-
-  // One run's lifecycle, shared by a fresh distill and a resume: claim the UI,
-  // follow the progress, and say what happened. `start` is what actually runs.
   const startDistilling = useCallback(
-    async (start: () => Promise<DistillRunResult>) => {
-      // Sync the ref before the state commits: a settings save landing in this
-      // same tick must already see the run as active and defer its embed swap
-      // (the effect that normally maintains the ref runs a render later).
-      distillingRef.current = true
-      distillCancelled.current = false
-      setDistilling({ phase: 'starting', done: 0, total: 0 })
-      const off = window.nodebook.onDistillProgress((runId, p) =>
-        setDistilling({ runId, phase: p.phase, done: p.done, total: p.total })
-      )
+    async (start: () => Promise<DistillRunResult>, options: {
+      runId?: string
+      estimate?: DistillEstimate
+    }) => {
+      const owner = currentVault.current
+      if (!owner || switchingVault.current || activeDistill.current) return
+      const claim: ActiveDistill = { runId: options.runId, pausing: false, settled: false }
+      const startView = navigationVersion.current
+      const inCurrentVault = (): boolean => currentVault.current === owner && !switchingVault.current
+      // Disable all start paths before React commits the busy state.
+      activeDistill.current = claim
+      setDistilling({ runId: claim.runId, phase: claim.runId ? 'resuming' : 'starting', done: 0, total: 0 })
+      setDistillEstimate(options.estimate ?? null)
       setDistillDoneNote(null)
+      let off: (() => void) | undefined
       try {
+        off = window.nodebook.onDistillProgress((runId, p) => {
+          if (activeDistill.current !== claim || claim.settled || !inCurrentVault()) return
+          if (claim.runId && claim.runId !== runId) return
+          claim.runId = runId
+          const phase = options.runId && p.phase === 'starting' ? 'resuming' : p.phase
+          setDistilling({ runId, phase, done: p.done, total: p.total, pausing: claim.pausing })
+        })
         const res = await start()
-        setGraphOpen(false)
-        setAskOpen(false)
-        setDistillOverlay(false) // a fresh run opens standalone
-        setDistillRun({ runId: res.runId })
-        void refreshRuns()
+        if (!inCurrentVault()) return
+        // A delayed or failed list refresh must never make a completed run resumable again.
+        replaceRuns(currentRuns.current.map((run) => run.id === res.runId
+          ? { ...run, notes: res.stats.notes, unfinished: false }
+          : run))
+        if (navigationVersion.current === startView && !navigation.current && !noteHasChanges() && !configHasChanges()) {
+          setGraphOpen(false)
+          setAskOpen(false)
+          setReaderOrigin(null)
+          setDistillRun({ runId: res.runId, opening: ++bookOpening.current })
+        }
         // Always say what happened: the run is STAGED, not in the vault — and a
         // zero-note run must explain itself instead of showing a blank map.
         const s = res.stats
@@ -994,59 +1216,111 @@ export default function App() {
         if (s.failedWindows > 0)
           why.push(`${s.failedWindows} of ${s.windows} steps got an unusable model response`)
         const read = s.coverage === 1 ? 'all' : `about ${Math.round(s.coverage * 100)}%`
+        const preserved = res.figures?.length ?? 0
+        const onlyFigures = preserved > 0 && s.chunks === 0
         const summary = s.notes === 0
           ? 'No notes were staged with matching source quotes.'
           : `Staged ${s.notes} note${s.notes === 1 ? '' : 's'}. Choose Merge to add them to your vault.`
         setDistillDoneNote([
-          summary,
+          onlyFigures ? 'Staged the source document and its figures. Choose Merge to add them to your vault.' : summary,
           res.pdf && describePdfExtraction(res.pdf),
-          `The model read ${read} of the extracted text.`,
+          figureCoverageText(preserved, res.figureCoverage?.skipped, res.figureCoverage?.uninspectedPages),
+          onlyFigures ? 'There were no passages of authored text to distill.' : `The model read ${read} of the extracted text.`,
           ...why
         ].filter(Boolean).join(' '))
       } catch (e) {
+        if (!inCurrentVault()) return
         // Cancelling is a choice, not a fault — say what happened, don't alarm.
         // A cancelled run is PAUSED, not lost: what it already read is kept.
-        if (distillCancelled.current) {
+        if (claim.pausing) {
           setDistillDoneNote(
-            'Distilling cancelled — what it read so far is kept. Press Resume under “Distilled runs” to carry on.'
+            'Distilling paused. Completed steps are saved. Choose Resume under “Distilled runs” to continue.'
           )
         } else setError(e instanceof Error ? e.message : String(e))
-        // Either way the run may be resumable now — show it in the sidebar.
-        void refreshRuns()
       } finally {
-        off()
-        setDistilling(null)
-        setDistillEstimate(null)
+        claim.settled = true
+        off?.()
+        if (activeDistill.current === claim) {
+          setDistilling((progress) => progress && { ...progress, settled: true })
+          // Keep the controls locked until the sidebar knows which runs can resume.
+          await refreshRuns(owner)
+          activeDistill.current = null
+          setDistilling(null)
+          setDistillEstimate(null)
+        }
       }
     },
-    [refreshRuns]
+    [configHasChanges, noteHasChanges, refreshRuns, replaceRuns]
   )
+
+  const pauseDistilling = useCallback(async () => {
+    const claim = activeDistill.current
+    if (!claim?.runId || claim.pausing || claim.settled || switchingVault.current) return
+    claim.pausing = true
+    setDistilling((progress) => progress && { ...progress, pausing: true })
+    try {
+      await window.nodebook.distillCancel(claim.runId)
+    } catch (err) {
+      if (activeDistill.current !== claim || claim.settled || switchingVault.current) return
+      claim.pausing = false
+      setDistilling((progress) => progress && { ...progress, pausing: false })
+      setError(`Couldn't pause distilling: ${String(err)}`)
+    }
+  }, [])
+
+  const discardImport = useCallback((id: string) => {
+    if (pendingImport.current === id) pendingImport.current = null
+    setPreparingImport((pending) => pending === id ? null : pending)
+    void window.nodebook.distillDiscardPick(id).catch(() => {})
+  }, [])
 
   // Price the run, warn if it needs more steps than the budget allows, then go.
   // The focus is passed to both halves so the estimate is made against the same
   // prompt the run will send.
   const estimateThenRun = useCallback(
-    async (docId: string, focus: string) => {
-      // The estimate converts the document; the run reuses that same copy, so
-      // this costs the conversion once and the toast can say what is coming.
+    async (docId: string, focus: string, encoding?: string, previewed?: DistillEstimate) => {
+      // Text imports use the exact preview the reader approved. Other formats
+      // are prepared here after the focus has been chosen.
       let est: DistillEstimate
+      setPreparingImport(docId)
       try {
-        est = await window.nodebook.distillEstimate(docId, focus)
+        est = previewed && !focus ? previewed :
+          await window.nodebook.distillEstimate(docId, focus, encoding, previewed?.preparedId)
       } catch (err) {
+        if (pendingImport.current !== docId) return
+        discardImport(docId)
         setError(`Couldn’t prepare this import. ${err instanceof Error ? err.message : String(err)}`)
         return
       }
-      setDistillEstimate(est)
-      const go = (): Promise<void> =>
-        startDistilling(() => window.nodebook.distillRun(docId, focus))
+      if (pendingImport.current !== docId) return
+      setPreparingImport(null)
+      const go = async (): Promise<void> => {
+        if (pendingImport.current !== docId) return
+        pendingImport.current = null
+        try {
+          if (activeDistill.current) {
+            setError('A document is already being distilled. Try again after it finishes or pauses.')
+            return
+          }
+          await startDistilling(() => window.nodebook.distillRun(docId, focus, encoding, est.preparedId), {
+            estimate: est
+          })
+        } finally {
+          discardImport(docId)
+        }
+      }
       const sampled = est.totalWindows > est.maxCalls
-      if (sampled || est.pdf?.missing.length) {
+      if (sampled || est.pdf?.missing.length || est.figureCoverage?.skipped || est.figureCoverage?.uninspectedPages) {
         const steps = sampled
           ? `This document needs ${est.totalWindows} steps. Your budget covers ${est.calls} evenly spaced steps, about ${Math.round(est.coverage * 100)}% of the extracted text.`
-          : `Read the extracted text in ${est.calls} step${est.calls === 1 ? '' : 's'}?`
+          : est.calls === 0 && est.figures?.length ? 'Save the source document and its figures without a model call?' :
+            `Read the extracted text in ${est.calls} step${est.calls === 1 ? '' : 's'}?`
         setConfirm({
-          message: [est.pdf && describePdfExtraction(est.pdf), steps].filter(Boolean).join(' '),
-          confirmLabel: sampled ? `Read ${est.calls} steps` : 'Continue with extracted text',
+          importId: docId,
+          message: [est.pdf && describePdfExtraction(est.pdf),
+            figureCoverageText(est.figures?.length, est.figureCoverage?.skipped, est.figureCoverage?.uninspectedPages),
+            steps].filter(Boolean).join(' '),
+          confirmLabel: sampled ? `Read ${est.calls} steps` : est.calls === 0 && est.figures?.length ? 'Save figures' : 'Continue with extracted text',
           onConfirm: () => {
             setConfirm(null)
             void go()
@@ -1056,34 +1330,39 @@ export default function App() {
       }
       await go()
     },
-    [startDistilling]
+    [startDistilling, discardImport]
   )
 
   const runDistill = useCallback(async () => {
-    // main hands back an opaque id for the picked document, never a path.
-    const doc = await window.nodebook.distillPick()
-    if (!doc) return
-    // Ask what this reading is for BEFORE the estimate: the focus rides in
-    // every prompt, so it is part of what the run will cost. An empty field is
-    // an answer — no focus, and the run reads as it always did.
-    openPrompt({
-      title: 'What should the notes focus on? (optional)',
-      placeholder: 'e.g. the arguments and the evidence for them',
-      confirmLabel: 'Distill',
-      presets: FOCUS_LENSES,
-      maxLength: DISTILL_FOCUS_MAX,
-      allowEmpty: true,
-      onConfirm: (focus) => {
-        setPrompt(null)
-        void estimateThenRun(doc.id, focus)
+    const owner = currentVault.current
+    if (!owner || switchingVault.current || activeDistill.current || pickingImport.current) return
+    pickingImport.current = true
+    try {
+      // Main hands back an opaque id for the picked document, never a path.
+      const doc = await window.nodebook.distillPick()
+      if (!doc) return
+      if (currentVault.current !== owner || switchingVault.current || activeDistill.current) {
+        discardImport(doc.id)
+        return
       }
-    })
-  }, [estimateThenRun, openPrompt])
+      if (pendingImport.current) discardImport(pendingImport.current)
+      pendingImport.current = doc.id
+      setConfirm((request) => request?.importId ? null : request)
+      setImportDocument(doc)
+    } catch (err) {
+      if (currentVault.current === owner && !switchingVault.current) {
+        setError(`Couldn't pick a document: ${String(err)}`)
+      }
+    } finally {
+      pickingImport.current = false
+    }
+  }, [discardImport])
 
   // Carry on a run that was cancelled or interrupted, from its own checkpoint.
   const resumeStagedRun = useCallback(
     (runId: string) => {
-      void startDistilling(() => window.nodebook.distillResume(runId))
+      if (discardingRuns.current.has(runId) || !currentRuns.current.some((r) => r.id === runId && r.unfinished)) return
+      void startDistilling(() => window.nodebook.distillResume(runId), { runId })
     },
     [startDistilling]
   )
@@ -1092,13 +1371,19 @@ export default function App() {
   // be unreachable — the run looked lost even though it was staged on disk).
   const openStagedRun = useCallback(
     (id: string) => {
+      const owner = currentVault.current
+      const canOpen = (): boolean => currentVault.current === owner && !switchingVault.current &&
+        activeDistill.current?.runId !== id && !discardingRuns.current.has(id) &&
+        currentRuns.current.some((run) => run.id === id && !run.unfinished)
+      if (!canOpen()) return
       void navigate(() => {
+        if (!canOpen()) return null
         setGraphOpen(false)
         setAskOpen(false)
         setHelpOpen(false)
         setSettingsOpen(false)
-        setDistillOverlay(false)
-        setDistillRun({ runId: id })
+        setReaderOrigin(null)
+        setDistillRun({ runId: id, opening: ++bookOpening.current })
       })
     },
     [navigate]
@@ -1106,7 +1391,14 @@ export default function App() {
 
   const discardStagedRun = useCallback(
     (run: DistillRunInfo) => {
+      const owner = currentVault.current
+      const canDiscard = (): boolean => currentVault.current === owner && !switchingVault.current &&
+        activeDistill.current?.runId !== run.id && !discardingRuns.current.has(run.id) &&
+        currentRuns.current.some((entry) => entry.id === run.id &&
+          entry.unfinished === run.unfinished && entry.merged === run.merged)
+      if (!canDiscard()) return
       setConfirm({
+        discardRunId: run.id,
         message: run.unfinished
           ? `Discard the paused run “${run.id}”? What it has read so far is lost, and it can't be resumed.`
           : `Discard the distilled run “${run.id}”? Its staged notes are deleted${
@@ -1117,90 +1409,141 @@ export default function App() {
         confirmLabel: 'Discard',
         onConfirm: () => {
           setConfirm(null)
-          void window.nodebook.distillRemove(run.id).then(() => {
-            setDistillRun((cur) => (cur?.runId === run.id ? null : cur))
-            void refreshRuns()
-          })
+          if (!canDiscard()) return
+          const removing = discardingRuns.current
+          removing.add(run.id)
+          void (async () => {
+            try {
+              await window.nodebook.distillRemove(run.id)
+              if (currentVault.current !== owner || switchingVault.current) return
+              replaceRuns(currentRuns.current.filter(({ id }) => id !== run.id))
+              setDistillRun((cur) => (cur?.runId === run.id ? null : cur))
+              setReaderOrigin((cur) => cur?.book?.runId === run.id ? null : cur)
+              await refreshRuns(owner)
+            } catch (err) {
+              if (currentVault.current === owner && !switchingVault.current) {
+                setError(`Couldn't discard “${run.id}”: ${String(err)}`)
+              }
+            } finally {
+              removing.delete(run.id)
+            }
+          })()
         }
       })
     },
-    [refreshRuns]
+    [refreshRuns, replaceRuns]
   )
-
-  // Stable graph loader for the run map, so the reused GraphView doesn't refetch
-  // every render. Only called while a run map is shown (distillRun set).
-  const distillLoad = useCallback(
-    (f: string | null, o?: { depth?: number; cap?: number }) => {
-      const id = distillRun?.runId ?? ''
-      return distillOverlay
-        ? window.nodebook.distillOverlayGraph(id, f, o)
-        : window.nodebook.distillGraph(id, f, o)
-    },
-    [distillRun, distillOverlay]
-  )
-
-  // Open a staged note from the run map, read-only: staged notes are not vault
-  // files, so they never reach the editor (no path to save to, no dirty state).
-  const openStagedNote = useCallback((path: string) => {
-    const name = (path.split(/[/\\]/).pop() ?? path).replace(/\.md$/i, '')
-    if (name) setStagedNote(name)
-  }, [])
 
   // Merge a run into the vault (an explicit, confirmed, reversible write). The
   // plan comes first: the dialog says what would happen — and, for a note whose
   // name you already use, asks whether the two are really the same thing.
-  const [mergePlanning, setMergePlanning] = useState(false)
-  const mergeDistillRun = useCallback(() => {
-    if (!distillRun || mergePlanning) return
-    const runId = distillRun.runId
-    setMergePlanning(true) // the plan may embed the run's notes: seconds, not instant
-    void window.nodebook
-      .distillMergePlan(runId)
-      .then((plan) => setMergePlan({ runId, plan }))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setMergePlanning(false))
-  }, [distillRun, mergePlanning])
+  const [mergeBusy, setMergeBusy] = useState<{
+    run: NonNullable<typeof distillRun>; label: string
+  } | null>(null)
+  const mergeStatus = runMerge?.run === distillRun ? runMerge : null
+  const currentMergeWork = mergeBusy?.run === distillRun ? mergeBusy : null
+  const mergeDistillRun = (): void => {
+    if (!distillRun || !mergeStatus || mergeStatus.status.merged || currentMergeWork) return
+    const work = { run: distillRun, label: 'Planning…' }
+    setMergeBusy(work)
+    void window.nodebook.distillMergePlan(distillRun.runId).then((plan) => {
+      if (currentDistillRun.current === distillRun) setMergePlan({ run: distillRun, plan })
+    }).catch((err) => {
+      if (currentDistillRun.current === distillRun) setError(String(err))
+    }).finally(() => setMergeBusy((active) => active === work ? null : active))
+  }
 
-  const confirmMerge = useCallback(
-    (runId: string, sameAs: string[]) => {
-      setMergePlan(null)
-      void window.nodebook
-        .distillMerge(runId, { sameAs })
-        .then((res) => {
-          setMergeInfo({ runId, folder: res.folder, count: res.count })
-          void refreshRuns() // the run's "merged" tag changed
-        })
-        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-    },
-    [refreshRuns]
-  )
-
-  // Restore the merged/undo state when a run map opens (and clear it on close).
-  useEffect(() => {
-    setStagedNote(null) // a different run: back to its map
+  // A merge or undo can finish after the reader has moved to another book.
+  const applyMergeStatus = (runId: string, status: DistillMergeStatus): void => {
+    const displayed = currentDistillRun.current
+    if (displayed?.runId !== runId) return
+    mergeRead.current++
+    setRunMerge({ run: displayed, status, dismissed: false })
+  }
+  const confirmMerge = async (runId: string, sameAs: string[]): Promise<void> => {
+    if (!distillRun || distillRun.runId !== runId || currentMergeWork) return
+    const owner = currentVault.current
+    const work = { run: distillRun, label: 'Merging…' }
+    setMergeBusy(work)
     setMergePlan(null)
-    if (!distillRun) {
-      setMergeInfo(null)
-      return
+    try {
+      const res = await window.nodebook.distillMerge(runId, { sameAs })
+      if (currentVault.current !== owner || switchingVault.current) return
+      applyMergeStatus(runId, { merged: true, folder: res.folder, count: res.count })
+      void refreshRuns(owner)
+    } catch (err) {
+      if (currentVault.current === owner && !switchingVault.current) setError(String(err))
+    } finally {
+      setMergeBusy((active) => active === work ? null : active)
     }
-    const runId = distillRun.runId
-    void window.nodebook.distillMergeStatus(runId).then((s) => {
-      setMergeInfo(s.merged ? { runId, folder: s.folder ?? '', count: s.count ?? 0 } : null)
+  }
+  const undoMerge = async (): Promise<void> => {
+    if (!distillRun || !mergeStatus?.status.merged || currentMergeWork) return
+    const owner = currentVault.current
+    const work = { run: distillRun, label: 'Undoing…' }
+    setMergeBusy(work)
+    try {
+      const r = await window.nodebook.distillUnmerge(distillRun.runId)
+      if (currentVault.current !== owner || switchingVault.current) return
+      applyMergeStatus(distillRun.runId, { merged: false })
+      if (currentDistillRun.current?.runId === distillRun.runId) {
+        setDistillDoneNote(
+          `Undone — ${r.removed} note${r.removed === 1 ? '' : 's'} removed` +
+          (r.trashed > 0 ? `, ${r.trashed} edited note${r.trashed === 1 ? '' : 's'} moved to the Trash.` : '.')
+        )
+      }
+      void refreshRuns(owner)
+    } catch (err) {
+      if (currentVault.current === owner && !switchingVault.current) setError(`Couldn't undo the merge: ${String(err)}`)
+    } finally {
+      setMergeBusy((active) => active === work ? null : active)
+    }
+  }
+
+  useEffect(() => {
+    const request = ++mergeRead.current
+    setMergePlan(null)
+    if (!distillRun) return
+    const owner = currentVault.current
+    const isCurrent = (): boolean => owner === currentVault.current && !switchingVault.current &&
+      currentDistillRun.current === distillRun && request === mergeRead.current
+    void window.nodebook.distillMergeStatus(distillRun.runId).then((status) => {
+      if (isCurrent()) setRunMerge((previous) => ({
+        run: distillRun, status,
+        dismissed: previous?.run === distillRun && previous.status.merged && status.merged && previous.dismissed
+      }))
+    }).catch((err) => {
+      if (isCurrent()) setError(`Couldn't read the run's merge status: ${String(err)}`)
     })
   }, [distillRun])
+
+  const showActiveMap = useCallback((wholeVault = false) => {
+    if (!wholeVault && !active) return
+    void navigate(() => {
+      setReaderOrigin(null)
+      mapLauncher.current = wholeVault ? document.querySelector('.vault-map-link') : document.querySelector('.graph-open-btn')
+      setMapAnchor(active)
+      setStartGlobal(wholeVault)
+      setSettingsOpen(false)
+      setHelpOpen(false)
+      setAskOpen(false)
+      setDistillRun(null)
+      setGraphOpening((n) => n + 1)
+      setGraphOpen(true)
+    })
+  }, [active, navigate])
 
   useEffect(() => {
     return window.nodebook.onMenuCommand((cmd, arg) => {
       // ⌘E toggles writing (Live) ⇄ Reading; ⌘1/2/3 pick a mode.
-      if (cmd === 'toggle-read') setEditorMode((m) => (m === 'reading' ? 'live' : 'reading'))
-      else if (cmd === 'mode-code') setEditorMode('code')
-      else if (cmd === 'mode-live') setEditorMode('live')
-      else if (cmd === 'mode-reading') setEditorMode('reading')
+      if (cmd === 'toggle-read' && noteVisible) setEditorMode((m) => (m === 'reading' ? 'live' : 'reading'))
+      else if (cmd === 'mode-code' && noteVisible) setEditorMode('code')
+      else if (cmd === 'mode-live' && noteVisible) setEditorMode('live')
+      else if (cmd === 'mode-reading' && noteVisible) setEditorMode('reading')
       else if (cmd === 'help') openHelp(arg)
-      else if (cmd === 'export-pdf') void exportPdf()
-      else if (cmd === 'print') {
-        fillPrint()
-        window.print()
+      else if (cmd === 'export-pdf' && noteVisible) void exportPdf()
+      else if (cmd === 'print' && noteVisible) {
+        void fillPrint().then((ready) => { if (ready) window.print() })
       } else if (cmd === 'save') {
         saveCurrent()
       } else if (cmd === 'settings') void openSettings()
@@ -1214,8 +1557,8 @@ export default function App() {
         // ⌘K: jump to the sidebar search box (select so typing replaces).
         searchRef.current?.focus()
         searchRef.current?.select()
-      } else if (cmd === 'map') {
-        if (active) setGraphOpen(true)
+      } else if (cmd === 'map' && noteVisible) {
+        showActiveMap()
       } else if (cmd === 'distill') {
         void runDistill()
       } else if (cmd === 'ask') {
@@ -1235,7 +1578,8 @@ export default function App() {
     openAsk,
     saveCurrent,
     vault,
-    active,
+    noteVisible,
+    showActiveMap,
     talk.canAsk,
     runDistill
   ])
@@ -1243,9 +1587,24 @@ export default function App() {
   // The right panel (backlinks) only shows when editing a note; collapse the grid
   // to two columns otherwise (map / settings / help / empty) so the centre fills
   // the width instead of leaving a blank third column.
-  const showRightPanel =
-    !!active && !settingsOpen && !helpOpen && !graphOpen && !askOpen && !distillRun
+  const showRightPanel = noteVisible
+  const mapPaneVisible = !askOpen && !helpOpen && !settingsOpen
+  const bookVisible = mapPaneVisible && !!distillRun
+  const graphVisible = mapPaneVisible && graphOpen && !distillRun
+  const mountedBook = distillRun ?? readerOrigin?.book
+  const mountVaultMap = graphOpen || readerOrigin?.book === null
+  const appControls = (
+    <span className="app-controls">
+      <StatusSelect kind="theme" prefix="Appearance: " title="App theme" value={themeMode}
+        options={THEME_OPTIONS} onChange={pickThemeMode} />
+      <TelemetryWidget enabled={telemetryOn} />
+    </span>
+  )
+  const utilityFooter = !graphVisible && !bookVisible &&
+    (settingsOpen || helpOpen || askOpen || !active || doc === null || active.rel.endsWith('.map.md'))
+
   return (
+    <OpenFigure.Provider value={setViewFigure}>
     <div className={`app${showRightPanel ? '' : ' app--no-right'}`}>
       <aside className="sidebar">
         <div className="vault-actions">
@@ -1257,8 +1616,11 @@ export default function App() {
           </button>
         </div>
         {vault && (
-          <div className="vault-path" title={vault}>
-            {vault.split('/').pop()}
+          <div className="vault-heading">
+            <div className="vault-path" title={vault}>{vault.split('/').pop()}</div>
+            <button className="vault-map-link" type="button" onClick={() => showActiveMap(true)}>
+              Whole vault map
+            </button>
           </div>
         )}
         {vault && (
@@ -1271,10 +1633,11 @@ export default function App() {
             onChange={(e) => {
               setQuery(e.target.value)
               setResults([])
+              setFigureHits([])
             }}
             onKeyDown={(e) => {
-              if (!results.length) return
-              const first = searchList.current?.querySelector<HTMLElement>('[role=button]')
+              if (!results.length && !figureHits.length) return
+              const first = searchList.current?.querySelector<HTMLButtonElement>('.search-hit')
               if (e.key === 'ArrowDown' && first) {
                 e.preventDefault()
                 first.focus()
@@ -1285,7 +1648,7 @@ export default function App() {
             }}
           />
         )}
-        {vault && <TalkPanel talk={talk} distilling={distilling !== null} />}
+        {vault && <TalkPanel talk={talk} distilling={distillBusy} />}
         {vault &&
           (talk.canAsk ? (
             <button className="ask-open-btn" onClick={openAsk}>
@@ -1305,71 +1668,87 @@ export default function App() {
         {vault && stagedRuns.length > 0 && (
           <div className="runs-section">
             <div className="runs-header">Distilled runs</div>
-            {stagedRuns.map((r) => (
-              <div
-                key={r.id}
-                className="run-item"
-                role="button"
-                tabIndex={0}
-                onClick={() => (r.unfinished ? resumeStagedRun(r.id) : openStagedRun(r.id))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    if (r.unfinished) resumeStagedRun(r.id)
-                    else openStagedRun(r.id)
-                  }
-                }}
-              >
-                <span className="run-item-name" title={r.id}>
-                  {r.id}
-                </span>
-                <span className="run-item-meta">
-                  {r.unfinished
-                    ? 'paused'
-                    : r.merged
-                      ? 'merged'
-                      : `${r.notes} note${r.notes === 1 ? '' : 's'}`}
-                </span>
-                {r.unfinished && (
-                  <button
-                    className="run-item-resume"
-                    title="Carry on where this run stopped"
-                    disabled={distilling !== null}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      resumeStagedRun(r.id)
-                    }}
-                  >
-                    Resume
-                  </button>
-                )}
-                <button
-                  className="run-item-del"
-                  aria-label={`Discard run ${r.id}`}
-                  title="Discard this staged run"
+            {stagedRuns.map((r) => {
+              const activity = distilling?.runId === r.id ? distilling : null
+              const discardDisabled = !!activity || discardingRuns.current.has(r.id)
+              const openDisabled = discardDisabled || (r.unfinished && distillBusy)
+              let status = r.merged ? 'merged' : `${r.notes} note${r.notes === 1 ? '' : 's'}`
+              if (r.unfinished) status = 'paused'
+              if (activity) {
+                status = activity.phase === 'resuming' ? 'resuming' : 'distilling'
+                if (activity.settled) status = 'finishing'
+                if (activity.pausing) status = 'pausing'
+              }
+              const open = (): void => {
+                if (openDisabled) return
+                if (r.unfinished) resumeStagedRun(r.id)
+                else openStagedRun(r.id)
+              }
+              return (
+                <div
+                  key={r.id}
+                  className="run-item" data-run-id={r.id}
+                  role="group"
+                  aria-label={`Distilled run ${r.id}`}
+                  data-open-disabled={openDisabled}
+                  tabIndex={-1}
                   onClick={(e) => {
-                    e.stopPropagation()
-                    discardStagedRun(r)
+                    if (e.detail <= 1 && !(e.target as HTMLElement).closest('button')) open()
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget || e.repeat || (e.key !== 'Enter' && e.key !== ' ')) return
+                    e.preventDefault()
+                    open()
                   }}
                 >
-                  ✕
-                </button>
-                {/* What this reading was asked to look for — how two runs of
-                    one book are told apart before their themes are read. */}
-                {r.focus && (
-                  <span className="run-item-focus" title={r.focus}>
-                    Focus: {r.focus}
-                  </span>
-                )}
-                {/* What the run turned out to be about — its themes, on their
-                    own line under the run (see the wrapping rule in the CSS). */}
-                {(r.themes?.length ?? 0) > 0 && (
-                  <span className="run-item-themes" title={r.themes!.join(' · ')}>
-                    {r.themes!.join(' · ')}
-                  </span>
-                )}
-              </div>
-            ))}
+                  <button
+                    className="run-item-open"
+                    type="button"
+                    aria-label={activity ? `${r.id}, ${status}` : `${r.unfinished ? 'Resume' : 'Open'} run ${r.id}`}
+                    disabled={openDisabled}
+                    onClick={(e) => {
+                      if (e.detail <= 1) open()
+                    }}
+                  >
+                    <span className="run-item-name" title={r.id}>{r.id}</span>
+                    <span className="run-item-meta">{status}</span>
+                  </button>
+                  {r.unfinished && !activity && (
+                    <button
+                      className="run-item-resume"
+                      type="button"
+                      title="Carry on where this run stopped"
+                      disabled={openDisabled}
+                      onClick={(e) => {
+                        if (e.detail <= 1) open()
+                      }}
+                    >
+                      Resume
+                    </button>
+                  )}
+                  <button
+                    className="run-item-del"
+                    type="button"
+                    aria-label={`Discard run ${r.id}`}
+                    title="Discard this staged run"
+                    disabled={discardDisabled}
+                    onClick={() => discardStagedRun(r)}
+                  >
+                    ✕
+                  </button>
+                  {r.focus && (
+                    <span className="run-item-focus" title={r.focus}>
+                      Focus: {r.focus}
+                    </span>
+                  )}
+                  {!!r.themes?.length && (
+                    <span className="run-item-themes" title={r.themes.join(' · ')}>
+                      {r.themes.join(' · ')}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
         {query.trim() ? (
@@ -1380,16 +1759,28 @@ export default function App() {
               if (e.key === 'ArrowDown') {
                 e.preventDefault()
                 const next = row.nextElementSibling as HTMLElement | null
-                next?.focus()
+                next?.querySelector<HTMLButtonElement>('.search-hit')?.focus()
               } else if (e.key === 'ArrowUp' || e.key === 'Escape') {
                 e.preventDefault()
                 const prev = e.key === 'ArrowUp' ? row.previousElementSibling as HTMLElement | null : null
-                const target = prev ?? searchRef.current
+                const target = prev?.querySelector<HTMLButtonElement>('.search-hit') ?? searchRef.current
                 target?.focus()
               }
             }}
           >
-            {results.length === 0 ? (
+            {figureHits.map(({ path, figure }, i) => {
+              const file = noteByPath.get(path)
+              if (!file) return null
+              return <li key={`figure-${path}-${figure.id}-${i}`}>
+                <button className="search-hit" onClick={async () => {
+                  if (await openFile(file) !== null) setViewFigure({ path, id: figure.id, label: figure.label, ref: figure })
+                }}>
+                  <span className="search-result-title">View figure · {figure.label}</span>
+                  <span className="search-result-path">{file.name} · {figure.location}</span>
+                </button>
+              </li>
+            })}
+            {!results.length && !figureHits.length ? (
               <li className="search-empty">No matches.</li>
             ) : (
               results.map((hit) => {
@@ -1398,31 +1789,26 @@ export default function App() {
                   <li
                     key={hit.path}
                     className={active?.path === hit.path ? 'active' : ''}
-                    role="button"
-                    tabIndex={0}
-                    aria-current={active?.path === hit.path ? 'page' : undefined}
-                    onClick={() => {
-                      if (f) void openSearchResult(f)
-                    }}
-                    onKeyDown={(e) => {
-                      if ((e.key === 'Enter' || e.key === ' ') && f) {
-                        e.preventDefault()
-                        void openSearchResult(f)
-                      }
-                    }}
                   >
-                    <div className="search-result-title">
-                      {hit.semantic && (
-                        <span className="search-result-ai" title="Matched by meaning">
-                          ✨{' '}
-                        </span>
+                    <button type="button" className="search-hit"
+                      aria-current={active?.path === hit.path ? 'page' : undefined}
+                      disabled={!f} onClick={() => { if (f) void openFile(f) }}>
+                      <span className="search-result-title">
+                        {hit.semantic && (
+                          <span className="search-result-ai" title="Matched by meaning">
+                            ✨{' '}
+                          </span>
+                        )}
+                        {hit.title}
+                      </span>
+                      <span className="search-result-path">{f?.rel ?? hit.path}</span>
+                      {hit.snippet && (
+                        <span className="search-result-snippet">{renderSnippet(hit.snippet)}</span>
                       )}
-                      {hit.title}
-                    </div>
-                    <div className="search-result-path">{f?.rel ?? hit.path}</div>
-                    {hit.snippet && (
-                      <div className="search-result-snippet">{renderSnippet(hit.snippet)}</div>
-                    )}
+                    </button>
+                    {f && <button className="search-hit-map" type="button"
+                      aria-label={`Show ${hit.title} on map`}
+                      onClick={(e) => void openFile(f, 'new-map', e.currentTarget)}>Show on map</button>}
                   </li>
                 )
               })
@@ -1446,6 +1832,60 @@ export default function App() {
       </aside>
 
       <main className="editor-pane" inert={navigating}>
+        {mountedBook && (
+          <div className="reader-map-host" hidden={!bookVisible}>
+            <BookMap
+              key={`distill-${mountedBook.runId}-${mountedBook.opening}`}
+              runId={mountedBook.runId}
+              themeOverviewThreshold={themeOverviewThreshold}
+              active={bookVisible}
+              vaultRevision={graphEpoch}
+              vaultRoot={vault}
+              layoutPreference={mapLayout}
+              onLayoutChange={pickMapLayout}
+              onOpenVaultNote={openPathInEditor}
+              onClose={closeMap}
+              mergeAction={bookVisible && mergeStatus && (!mergeStatus.status.merged || mergeStatus.dismissed) ? (
+                <button type="button" className="status-btn distill-merge-btn"
+                  onClick={mergeStatus.status.merged ? () => void undoMerge() : mergeDistillRun}
+                  disabled={!!currentMergeWork}>
+                  {currentMergeWork?.label ?? (mergeStatus.status.merged ? 'Undo merge' : 'Merge book…')}
+                </button>
+              ) : undefined}
+              statusSlot={bookVisible ? appControls : undefined}
+            />
+          </div>
+        )}
+        {mountVaultMap && (
+          <div className="reader-map-host" hidden={!graphVisible}>
+            <GraphView
+              key={graphOpening}
+              layoutPreference={mapLayout}
+              onLayoutChange={pickMapLayout}
+              focusPath={mapAnchor?.path ?? null}
+              focusName={mapAnchor?.name ?? 'Whole vault'}
+              initialGlobal={startGlobal}
+              active={graphVisible}
+              vaultRoot={vault}
+              talkReady={talk.ready}
+              onOpen={openPathInGraph}
+              onOpenInEditor={openPathInEditor}
+              onClose={closeMap}
+              reloadKey={graphEpoch}
+              statusSlot={graphVisible ? appControls : undefined}
+            />
+          </div>
+        )}
+        {(readerOrigin || citationOrigin) && mapPaneVisible && !graphOpen && !distillRun && (
+          <div className="reader-return">
+            {citationOrigin && <button type="button" className="graph-ctl" onClick={backToCitingNote}>
+              ← Back to {citationOrigin.note.name}
+            </button>}
+            {readerOrigin && <button type="button" className="graph-ctl" onClick={backToMap}>
+              ← Back to {readerOrigin.book?.runId ?? 'map'}
+            </button>}
+          </div>
+        )}
         {askOpen ? (
           <AskPanel
             key={vault}
@@ -1497,6 +1937,7 @@ export default function App() {
                 <button className="settings-reset" onClick={resetSettingsToDefaults}>
                   Reset to defaults
                 </button>
+                <button className="settings-close" onClick={() => void navigate(() => setSettingsOpen(false))}>Close</button>
               </div>
             </div>
             {settingsError && (
@@ -1520,92 +1961,7 @@ export default function App() {
               )}
             </div>
           </div>
-        ) : distillRun && stagedNote ? (
-          <StagedNoteView
-            key={`staged-${distillRun.runId}-${stagedNote}`}
-            runId={distillRun.runId}
-            name={stagedNote}
-            onBack={() => setStagedNote(null)}
-          />
-        ) : distillRun ? (
-          <GraphView
-            key={`distill-${distillRun.runId}`}
-            loadGraph={distillLoad}
-            defaultShowSources
-            initialLayout="elk"
-            emptyMessage="This run staged no notes with matching source quotes."
-            focusPath={null}
-            focusName=""
-            vaultRoot={vault}
-            talkReady={false}
-            onOpen={openStagedNote}
-            onOpenInEditor={openStagedNote}
-            onClose={() => setDistillRun(null)}
-            reloadKey={0}
-            statusSlot={
-              <>
-                <button
-                  className="status-btn distill-view-toggle"
-                  title={
-                    distillOverlay
-                      ? 'Overlay: your notes + this run together (nothing written)'
-                      : 'Standalone: this run on its own'
-                  }
-                  onClick={() => setDistillOverlay((v) => !v)}
-                >
-                  {distillOverlay ? '⧉ Overlay' : '◻ Standalone'}
-                </button>
-                {!mergeInfo && (
-                  <button
-                    className="status-btn distill-merge-btn"
-                    title="Merge this run's notes into your vault (reversible)"
-                    onClick={mergeDistillRun}
-                    disabled={mergePlanning}
-                  >
-                    {mergePlanning ? '⤓ Planning…' : '⤓ Merge'}
-                  </button>
-                )}
-                <StatusSelect
-                  kind="theme"
-                  title="App theme"
-                  value={themeMode}
-                  options={THEME_OPTIONS}
-                  onChange={pickThemeMode}
-                />
-                <TelemetryWidget enabled={telemetryOn} />
-              </>
-            }
-          />
-        ) : graphOpen && active ? (
-          <GraphView
-            key="graph"
-            focusPath={active.path}
-            focusName={active.name}
-            vaultRoot={vault}
-            talkReady={talk.ready}
-            onOpen={openPathInGraph}
-            onOpenInEditor={(path) => {
-              const f = files.find((x) => x.path === path)
-              if (f) void openFile(f).then((content) => {
-                if (content !== null) setGraphOpen(false)
-              })
-            }}
-            onClose={() => setGraphOpen(false)}
-            reloadKey={graphEpoch}
-            statusSlot={
-              <>
-                <StatusSelect
-                  kind="theme"
-                  title="App theme"
-                  value={themeMode}
-                  options={THEME_OPTIONS}
-                  onChange={pickThemeMode}
-                />
-                <TelemetryWidget enabled={telemetryOn} />
-              </>
-            }
-          />
-        ) : active && doc !== null ? (
+        ) : bookVisible || graphVisible ? null : active && doc !== null ? (
           active.rel.endsWith('.map.md') ? (
             <MapView key={active.path} content={doc} onOpen={openLink} />
           ) : (
@@ -1613,6 +1969,7 @@ export default function App() {
               <div className="note-content">
                 <Editor
                   key={`${active.path}#${noteEpoch}`}
+                  notePath={active.path}
                   initialDoc={noteSaver.getContent() ?? doc ?? ''}
                   noteNames={noteNames}
                   onChange={noteSaver.onChange}
@@ -1624,29 +1981,14 @@ export default function App() {
                   revealRange={revealRange}
                 />
               </div>
-              <div className="status-bar">
-                <StatusSelect
-                  kind="theme"
-                  title="App theme"
-                  value={themeMode}
-                  options={THEME_OPTIONS}
-                  onChange={pickThemeMode}
-                />
-                <StatusSelect
-                  kind="mode"
-                  title="View mode"
-                  value={editorMode}
-                  options={MODE_OPTIONS}
-                  onChange={(v) => setEditorMode(v as ViewMode)}
-                />
-                <button
-                  className="status-btn graph-open-btn"
-                  title="Show this note in the knowledge map"
-                  onClick={() => setGraphOpen(true)}
-                >
-                  ⊹ Map
-                </button>
-                <TelemetryWidget enabled={telemetryOn} />
+              <div className="status-bar" role="group" aria-label="Editor controls">
+                <div className="editor-controls">
+                  <StatusSelect kind="mode" prefix="View: " title="View mode" value={editorMode}
+                    options={MODE_OPTIONS} onChange={(v) => setEditorMode(v as ViewMode)} />
+                  <button type="button" className="status-btn graph-open-btn"
+                    title="Show this note in the knowledge map" onClick={() => showActiveMap()}>⊹ Map</button>
+                </div>
+                {appControls}
               </div>
               {/* Off-screen; populated only for Print / Export-PDF. */}
               <div className="print-reader md-rendered" ref={printRef} />
@@ -1660,6 +2002,11 @@ export default function App() {
                 <button className="open-btn" onClick={() => newNoteIn(vault)}>New note</button>
               </div>
             ) : vault ? 'Select a note' : 'Open a vault to begin'}
+          </div>
+        )}
+        {utilityFooter && (!settingsOpen || telemetryOn) && (
+          <div className="status-bar utility-status-bar" role="group" aria-label="App controls">
+            {settingsOpen ? <TelemetryWidget enabled={telemetryOn} /> : appControls}
           </div>
         )}
       </main>
@@ -1681,6 +2028,17 @@ export default function App() {
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
       )}
+      {importDocument && (
+        <ImportPrompt key={importDocument.id} document={importDocument} presets={FOCUS_LENSES}
+          onCancel={() => {
+            discardImport(importDocument.id)
+            setImportDocument(null)
+          }}
+          onConfirm={(focus, encoding, estimate) => {
+            setImportDocument(null)
+            void estimateThenRun(importDocument.id, focus, encoding, estimate)
+          }} />
+      )}
       {prompt && (
         <Prompt
           key={prompt.seq}
@@ -1695,12 +2053,12 @@ export default function App() {
           onCancel={() => setPrompt(null)}
         />
       )}
-      {mergePlan && (
+      {mergePlan && mergePlan.run === distillRun && (
         <MergeDialog
           plan={mergePlan.plan}
-          folder={`Distilled/${mergePlan.runId}`}
+          folder={`Distilled/${mergePlan.run.runId}`}
           onCancel={() => setMergePlan(null)}
-          onConfirm={(sameAs) => confirmMerge(mergePlan.runId, sameAs)}
+          onConfirm={(sameAs) => confirmMerge(mergePlan.run.runId, sameAs)}
         />
       )}
       {savePrompt ? (
@@ -1720,102 +2078,102 @@ export default function App() {
           message={confirm.message}
           confirmLabel={confirm.confirmLabel}
           onConfirm={confirm.onConfirm}
-          onCancel={() => setConfirm(null)}
+          onCancel={() => {
+            if (confirm.importId) discardImport(confirm.importId)
+            setConfirm(null)
+          }}
         />
       )}
-      {distilling && (
-        <div className="distill-toast" role="status">
-          <span className="distill-spinner" aria-hidden="true" />
-          <span className="distill-toast-lines">
-            {distillEstimate && (
-              <span className="distill-toast-plan">
-                Reading {distillEstimate.chunks} passage
-                {distillEstimate.chunks === 1 ? '' : 's'} in {distillEstimate.calls} step
-                {distillEstimate.calls === 1 ? '' : 's'}.
+      <div className="app-notices">
+        {preparingImport && !distilling && (
+          <div className="distill-toast" role="status">
+            Preparing document…
+            <button className="distill-cancel" onClick={() => discardImport(preparingImport)}>Cancel</button>
+          </div>
+        )}
+        {distilling && (
+          <div className="distill-toast" role="status">
+            <span className="distill-spinner" aria-hidden="true" />
+            <span className="distill-toast-lines">
+              {distillEstimate && (
+                <span className="distill-toast-plan">
+                  Reading {distillEstimate.chunks} passage
+                  {distillEstimate.chunks === 1 ? '' : 's'} in {distillEstimate.calls} step
+                  {distillEstimate.calls === 1 ? '' : 's'}.
+                </span>
+              )}
+              <span className="distill-toast-label">
+                {distilling.pausing ? 'Pausing…' : distilling.settled ? 'Updating distilled runs…' : (
+                  <>
+                    Distilling…{' '}
+                    {({
+                      resuming: 'resuming',
+                      chunking: 'reading',
+                      extracting: 'extracting concepts',
+                      finalizing: 'writing notes',
+                      themes: 'grouping into themes',
+                      done: 'done'
+                    } as Record<string, string>)[distilling.phase] ?? 'starting'}
+                    {distilling.total > 0 ? ` (${distilling.done}/${distilling.total})` : ''}
+                  </>
+                )}
               </span>
-            )}
-            <span className="distill-toast-label">
-            Distilling…{' '}
-            {({
-              chunking: 'reading',
-              extracting: 'extracting concepts',
-              finalizing: 'writing notes',
-              themes: 'grouping into themes',
-              done: 'done'
-            } as Record<string, string>)[distilling.phase] ?? 'starting'}
-            {distilling.total > 0 ? ` (${distilling.done}/${distilling.total})` : ''}
             </span>
-          </span>
-          {distilling.runId && (
-            <button
-              className="distill-cancel"
-              onClick={() => {
-                distillCancelled.current = true
-                void window.nodebook.distillCancel(distilling.runId!)
-              }}
-            >
-              Cancel
+            {distilling.runId && (
+              <button
+                className="distill-cancel"
+                type="button"
+                title="Pause and keep reading progress"
+                disabled={distilling.pausing || distilling.settled}
+                onClick={() => void pauseDistilling()}
+              >
+                Pause
+              </button>
+            )}
+          </div>
+        )}
+        {bookVisible && mergeStatus?.status.merged && !mergeStatus.dismissed && (
+          <div className="distill-merged-banner" role="status">
+            <span>
+              Merged {mergeStatus.status.count} {mergeStatus.status.count === 1 ? 'note' : 'notes'} into{' '}
+              <code>{mergeStatus.status.folder}</code>.
+            </span>
+            <button className="distill-undo" disabled={!!currentMergeWork} onClick={() => void undoMerge()}>
+              {currentMergeWork?.label ?? 'Undo'}
             </button>
-          )}
-        </div>
-      )}
-      {mergeInfo && (
-        <div className="distill-merged-banner" role="status">
-          <span>
-            Merged {mergeInfo.count} {mergeInfo.count === 1 ? 'note' : 'notes'} into{' '}
-            <code>{mergeInfo.folder}</code>.
-          </span>
-          <button
-            className="distill-undo"
-            onClick={() => {
-              const runId = mergeInfo.runId
-              void window.nodebook.distillUnmerge(runId).then((r) => {
-                setMergeInfo(null)
-                setDistillDoneNote(
-                  `Undone — ${r.removed} note${r.removed === 1 ? '' : 's'} removed` +
-                    (r.trashed > 0
-                      ? `, ${r.trashed} edited note${r.trashed === 1 ? '' : 's'} moved to the Trash.`
-                      : '.')
-                )
-                void refreshRuns() // the run's "merged" tag changed
-              })
-            }}
-          >
-            Undo
-          </button>
-          <button
-            className="distill-merged-close"
-            aria-label="Dismiss"
-            onClick={() => setMergeInfo(null)}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-      {distillDoneNote && (
-        <div className="distill-coverage-banner" role="status">
-          <span>{distillDoneNote}</span>
-          <button
-            className="distill-coverage-close"
-            aria-label="Dismiss"
-            onClick={() => setDistillDoneNote(null)}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-      {error && (
-        <div className="error-banner" role="alert">
-          <span>{error}</span>
-          <button
-            className="error-banner-close"
-            aria-label="Dismiss"
-            onClick={() => setError(null)}
-          >
-            ✕
-          </button>
-        </div>
-      )}
+            <button className="distill-merged-close" aria-label="Dismiss"
+              onClick={() => setRunMerge({ ...mergeStatus, dismissed: true })}>✕</button>
+          </div>
+        )}
+        {distillDoneNote && (
+          <div className="distill-coverage-banner" role="status">
+            <span>{distillDoneNote}</span>
+            <button
+              className="distill-coverage-close"
+              aria-label="Dismiss"
+              onClick={() => setDistillDoneNote(null)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="error-banner" role="alert">
+            <span>{error}</span>
+            <button
+              className="error-banner-close"
+              aria-label="Dismiss"
+              onClick={() => setError(null)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
+      {viewFigure && <FigureDialog
+        key={JSON.stringify([viewFigure.path, viewFigure.runId, viewFigure.id, viewFigure.occurrence, viewFigure.ref?.location, viewFigure.ref?.label])}
+        target={viewFigure} onClose={() => setViewFigure(null)} />}
     </div>
+    </OpenFigure.Provider>
   )
 }

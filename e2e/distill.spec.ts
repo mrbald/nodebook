@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import {
   cpSync,
@@ -67,10 +67,13 @@ test.beforeAll(async () => {
   bookPath = join(userDataDir, 'on-government.md')
   writeFileSync(bookPath, BOOK)
 
-  app = await electron.launch({
-    args: [projectRoot],
+  const binary = process.env.NODEBOOK_SMOKE_BINARY
+  app = await launchElectron({
+    executablePath: binary,
+    args: binary ? [] : [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
+  if (binary) expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(true)
   await app.evaluate(async ({ dialog }, dir) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] })
   }, vaultDir)
@@ -94,7 +97,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 /** Distill a document by path. The renderer never names a path to `distillRun`
@@ -172,6 +175,11 @@ test('OVERLAY unions the vault + the run with provenance, writing nothing', asyn
   expect(canon).not.toContain('on-government')
 })
 
+async function pickRoutedLayout(): Promise<void> {
+  await page.locator('.graph-view:visible').getByTitle('Map layout').click()
+  await page.getByRole('menuitemradio', { name: 'Routed (ELK)', exact: true }).click()
+}
+
 test('File ▸ Distill a document… runs from the menu and shows the run map', async () => {
   // Point the file dialog at the book, then fire the menu command.
   await app.evaluate(async ({ dialog }, p) => {
@@ -186,14 +194,12 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
   await expect(focusModal).toBeVisible()
   await focusModal.getByRole('button', { name: 'Distill' }).click()
   // The run map renders via the reused GraphView, with nodes + a source edge.
-  await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
-  await expect(page.locator('.graph-canvas')).toHaveAttribute('data-layout', 'routed')
-  await expect(page.locator('.graph-node').first()).toBeVisible()
-  expect(await page.locator('.graph-node').count()).toBeGreaterThan(1)
-  // Not `toBeVisible`: a two-node map can lay its nodes out exactly level, and
-  // a horizontal SVG line has a zero-height box Playwright calls hidden. So ask
-  // the geometry instead — an edge that is really drawn has a length.
-  const edge = page.locator('path.graph-edge[data-automatic="true"]').first()
+  await expect(page.locator('.graph-view:visible')).toBeVisible({ timeout: 15000 })
+  await expect(page.locator('.graph-canvas:visible')).toHaveAttribute('data-layout', 'force')
+  await expect(page.locator('.graph-node:visible').first()).toBeVisible()
+  expect(await page.locator('.graph-node:visible').count()).toBeGreaterThan(1)
+  // A horizontal SVG line has a zero-height box, so check its geometry.
+  const edge = page.locator('line.graph-edge').first()
   await expect(edge).toBeAttached()
   const edgeLength = await edge.evaluate((el) => (el as SVGGeometryElement).getTotalLength())
   expect(edgeLength).toBeGreaterThan(0)
@@ -211,8 +217,8 @@ test('File ▸ Distill a document… runs from the menu and shows the run map', 
 
 test('a closed run map is reachable again from the sidebar "Distilled runs" list', async () => {
   // Close the run map opened by the previous test — the run must NOT be lost.
-  await page.locator('.graph-close').click()
-  await expect(page.locator('.graph-view')).toHaveCount(0)
+  await page.locator('.graph-close:visible').click()
+  await expect(page.locator('.graph-view:visible')).toHaveCount(0)
 
   const section = page.locator('.runs-section')
   await expect(section).toBeVisible()
@@ -222,8 +228,8 @@ test('a closed run map is reachable again from the sidebar "Distilled runs" list
 
   // Clicking the row reopens the staged run's map (the graph loads async).
   await row.click()
-  await expect(page.locator('.graph-canvas')).toHaveAttribute('data-layout', 'routed')
-  await expect.poll(() => page.locator('.graph-node').count()).toBeGreaterThan(1)
+  await expect(page.locator('.graph-canvas:visible')).toHaveAttribute('data-layout', 'force')
+  await expect.poll(() => page.locator('.graph-node:visible').count()).toBeGreaterThan(1)
 })
 
 test('the run map groups the notes under theme nodes, drawn as diamonds', async () => {
@@ -241,6 +247,8 @@ test('the run map groups the notes under theme nodes, drawn as diamonds', async 
   for (const e of partOf) expect(themeIds).toContain(e.target)
 
   // The routed map draws diamond glyphs for themes inside their node boxes.
+  await pickRoutedLayout()
+  await expect(page.locator('.graph-canvas:visible')).toHaveAttribute('data-layout', 'routed')
   await expect(page.locator('.graph-node path.graph-note-glyph')).toHaveCount(themes.length)
   await expect(page.locator('.graph-shape-key')).toContainText('theme')
 
@@ -291,14 +299,21 @@ test('distills an EPUB (unzip + HTML→markdown) → cited notes', async () => {
   expect(res.stats.notes).toBeGreaterThan(0)
 })
 
-test('the run map toggles Standalone ⟷ Overlay (overlay adds the vault notes)', async () => {
+test('the run map scope selects Standalone or Overlay (overlay adds the vault notes)', async () => {
   // The run map is open from the previous test.
-  await expect(page.locator('.distill-view-toggle')).toContainText('Standalone')
-  const standalone = await page.locator('.graph-node').count()
-  await page.locator('.distill-view-toggle').click()
-  await expect(page.locator('.distill-view-toggle')).toContainText('Overlay')
+  const scope = page.getByTitle('Book map scope')
+  await expect(scope).toHaveAccessibleName(/^Scope: Standalone/)
+  await expect(page.locator('.graph-node:visible').first()).toBeVisible()
+  const standalone = await page.locator('.graph-node:visible').count()
+  await scope.click()
+  await page.getByRole('menuitemradio', { name: 'Overlay', exact: true }).click()
+  await expect(scope).toHaveAccessibleName(/^Scope: Overlay/)
   // Overlay folds in your vault's notes, so there are strictly more nodes.
-  await expect.poll(() => page.locator('.graph-node').count()).toBeGreaterThan(standalone)
+  await expect.poll(() => page.locator('.graph-node:visible').count()).toBeGreaterThan(standalone)
+  await scope.click()
+  await page.getByRole('menuitemradio', { name: 'Standalone', exact: true }).click()
+  await expect(scope).toHaveAccessibleName(/^Scope: Standalone/)
+  await expect(page.locator('.graph-node:visible')).toHaveCount(standalone)
 })
 
 test('MERGE writes the run into the vault (now canonical); UNDO reverses it', async () => {
@@ -376,7 +391,8 @@ test('a staged note opens READ-ONLY before merge, and its citation shows the quo
 
   // A narrow overview uses the same label treatment as a dense run. Activate
   // the title zoom from the keyboard, then inspect and open a note by keyboard.
-  const canvas = page.locator('.graph-canvas')
+  await pickRoutedLayout()
+  const canvas = page.locator('.graph-canvas:visible')
   await expect(canvas).toHaveAttribute('data-layout', 'routed')
   const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize())
   try {
@@ -389,8 +405,20 @@ test('a staged note opens READ-ONLY before merge, and its citation shows the quo
     await resize(850)
     const zoom = page.getByRole('button', { name: 'Zoom to titles' })
     await expect(zoom).toBeVisible()
-    await zoom.press('Enter')
     const book = canvas.getByRole('button', { name: 'on-government', exact: true })
+    await expect(canvas).toHaveClass(/graph-routed-overview/)
+    await book.press('Space')
+    const title = canvas.locator('.graph-routed-label.is-active text', { hasText: 'on-government' })
+    await expect(title).toBeVisible()
+    const pixels = await title.evaluate((text: SVGTextElement) => {
+      const matrix = text.getScreenCTM()!
+      return parseFloat(getComputedStyle(text).fontSize) * Math.hypot(matrix.a, matrix.b)
+    })
+    expect(pixels).toBeGreaterThanOrEqual(11.9)
+    await expect(canvas.locator('.graph-edge-path.is-incident[marker-end]').first()).toBeAttached()
+    await expect(canvas.locator('.graph-edge-path.is-dim[marker-end]')).toHaveCount(0)
+    await zoom.press('Enter')
+    await expect(canvas.locator('.graph-routed-label')).toHaveCount(0)
     await expect(book).toBeFocused()
     await expect(book.locator('text')).toBeVisible()
 
@@ -408,7 +436,7 @@ test('a staged note opens READ-ONLY before merge, and its citation shows the quo
 
     const node = canvas.getByRole('button', { name: concept, exact: true })
     await node.press('Space')
-    await expect(page.locator('.graph-insp-title')).toContainText(concept)
+    await expect(page.locator('.graph-insp-title:visible')).toContainText(concept)
     await node.press('Enter')
   } finally {
     await app.evaluate(({ BrowserWindow }, [width, height]) =>
@@ -431,8 +459,10 @@ test('a staged note opens READ-ONLY before merge, and its citation shows the quo
   const quoted = (await page.locator('.staged-source mark').innerText()).trim()
   expect(BOOK).toContain(quoted)
 
+  await page.locator('.staged-note-back-note').click()
+  await expect(cite).toBeFocused()
   await page.locator('.staged-note-back').click()
-  await expect(page.locator('.graph-view')).toBeVisible()
+  await expect(page.locator('.graph-view:visible')).toBeVisible()
 })
 
 /** A distilled concept note this run staged — never the book itself. */
@@ -442,7 +472,7 @@ const someConcept = (id: string): string => stagedNames(id).find((n) => n !== 'o
  *  share a prefix ("Faction" and "Faction (on-government)"), so a substring
  *  match would open whichever the tree happened to list first. */
 const openNote = async (name: string): Promise<void> => {
-  if (await page.locator('.graph-close').count()) await page.locator('.graph-close').click()
+  if (await page.locator('.graph-close:visible').count()) await page.locator('.graph-close:visible').click()
   const exact = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
   await page.locator('.tree-name').filter({ hasText: exact }).first().click()
 }
@@ -534,12 +564,12 @@ test('ticking "same as the existing note" collapses the two into one dot', async
   expect(one.aliases).toEqual([`${clashName} (on-government)`])
 
   // …and the map's inspector says so, in words.
-  await page.locator('.graph-close').click()
+  await page.locator('.graph-close:visible').click()
   await page.locator('.tree-file', { hasText: clashName }).first().click()
   await page.locator('.graph-open-btn', { hasText: 'Map' }).click()
-  await page.locator('.graph-node', { hasText: clashName }).first().click()
-  await expect(page.locator('.graph-insp-aliases')).toContainText(`${clashName} (on-government)`)
-  await page.locator('.graph-close').click()
+  await page.locator('.graph-node:visible', { hasText: clashName }).first().click()
+  await expect(page.locator('.graph-insp-aliases:visible')).toContainText(`${clashName} (on-government)`)
+  await page.locator('.graph-close:visible').click()
 
   // Reading either note now shows what the other says. Your note has no
   // citations of its own, so everything under Sources came from the twin and
@@ -622,7 +652,7 @@ test('a citation says where the passage is, and the document opens its original'
   // Open a merged concept note: its Sources panel names the passage, not offsets.
   const concept = someConcept(id)
   const merged = readdirSync(join(root, 'Distilled', id)).find((n) => n.startsWith(concept))!
-  if (await page.locator('.graph-close').count()) await page.locator('.graph-close').click()
+  if (await page.locator('.graph-close:visible').count()) await page.locator('.graph-close:visible').click()
   await page.locator('.tree-file', { hasText: merged.replace(/\.md$/, '') }).first().click()
   const cite = page.locator('.backlinks .source-cite').first()
   await expect(cite).toBeVisible()
@@ -684,7 +714,7 @@ test('a run can be told what to focus on, and the runs list says what it was', a
   // The fixed words behind the "Timeline" lens — a lens is reproducible because
   // it is a string, not a paraphrase (see FOCUS_LENSES in App.tsx).
   const TIMELINE = 'what happens, in order: events, dates, and what led to what'
-  if (await page.locator('.graph-close').count()) await page.locator('.graph-close').click()
+  if (await page.locator('.graph-close:visible').count()) await page.locator('.graph-close:visible').click()
   await app.evaluate(async ({ dialog }, p) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] })
   }, bookPath)
@@ -698,7 +728,7 @@ test('a run can be told what to focus on, and the runs list says what it was', a
   await expect(modal.locator('.modal-input')).toHaveValue(TIMELINE)
   await modal.getByRole('button', { name: 'Distill' }).click()
 
-  await expect(page.locator('.graph-view')).toBeVisible({ timeout: 15000 })
+  await expect(page.locator('.graph-view:visible')).toBeVisible({ timeout: 15000 })
   // The run remembers what it was read for, so two runs of one book can be
   // told apart in the sidebar.
   const focused = await page.evaluate(
@@ -757,4 +787,49 @@ test('running one of two estimated documents uses its own prepared text', async 
   writeFileSync(first, '# Replacement\nThis text was never estimated.')
   const run = await page.evaluate((picked) => window.nodebook.distillRun(picked), id)
   expect(readFileSync(join(vaultDir, '.distill', run.runId, 'source.md'), 'utf8')).toBe(BOOK)
+})
+
+test('legacy text import previews a local guess, supports correction, and stages the approved text', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nodebook-cyrillic-'))
+  const original = join(directory, 'Письма.txt')
+  const line = 'Старые письма хранят историю переписки.'
+  // Independently encoded Windows-1251 bytes, including lowercase я (0xff).
+  const bytes = Buffer.from('d1f2e0f0fbe520efe8f1fcece020f5f0e0edfff220e8f1f2eef0e8fe20efe5f0e5efe8f1eae82e', 'hex')
+  const preamble = 'Archive header\r\n'.repeat(100)
+  const content = preamble + Array(5).fill(line).join('\r\n')
+  const originalBytes = Buffer.concat([Buffer.from(preamble), Buffer.from(Array(5).fill(bytes.toString('hex')).join('0d0a'), 'hex')])
+  writeFileSync(original, originalBytes)
+  const manifest = join(vaultDir, '.distill', 'sources.json')
+  const manifestBytes = () => existsSync(manifest) ? readFileSync(manifest, 'utf8') : null
+  const initialManifest = manifestBytes()
+  const start = async (): Promise<void> => {
+    await app.evaluate(({ BrowserWindow, dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
+      BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'distill')
+    }, original)
+  }
+  const existing = await page.evaluate(async () => (await window.nodebook.distillListRuns()).map((run) => run.id))
+  const modal = page.getByRole('dialog')
+  const preview = modal.getByLabel('Decoded text preview')
+  await start()
+  await expect(preview).toContainText(line)
+  await expect(modal.getByRole('combobox').locator('option:checked')).toContainText('Windows-1251')
+  expect(manifestBytes()).toBe(initialManifest)
+  await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
+  expect(await page.evaluate(async () => (await window.nodebook.distillListRuns()).length)).toBe(existing.length)
+  expect(manifestBytes()).toBe(initialManifest)
+  await start()
+  await expect(preview).toContainText(line)
+  await modal.getByRole('combobox').selectOption('koi8-r')
+  await expect(preview).toBeVisible()
+  await expect(preview).not.toContainText(line)
+  await modal.getByRole('combobox').selectOption('windows-1251')
+  await expect(preview).toContainText(line)
+  expect(manifestBytes()).toBe(initialManifest)
+  await modal.getByRole('button', { name: 'Timeline', exact: true }).click()
+  await modal.getByRole('button', { name: 'Distill', exact: true }).click()
+  await expect.poll(async () => (await page.evaluate(() => window.nodebook.distillListRuns())).length).toBe(existing.length + 1)
+  const run = (await page.evaluate(() => window.nodebook.distillListRuns())).find((item) => !existing.includes(item.id))!
+  expect(readFileSync(join(vaultDir, '.distill', run.id, 'source.md'), 'utf8')).toBe(content)
+  expect(readFileSync(original)).toEqual(originalBytes)
 })

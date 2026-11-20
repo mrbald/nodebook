@@ -22,3 +22,19 @@ describe('renderAskMarkdown', () => {
     expect(html).not.toContain('<a ')
   })
 })
+
+
+it('resolves only managed relative images in the scoped reader and counts repeated placements', () => {
+  const id = 'a'.repeat(64)
+  const note = '/my vault/Source book.md'
+  const input = `![One](figures/${id}.png) and ![Two](figures/${id}.png)`
+  const html = renderMarkdown(input, { path: note, runId: 'book' })
+  expect(html).toContain('data-occurrence="0"')
+  expect(html).toContain('data-occurrence="1"')
+  expect(html).toContain(`nodebook-figure://asset/${id}?note=%2Fmy+vault%2FSource+book.md&amp;run=book`)
+  const handmade = renderMarkdown(`![Other](nodebook-figure://asset/${id}?note=other)`, { path: note })
+  expect(handmade).not.toContain('<img')
+  const linked = renderMarkdown(`[![Chart](figures/${id}.png)](https://example.org/)`, { path: note })
+  expect(linked).toContain('data-figure-id')
+  expect(linked).not.toContain('<a ')
+})

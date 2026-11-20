@@ -30,6 +30,16 @@ describe('groupsLayout', () => {
     ])
   })
 
+  it('gives a large community room between its notes alongside small communities', () => {
+    const members = Array.from({ length: 80 }, (_, i) => ({ id: `member-${i}` }))
+    const islands = Array.from({ length: 8 }, (_, i) => ({ id: `island-${i}` }))
+    const edges = members.slice(1).map(({ id }) => ({ source: members[0].id, target: id }))
+    const positions = groupsLayout([...members, ...islands], edges)
+    const points = members.map(({ id }) => positions.get(id)!)
+    const nearest = points.flatMap((point, i) => points.slice(i + 1).map((other) => d(point, other)))
+    expect(Math.min(...nearest)).toBeGreaterThan(12)
+  })
+
   it('handles empty and single-node graphs', () => {
     expect(groupsLayout([], []).size).toBe(0)
     expect(groupsLayout([{ id: 'X' }], [])).toEqual(new Map([['X', { x: 400, y: 300 }]]))

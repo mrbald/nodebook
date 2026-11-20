@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -35,7 +35,7 @@ test.beforeAll(async () => {
     writeFileSync(join(vaultDir, dir, `From-${dir}.md`), `# From-${dir}\n\nSee [[Twin]].\n`)
   }
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-conn-userdata-'))
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -48,7 +48,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('the Connections panel hides self-references', async () => {

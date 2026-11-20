@@ -1,4 +1,8 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { handleFigureRequest, searchFigureSources } from './figureProtocol'
+import { FigureAnalyses } from './distill/figureAnalysis'
+import { resolveNoteFigureBytes, resolveNoteFigures } from './distill/noteFigures'
+import type { FigureAnalysis, FigureAnalysisStatus, FigureContext } from '../shared/figures'
+import { app, shell, BrowserWindow, ipcMain, dialog, crashReporter, protocol } from 'electron'
 import { join, relative, dirname, resolve, basename } from 'path'
 import {
   promises as fs,
@@ -21,13 +25,17 @@ import chokidar, { type FSWatcher } from 'chokidar'
 import type { MarkdownFile, MenuState, SaveFileResult, VaultListing } from '../shared/types'
 import { VaultIndex } from './indexer'
 import { overlayGraph, noteName } from './graph'
+import { noteGist } from '../shared/markdown/noteGist'
+import { encodingSample } from '../shared/encodingSample'
 import { noteVector, sameAsCandidatesYielding, type NoteVec } from './distill/sameAs'
 import { chunkMarkdown, embedText } from './rag/chunk'
-import { distill, probeChat, estimateDistill, type DistillEmbedder } from './distill/run'
+import { distill, probeChat, estimateDistill, figureOnlyResult, type DistillEmbedder, type DistillResult } from './distill/run'
 import { normalizeFocus } from './distill/extract'
 import { StagedRunStore } from './distill/staged'
-import { convertDocumentWithCoverage } from './distill/convert'
-import { convertSource, originalPathOf, readSourceText, sha1 } from './distill/sources'
+import { ReadingCopies, READING_COPY_EXTENSIONS } from './distill/readingCopy'
+import { convertDocumentWithCoverage, supportsImportTextEncoding } from './distill/convert'
+import { bindPickedSource, originalPathOf, prepareSource, publishSource, type PickedSourceFile, type PreparedSource } from './distill/sources'
+import { IMPORT_TEXT_ENCODINGS, importTextEncodingLabel } from '../shared/textEncodings'
 import { distillRunId, uniqueRunId } from './distill/runId'
 import {
   mergeRun,
@@ -36,7 +44,6 @@ import {
   readRunMeta,
   readRunJson,
   readRunNotes,
-  readStagedNote,
   sourceNoteName,
   contentHash,
   migrateDistillRuns,
@@ -45,6 +52,7 @@ import {
   isUnfinishedRun,
   checkpointStore,
   RESERVED_RUN_IDS,
+  archivedFigureRunIds,
   type RunSource
 } from './distill/artifact'
 import { mergePlan, twinOf } from './distill/mergePlan'
@@ -62,7 +70,7 @@ import {
   type ThemeMode
 } from './settings'
 import { makeChatModel } from './rag/chat'
-import { ASK_SYSTEM, NO_ASK_EVIDENCE, packAskContext } from './rag/ask'
+import { ASK_SYSTEM, NO_ASK_EVIDENCE, authoredAskPassages, packAskContext } from './rag/ask'
 import { DEFAULT_INPUT_BUDGET, inputBudgetFor } from './rag/provider'
 import { buildAppMenu } from './menu'
 import { addRecent } from './recents'
@@ -100,6 +108,13 @@ app.setAboutPanelOptions({ applicationName: 'Nodebook' })
 // useful for a portable install). Must run before app is ready.
 if (process.env['NODEBOOK_USER_DATA']) {
   app.setPath('userData', process.env['NODEBOOK_USER_DATA'])
+}
+
+// Keep post-start macOS test main-process crash dumps in Playwright's output.
+const e2eCrashDumps = process.env['NODEBOOK_E2E_CRASH_DUMPS']
+if (process.platform === 'darwin' && process.env['NODEBOOK_E2E'] === '1' && e2eCrashDumps) {
+  app.setPath('crashDumps', e2eCrashDumps)
+  crashReporter.start({ uploadToServer: false, ignoreSystemCrashHandler: true })
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -290,17 +305,43 @@ let index: VaultIndex | null = null
 let watcher: FSWatcher | null = null
 let vaultRoot: string | null = null
 let distillRuns: StagedRunStore | null = null
-const distillAbort = new Map<string, AbortController>()
 const askAbort = new Map<string, AbortController>()
-// Exactly one distill run at a time: a second would race the first on the same
-// run directory and clobber its AbortController. Claimed synchronously at the
-// top of `distill:run`, released in its finally.
-let activeRunId: string | null = null
-// Documents the user picked to distill: an opaque id → the absolute path. The
-// renderer only ever holds the id, so it cannot name a path of its own to run.
-type PickedDocument = { path: string; estimated?: Omit<RunSource, 'text'> }
+const vaultThemesAbort = new Map<string, AbortController>()
+// Keep cancellation and completion tied to the same run, including its preflight.
+let activeDistill: {
+  id: string
+  controller: AbortController
+  done: Promise<DistillRunResult>
+} | null = null
+
+function withDistillRun(id: string, work: (signal: AbortSignal) => Promise<DistillRunResult>): Promise<DistillRunResult> {
+  if (activeDistill) throw new Error('A document is already being distilled — wait for it to finish or pause it.')
+  const controller = new AbortController()
+  const done = Promise.resolve().then(() => {
+    controller.signal.throwIfAborted()
+    return work(controller.signal)
+  }).finally(() => { activeDistill = null })
+  activeDistill = { id, controller, done }
+  return done
+}
+
+// Only main knows the selected file and holds the approved preview's text.
+interface PickedDocument {
+  path: string
+  file: PickedSourceFile | null
+  estimateRequest?: AbortController
+  estimated?: {
+    id: string
+    focus: string
+    choice?: string
+    source: PreparedSource
+  }
+}
 const pickedDocs = new Map<string, PickedDocument>()
+const distillEncodingOptions = IMPORT_TEXT_ENCODINGS.map(({ id, label }) => ({ name: id, label }))
 const telemetry = new Telemetry()
+const readingCopies = new ReadingCopies(app.getPath('userData'))
+const figureAnalyses = new FigureAnalyses(app.getPath('userData'))
 
 // Pending distill embed round-trips (the renderer WASM embedder answers main's
 // requests over IPC), keyed by their reply channel. Tracked globally so a
@@ -315,6 +356,19 @@ const pendingEmbeds = new Map<string, (err: Error) => void>()
 // time — a tick means "same as the twin I was shown", nothing else.
 const shownCandidates = new Map<string, Map<string, string>>()
 const shownTwins = new Map<string, Map<string, string>>()
+const distillWrites = new Map<string, Promise<void>>()
+
+/** Merge, undo and discard share figure ownership. An undo can yield while
+ *  moving edited files to the Trash, so order those writes within each vault. */
+function queueDistillWrite<T>(root: string, write: () => T | Promise<T>): Promise<T> {
+  const result = (distillWrites.get(root) ?? Promise.resolve()).then(write)
+  const done = result.then(() => {}, () => {})
+  distillWrites.set(root, done)
+  void done.then(() => {
+    if (distillWrites.get(root) === done) distillWrites.delete(root)
+  })
+  return result
+}
 
 async function closeVault(): Promise<void> {
   const previousIndex = index
@@ -324,8 +378,10 @@ async function closeVault(): Promise<void> {
   watcher = null
   for (const ctrl of askAbort.values()) ctrl.abort()
   askAbort.clear()
-  for (const ctrl of distillAbort.values()) ctrl.abort()
-  distillAbort.clear()
+  for (const ctrl of vaultThemesAbort.values()) ctrl.abort()
+  vaultThemesAbort.clear()
+  const stopping = activeDistill
+  stopping?.controller.abort()
   // Fail any in-flight embed round-trip now — otherwise its `ipcMain.once`
   // listener (and the run awaiting it) would hang until the timeout, or
   // forever if the renderer never replies (e.g. it reloaded mid-run).
@@ -333,11 +389,13 @@ async function closeVault(): Promise<void> {
   pendingEmbeds.clear()
   shownCandidates.clear()
   shownTwins.clear()
+  readingCopies.clear()
+  for (const picked of pickedDocs.values()) picked.estimateRequest?.abort()
   pickedDocs.clear()
   distillRuns?.close()
   distillRuns = null
   previousIndex?.close()
-  await previousWatcher?.close()
+  await Promise.all([previousWatcher?.close(), stopping?.done.catch(() => {})])
 }
 
 async function indexPath(path: string): Promise<void> {
@@ -382,6 +440,15 @@ function notifyIndexChanged(): void {
   mainWindow?.webContents.send('index:changed')
 }
 
+function notifyVaultThemesChanged(): void {
+  mainWindow?.webContents.send('index:vaultThemes:changed')
+}
+
+function vaultThemeModel(): string | null {
+  const { enabled, embed } = readSettings().talk
+  return enabled ? embed.model : null
+}
+
 function talkStatus(): TalkStatus {
   const { enabled, embed } = readSettings().talk
   const generation = enabled ? index?.talkGenerationFor(embed.model) ?? null : null
@@ -408,6 +475,7 @@ async function chunkUnchunkedFiles(target: VaultIndex): Promise<void> {
 }
 
 async function openVault(root: string): Promise<VaultListing> {
+  if (vaultRoot === root && activeDistill) return scanVault(root)
   await closeVault()
   vaultRoot = root
   index = new VaultIndex(join(root, '.nodebook', 'index.db'))
@@ -492,13 +560,10 @@ async function openVault(root: string): Promise<VaultListing> {
 // in the renderer (the same one "talk" uses); main owns the run db + chat. One
 // request/response round-trip per batch, correlated by a sequence id.
 //
-// The reply channel is namespaced with the run's own id (`token`), not just a
-// per-run-local sequence number — two concurrent runs each starting their
-// sequence at 1 would otherwise share `distill:embed:res:1` and cross-resolve
-// each other's vectors. A per-batch timeout (5 min — the first batch may need
-// to download the embedding model) and cleanup on vault close mean a run fails
-// fast instead of hanging if the renderer never replies (e.g. a reload mid-run).
-function rendererEmbedder(token: string, timeoutMs = 5 * 60_000): DistillEmbedder {
+// A paused batch can still reply after Resume starts. Give each embedder a fresh
+// token so its first batch cannot consume the previous attempt's reply.
+function rendererEmbedder(timeoutMs = 5 * 60_000): DistillEmbedder {
+  const token = randomUUID()
   let seq = 0
   return {
     embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]> {
@@ -554,23 +619,18 @@ function rendererEmbedder(token: string, timeoutMs = 5 * 60_000): DistillEmbedde
   }
 }
 
-/**
- * Convert a picked document to markdown once, through the vault's source store.
- *
- * The store is the cache AND the identity: an unchanged file converts once
- * ever, not once per run, and the run records the hash it got — so two runs of
- * the same book are recognisable as such, and the book itself is written into
- * the vault only once (see `sources.ts` and `artifact.mergeRun`).
- */
-async function convertPicked(filePath: string): Promise<RunSource> {
+/** Prepare a picked document in memory until the reader confirms the import. */
+async function preparePicked(picked: PickedDocument, encoding?: string, signal?: AbortSignal): Promise<PreparedSource> {
   if (!vaultRoot) throw new Error('Open a vault first.')
-  const stored = await convertSource(vaultRoot, filePath, convertDocumentWithCoverage)
-  return {
-    file: basename(filePath),
-    text: stored.text,
-    pdf: stored.record.pdf,
-    hash: stored.hash,
-    originalPath: stored.record.originalPath
+  const file = picked.file
+  if (!file) throw new Error('The picked document is unavailable. Pick it again.')
+  return prepareSource(vaultRoot, file.path, convertDocumentWithCoverage, { picked: file, encoding, signal })
+}
+
+function validateEncodingChoice(picked: PickedDocument, encoding: unknown): void {
+  if (encoding === undefined) return
+  if (!supportsImportTextEncoding(picked.path) || !distillEncodingOptions.some((item) => item.name === encoding)) {
+    throw new Error('Pick a supported text encoding for this document.')
   }
 }
 
@@ -595,72 +655,73 @@ function distillBudget(): { inputBudget: number; windowSize: number; maxCalls: n
  * artifact. Both entry points share this so a resume behaves exactly like a
  * run: same single-run slot, same pre-flight, same progress, same checkpoint.
  *
- * The run dir is created (`beginRun`) BEFORE the first model call: that record
+ * The run dir is created (`beginRun`) before extraction: that record
  * plus the checkpoint is what makes a cancelled or crashed run resumable, and
  * `meta.json` — written only on success — is what marks it finished.
  */
 async function runDistillPipeline(
   runId: string,
   source: RunSource,
-  opts: { resume: boolean; focus?: string }
+  opts: { resume: boolean; focus?: string; signal: AbortSignal }
 ): Promise<DistillRunResult> {
   const root = vaultRoot
   const runs = distillRuns
   if (!root || !runs) throw new Error('Open a vault first.')
-  // The caller has claimed `activeRunId` and releases it; this only owns the
-  // abort handle, so a cancel can reach the run while it is in flight.
-  const cfg = chatProviderConfig()
-  if (!cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
-  const ctrl = new AbortController()
-  distillAbort.set(runId, ctrl)
-  try {
+  const budget = distillBudget()
+  const onlyFigures = !!source.figures?.length && estimateDistill(source.text, { ...budget, focus: opts.focus }, source.figures).chunks === 0
+  const cfg = onlyFigures ? null : chatProviderConfig()
+  if (!onlyFigures && !cfg) throw new Error('Distill needs a chat provider — set [talk.chat] in Settings.')
+  if (!opts.resume)
+    beginRun(root, runId, source, { provider: cfg?.kind ?? 'none', model: cfg?.model ?? '' }, opts.focus)
+  mainWindow?.webContents.send('distill:progress', runId, { phase: 'starting', done: 0, total: 0 })
+  let result: DistillResult
+  if (cfg) {
     const chat = makeChatModel(cfg)
     // Fail fast: confirm the model actually responds (key valid, local server up)
     // BEFORE the expensive embedding, not half-way through the run. CLI backends
     // have multi-second cold starts (measured ~6.5s for a trivial codex round-trip).
     try {
-      await probeChat(chat, AbortSignal.any([ctrl.signal, AbortSignal.timeout(30_000)]))
+      await probeChat(chat, AbortSignal.any([opts.signal, AbortSignal.timeout(30_000)]))
     } catch (err) {
+      opts.signal.throwIfAborted()
       throw new Error(
         `Can't start distilling — the chat model didn't respond. Check [talk.chat]: the provider, an API key (Anthropic/OpenAI), that your local server (LM Studio/Ollama) is running at the right baseUrl, or that your CLI is installed and signed in (codex login, claude auth login). ${err instanceof Error ? err.message : ''}`.trim(),
         { cause: err }
       )
     }
-    ctrl.signal.throwIfAborted()
-    if (!opts.resume)
-      beginRun(root, runId, source, { provider: cfg.kind, model: cfg.model ?? '' }, opts.focus)
-    const result = await distill(
+    opts.signal.throwIfAborted()
+    result = await distill(
       source,
-      { embedder: rendererEmbedder(runId), chat },
+      { embedder: rendererEmbedder(), chat },
       {
-        ...distillBudget(),
+        ...budget,
         focus: opts.focus,
-        signal: ctrl.signal,
+        signal: opts.signal,
         onProgress: (p) => mainWindow?.webContents.send('distill:progress', runId, p),
         checkpoint: checkpointStore(root, runId)
       }
     )
-    // meta.json stores a flat map of numbers, so the drop reasons are
-    // spread out of their nested shape here.
-    ctrl.signal.throwIfAborted()
-    const { droppedByReason: why, ...flatStats } = result.stats
-    runs.create(
-      runId,
-      source,
-      result.notes,
-      {
-        ...flatStats,
-        droppedNoEvidence: why.noEvidence,
-        droppedNotFound: why.notFound,
-        droppedAmbiguous: why.ambiguous
-      },
-      result.themes,
-      opts.focus
-    )
-    return { runId, stats: result.stats, pdf: source.pdf }
-  } finally {
-    distillAbort.delete(runId)
+  } else {
+    result = figureOnlyResult()
   }
+  // meta.json stores a flat map of numbers, so the drop reasons are
+  // spread out of their nested shape here.
+  opts.signal.throwIfAborted()
+  const { droppedByReason: why, ...flatStats } = result.stats
+  runs.create(
+    runId,
+    source,
+    result.notes,
+    {
+      ...flatStats,
+      droppedNoEvidence: why.noEvidence,
+      droppedNotFound: why.notFound,
+      droppedAmbiguous: why.ambiguous
+    },
+    result.themes,
+    opts.focus
+  )
+  return { runId, stats: result.stats, pdf: source.pdf, figures: source.figures, figureCoverage: source.figureCoverage }
 }
 
 function registerIpc(): void {
@@ -846,19 +907,22 @@ function registerIpc(): void {
   ipcMain.handle(
     'index:typeRelation',
     async (_e, sourcePath: string, relation: string, target: string) => {
-      if (!isAccessibleFile(sourcePath)) throw new Error('Access denied: path outside the vault')
+      if (!vaultRoot || !index || !withinVault(sourcePath)) {
+        throw new Error('Only a note in the open vault can be edited from the map.')
+      }
+      const file = realpathSync(sourcePath)
+      if (!withinRoot(vaultRoot, file) || !MD_EXT.test(file) || ignoredInVault(vaultRoot)(file)) {
+        throw new Error('Only a note in the open vault can be edited from the map.')
+      }
       const rel = relation.trim()
       if (!/^[A-Za-z][\w -]*$/.test(rel)) throw new Error('Invalid relation name')
-      const current = readFileSync(sourcePath, 'utf8')
+      const current = readFileSync(file, 'utf8')
       const sep = current.length === 0 || current.endsWith('\n') ? '' : '\n'
       const content = `${current}${sep}${rel}:: [[${target}]]\n`
-      atomicWrite(sourcePath, content)
-      if (index && withinVault(sourcePath)) {
-        const { mtimeMs } = await fs.stat(sourcePath)
-        index.indexFile(sourcePath, content, Math.floor(mtimeMs))
-        notifyTalkDirty()
-        notifyIndexChanged()
-      }
+      atomicWrite(file, content)
+      index.indexFile(file, content, Math.floor(statSync(file).mtimeMs))
+      notifyTalkDirty()
+      notifyIndexChanged()
       return true
     }
   )
@@ -876,9 +940,27 @@ function registerIpc(): void {
     index && withinVault(path) ? index.sameAs(path) : []
   )
 
+  ipcMain.handle('index:searchFigures', async (_e, query: string) => {
+    const owner = index
+    const root = vaultRoot
+    if (!root || !owner || typeof query !== 'string') return []
+    const hits = await searchFigureSources(root, owner.figureSourceCandidates(query), query)
+    return owner === index ? hits : []
+  })
   ipcMain.handle('index:search', (_e, query: string) => index?.search(query) ?? [])
 
   ipcMain.handle('index:noteNames', () => index?.noteNames() ?? [])
+  ipcMain.handle('index:notePreview', (_e, path: string, runId?: string) => {
+    if (runId === undefined) return index?.notePreview(path) ?? ''
+    if (!vaultRoot || !distillRuns) return ''
+    const reading = readingCopies.status(vaultRoot, runId, path)
+    if (reading?.kind === 'source') {
+      if (!reading.copy) return 'Open this source and locate the original file to recover its text.'
+      const { summary, quotes } = noteGist(reading.copy.text.slice(0, 12000), 220)
+      return summary || quotes[0] || ''
+    }
+    return distillRuns.notePreview(runId, path)
+  })
 
   ipcMain.handle(
     'index:graph',
@@ -890,6 +972,28 @@ function registerIpc(): void {
         ambiguousTargets: 0
       }
   )
+
+  ipcMain.handle('index:vaultThemes', async (e, root: string, id: string) => {
+    const target = index
+    if (!target || root !== vaultRoot) return null
+    const key = `${e.sender.id}:${id}`
+    if (vaultThemesAbort.has(key)) return null
+    const controller = new AbortController()
+    vaultThemesAbort.set(key, controller)
+    try {
+      while (target === index && !controller.signal.aborted) {
+        const model = vaultThemeModel()
+        const data = await target.vaultThemes(root, model, controller.signal)
+        if (target === index && model === vaultThemeModel()) return data
+      }
+      return null
+    } finally {
+      vaultThemesAbort.delete(key)
+    }
+  })
+  ipcMain.on('index:vaultThemes:cancel', (e, id: string) => {
+    vaultThemesAbort.get(`${e.sender.id}:${id}`)?.abort()
+  })
 
   // --- Talk to docs -------------------------------------------------------
   ipcMain.handle('talk:status', () => talkStatus())
@@ -906,10 +1010,12 @@ function registerIpc(): void {
       if (model !== readSettings().talk.embed.model)
         throw new Error('The embedding model changed.')
       if (!Number.isSafeInteger(dims) || dims <= 0) throw new Error('Invalid embedding dimension.')
+      const previous = target.talkGenerationFor(model)
       target.enableTalk()
       target.setEmbedDims(dims, model)
       const path = ensureSettingsFile()
       atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), true))
+      if (previous !== target.talkGenerationFor(model)) notifyVaultThemesChanged()
       await chunkUnchunkedFiles(target)
       return talkStatus()
     }
@@ -920,6 +1026,7 @@ function registerIpc(): void {
     index?.disableTalk()
     const path = ensureSettingsFile()
     atomicWrite(path, setTalkEnabled(readFileSync(path, 'utf8'), false))
+    notifyVaultThemesChanged()
     return talkStatus()
   })
 
@@ -934,11 +1041,14 @@ function registerIpc(): void {
     'talk:putEmbeddings',
     (_e, generation: string, rows: { id: number; vector: number[] }[]): TalkStatus => {
       const { enabled, embed } = readSettings().talk
+      let changed = false
       if (enabled && generation === index?.talkGenerationFor(embed.model))
-        index.putEmbeddings(generation, rows.map((r) => ({
+        changed = index.putEmbeddings(generation, rows.map((r) => ({
           id: r.id, vector: Float32Array.from(r.vector)
         })))
-      return talkStatus()
+      const status = talkStatus()
+      if (changed && status.pending === 0) notifyVaultThemesChanged()
+      return status
     }
   )
 
@@ -976,7 +1086,7 @@ function registerIpc(): void {
       const vector = enabled && req.generation === target.talkGenerationFor(embed.model) && req.vector.length
         ? Float32Array.from(req.vector)
         : null
-      const chunks = target.talkRetrieve(req.question, vector)
+      const chunks = authoredAskPassages(vaultRoot, target.talkRetrieve(req.question, vector))
       const { prompt, citations } = packAskContext(req.question, vaultRoot, chunks, inputBudgetFor(cfg))
       if (!citations.length) return { answer: NO_ASK_EVIDENCE, citations }
       const model = makeChatModel(cfg)
@@ -1006,6 +1116,7 @@ function registerIpc(): void {
   // main keeps the path→id map, so `distill:run` can only ever run a document
   // the user actually picked in the dialog.
   ipcMain.handle('distill:pick', async (): Promise<DistillDocument | null> => {
+    const owner = distillRuns
     const res = await dialog.showOpenDialog(mainWindow ?? undefined!, {
       title: 'Distill a document',
       properties: ['openFile'],
@@ -1016,11 +1127,20 @@ function registerIpc(): void {
         }
       ]
     })
-    if (res.canceled || res.filePaths.length === 0) return null
-    const file = res.filePaths[0]
+    if (res.canceled || res.filePaths.length === 0 || owner !== distillRuns) return null
+    const path = res.filePaths[0]
     const id = randomUUID()
-    pickedDocs.set(id, { path: file })
-    return { id, name: basename(file) }
+    pickedDocs.set(id, { path, file: bindPickedSource(path) })
+    return {
+      id,
+      name: basename(path),
+      encodingOptions: supportsImportTextEncoding(path) ? distillEncodingOptions : undefined
+    }
+  })
+
+  ipcMain.handle('distill:discardPick', (_e, docId: string): void => {
+    pickedDocs.get(docId)?.estimateRequest?.abort()
+    pickedDocs.delete(docId)
   })
 
   // e2e only: the native dialog can't be driven from a spec, so tests register
@@ -1028,7 +1148,7 @@ function registerIpc(): void {
   ipcMain.handle('distill:registerPath', (_e, absPath: string): string => {
     if (!process.env.NODEBOOK_E2E) throw new Error('Not available.')
     const id = randomUUID()
-    pickedDocs.set(id, { path: absPath })
+    pickedDocs.set(id, { path: absPath, file: bindPickedSource(absPath) })
     return id
   })
 
@@ -1036,18 +1156,49 @@ function registerIpc(): void {
   // (once — the run reuses this copy) and handed to the same pure planner.
   ipcMain.handle(
     'distill:estimate',
-    async (_e, docId: string, focus?: string): Promise<DistillEstimate> => {
+    async (_e, docId: string, focus?: string, encoding?: string, fromPreparedId?: string): Promise<DistillEstimate> => {
+      if (!vaultRoot) throw new Error('Open a vault first.')
       const picked = pickedDocs.get(docId)
       if (!picked) throw new Error('Unknown document — pick it again.')
-      const filePath = picked.path
+      validateEncodingChoice(picked, encoding)
+      const asked = normalizeFocus(focus)
+      const previous = picked.estimated
+      if (fromPreparedId !== undefined && (previous?.id !== fromPreparedId || previous.choice !== encoding)) {
+        throw new Error('The preview changed. Review the document again before distilling.')
+      }
+      const request = randomUUID()
+      picked.estimateRequest?.abort()
+      const controller = new AbortController()
+      picked.estimateRequest = controller
+      picked.estimated = undefined
       // The focus rides in every prompt, so it costs window room — the estimate
       // has to be made against the same budget the run will have.
-      const source = await convertPicked(filePath)
-      const estimate = estimateDistill(source.text, { ...distillBudget(), focus: normalizeFocus(focus) })
-      if (pickedDocs.get(docId) !== picked) throw new Error('The vault changed. Pick the document again.')
-      const { file, hash, originalPath, pdf } = source
-      picked.estimated = { file, hash, originalPath, pdf }
-      return { ...estimate, pdf: source.pdf }
+      let source: PreparedSource
+      try {
+        source = fromPreparedId !== undefined && previous ? previous.source :
+          await preparePicked(picked, encoding, controller.signal)
+        controller.signal.throwIfAborted()
+      } finally {
+        if (picked.estimateRequest === controller) picked.estimateRequest = undefined
+      }
+      if (pickedDocs.get(docId) !== picked) throw new Error('The import is no longer available. Pick the document again.')
+      const { text, record } = source
+      const estimate = estimateDistill(text, { ...distillBudget(), focus: asked }, record.figures)
+      const decoded = record.encoding
+      picked.estimated = { id: request, focus: asked, choice: encoding, source }
+      return {
+        ...estimate,
+        pdf: record.pdf,
+        figures: record.figures,
+        figureCoverage: record.figureCoverage,
+        preparedId: request,
+        encoding: decoded && {
+          ...decoded,
+          label: importTextEncodingLabel(decoded.name),
+          preview: encodingSample(text),
+          options: distillEncodingOptions
+        }
+      }
     }
   )
 
@@ -1056,49 +1207,52 @@ function registerIpc(): void {
   // output lands in the run's own db (never the canonical index).
   ipcMain.handle(
     'distill:run',
-    async (_e, docId: string, focus?: string): Promise<DistillRunResult> => {
+    async (_e, docId: string, focus?: string, encoding?: string, preparedId?: string): Promise<DistillRunResult> => {
       if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
-      if (activeRunId !== null)
-        throw new Error(
-          'A document is already being distilled — wait for it to finish or cancel it.'
-        )
       const picked = pickedDocs.get(docId)
       if (!picked) throw new Error('Unknown document — pick it again.')
+      validateEncodingChoice(picked, encoding)
       const filePath = picked.path
       // Normalised (and capped) here, before the id is spent: an over-long
       // focus must cost the user nothing but the message that says so.
       const asked = normalizeFocus(focus)
-      // Claim the single run slot and the id BEFORE the first await, so two
-      // clicks in the same tick can't both get past the guard. One document, one
-      // run: the id is consumed here.
-      pickedDocs.delete(docId)
+      const estimated = picked.estimated?.choice === encoding ? picked.estimated : undefined
+      if (preparedId !== undefined && (estimated?.id !== preparedId || estimated.focus !== asked)) {
+        throw new Error('The preview changed. Review the document again before distilling.')
+      }
+      // Claim the slot before any await so two clicks cannot start a run.
       const runId = uniqueRunId(distillRunId(filePath), [
         ...distillRuns.list(),
+        ...archivedFigureRunIds(vaultRoot),
         ...RESERVED_RUN_IDS
       ])
-      activeRunId = runId
-      try {
-        // Convert to markdown first (PDF via pdf.js; markdown/text pass through). The
-        // rest of the pipeline is format-agnostic.
-        const owner = distillRuns
-        let source: RunSource
-        if (picked.estimated?.hash) {
-          const text = readSourceText(vaultRoot, picked.estimated.hash)
-          if (text === null || sha1(text) !== picked.estimated.hash) {
-            throw new Error('The prepared text changed or is unavailable. Pick the document again.')
-          }
-          source = { ...picked.estimated, text }
-        } else {
-          source = await convertPicked(filePath)
+      const root = vaultRoot
+      const owner = distillRuns
+      return withDistillRun(runId, async (signal) => {
+        picked.estimateRequest?.abort()
+        const source = estimated?.source ?? await preparePicked(picked, encoding, signal)
+        if (source.record.encoding?.uncertain && preparedId === undefined) {
+          throw new Error('Review and confirm the text encoding before distilling.')
         }
+        signal.throwIfAborted()
         if (owner !== distillRuns) throw new Error('The vault changed. Pick the document again.')
-        return await runDistillPipeline(runId, source, {
+        if (pickedDocs.get(docId) !== picked) throw new Error('The import was discarded. Pick it again.')
+        publishSource(root, source)
+        pickedDocs.delete(docId)
+        return await runDistillPipeline(runId, {
+          file: basename(filePath),
+          text: source.text,
+          pdf: source.record.pdf,
+          figures: source.record.figures,
+          figureCoverage: source.record.figureCoverage,
+          hash: source.hash,
+          originalPath: source.record.originalPath
+        }, {
           resume: false,
+          signal,
           focus: asked || undefined
         })
-      } finally {
-        activeRunId = null
-      }
+      })
     }
   )
 
@@ -1107,26 +1261,17 @@ function registerIpc(): void {
   // the original document does not have to be anywhere near.
   ipcMain.handle('distill:resume', async (_e, runId: string): Promise<DistillRunResult> => {
     if (!index || !vaultRoot || !distillRuns) throw new Error('Open a vault first.')
-    if (activeRunId !== null)
-      throw new Error('A document is already being distilled — wait for it to finish or cancel it.')
     if (!isUnfinishedRun(vaultRoot, runId)) throw new Error('That run has already finished.')
-    const source = readRunSource(vaultRoot, runId)
-    if (!source) throw new Error("That run can't be resumed — its saved text is missing.")
-    activeRunId = runId
-    try {
-      // The focus was asked for once, when the run started; `run.json` is where
-      // it has been waiting, so a resume reads the document the same way.
-      return await runDistillPipeline(runId, source, {
-        resume: true,
-        focus: readRunJson(vaultRoot, runId)?.focus
-      })
-    } finally {
-      activeRunId = null
-    }
+    const root = vaultRoot
+    return withDistillRun(runId, async (signal) => {
+      const source = readRunSource(root, runId)
+      if (!source) throw new Error("That run can't be resumed — its saved text is missing.")
+      return runDistillPipeline(runId, source, { resume: true, focus: readRunJson(root, runId)?.focus, signal })
+    })
   })
 
   ipcMain.handle('distill:cancel', (_e, runId: string) => {
-    distillAbort.get(runId)?.abort()
+    if (activeDistill?.id === runId) activeDistill.controller.abort()
   })
 
   // Distill views default to SHOWING the source-document node (the vault map
@@ -1154,6 +1299,25 @@ function registerIpc(): void {
         hiddenSources: 0,
         ambiguousTargets: 0
       }
+  )
+
+  ipcMain.handle('distill:bookOverview', (_e, runId: string) =>
+    distillRuns?.bookOverview(runId) ?? null
+  )
+  ipcMain.handle('distill:bookTheme', (_e, runId: string, themeId: string | null) =>
+    distillRuns?.themeDetails(runId, themeId) ?? null
+  )
+  ipcMain.handle('distill:bookLink', (_e, runId: string, source: string, target: string) =>
+    distillRuns?.linkEvidence(runId, source, target) ?? null
+  )
+  ipcMain.handle('distill:themeGraph', (_e, runId: string, themeId: string | null, cap?: number) =>
+    distillRuns?.themeGraph(runId, themeId, cap) ?? {
+      nodes: [],
+      edges: [],
+      total: 0,
+      hiddenSources: 0,
+      ambiguousTargets: 0
+    }
   )
 
   // Overlay: the vault + this run, unioned live (no writes) — the "how they'd
@@ -1202,19 +1366,54 @@ function registerIpc(): void {
     return out
   })
 
-  ipcMain.handle('distill:remove', (_e, runId: string) => distillRuns?.remove(runId))
+  ipcMain.handle('distill:remove', (_e, runId: string) => {
+    const root = vaultRoot
+    const owner = distillRuns
+    if (!root || !owner) return
+    return queueDistillWrite(root, () => {
+      if (owner !== distillRuns) throw new Error('The vault changed.')
+      if (activeDistill?.id === runId) throw new Error('Pause this run before discarding it.')
+      owner.remove(runId)
+    })
+  })
 
   // Read ONE staged note, for the read-only pane that lets you check a run
-  // before merging it. `readStagedNote` validates the name against the run's own
-  // `notes/` dir, so the renderer can't read its way out of the run.
-  ipcMain.handle(
-    'distill:readNote',
-    (_e, runId: string, name: string): { content: string } | null => {
-      if (!vaultRoot) return null
-      const content = readStagedNote(vaultRoot, runId, name)
-      return content === null ? null : { content }
-    }
+  // before merging it. The selector is scoped to the run's own `notes/` dir.
+  ipcMain.handle('distill:readNote', (_e, runId: string, note: string) => {
+    if (!vaultRoot || !distillRuns) return null
+    const file = distillRuns.readNote(runId, note)
+    if (!file) return null
+    return { ...file, reading: readingCopies.status(vaultRoot, runId, note) }
+  })
+
+  ipcMain.handle('distill:figures', async (_e, path: string, runId?: string) => {
+    const root = vaultRoot
+    const owner = distillRuns
+    if (!root || !owner) return []
+    const figures = await resolveNoteFigures(root, path, runId)
+    return owner === distillRuns ? figures : []
+  })
+  ipcMain.handle('distill:figureBytes', (_e, path: string, id: string, runId?: string) => {
+    const figure = vaultRoot && resolveNoteFigureBytes(vaultRoot, path, id, runId)
+    return figure ? { bytes: figure.bytes, mime: figure.mime } : null
+  })
+
+  ipcMain.handle('distill:locateReadingCopy', (_e, runId: string, note: string) => {
+    if (!vaultRoot) throw new Error('Open a vault first.')
+    return readingCopies.locate(vaultRoot, runId, note, async () => {
+      const result = await dialog.showOpenDialog(mainWindow ?? undefined!, {
+        title: 'Locate original',
+        properties: ['openFile'],
+        filters: [{ name: 'Text and Markdown', extensions: READING_COPY_EXTENSIONS }]
+      })
+      return result.canceled ? null : result.filePaths[0] ?? null
+    })
+  })
+  ipcMain.handle('distill:chooseReadingCopy', (_e, id: string, encoding?: string) =>
+    readingCopies.choose(id, encoding)
   )
+  ipcMain.handle('distill:saveReadingCopy', (_e, id: string) => readingCopies.save(id))
+  ipcMain.handle('distill:discardReadingCopy', (_e, id: string) => readingCopies.discard(id))
 
   // What merging this run would do, decided before a byte is written: which
   // notes are new, which the vault already holds verbatim, and which share a
@@ -1292,7 +1491,7 @@ function registerIpc(): void {
     try {
       // A short deadline: the dialog is waiting on this, and a renderer that
       // cannot embed within it gets a plan without proposals, not a stall.
-      const embedder = rendererEmbedder(`plan:${runId}`, 30_000)
+      const embedder = rendererEmbedder(30_000)
       const texts: string[] = []
       const spans: { name: string; from: number; to: number }[] = []
       for (const n of notes) {
@@ -1330,49 +1529,64 @@ function registerIpc(): void {
   // `sameAs` names the staged notes the user confirmed are the same thing as
   // their vault twin; each gets a `same_as::` line the map then collapses.
   ipcMain.handle('distill:merge', async (_e, runId: string, opts?: { sameAs?: string[] }): Promise<DistillMergeResult> => {
-    if (!vaultRoot || !index) throw new Error('Open a vault first.')
-    const plan = await planMergeFor(runId, 'merge')
-    // A tick is "same as the twin I was shown": pair each ticked name with the
-    // twin the dialog showed beside it, and let the merge keep only those that
-    // still hold against the fresh plan (`confirmedSameAs`).
-    // A tick with no remembered twin (the vault was closed and reopened in
-    // between, which clears what was shown) is dropped, never reinterpreted.
-    const twins = shownTwins.get(runId) ?? new Map<string, string>()
-    shownTwins.delete(runId)
-    const confirmations: { name: string; twin: string }[] = []
-    for (const name of opts?.sameAs ?? []) {
-      const twin = twins.get(name)
-      if (twin) confirmations.push({ name, twin })
-    }
-    const { manifest, written } = mergeRun(vaultRoot, runId, plan.entries, {
-      sameAs: confirmations
-    })
-    for (const p of written) {
-      try {
-        index.indexFile(p, readFileSync(p, 'utf8'), 0)
-      } catch {
-        /* unreadable — the watcher will retry */
+    const root = vaultRoot
+    const owner = index
+    if (!root || !owner) throw new Error('Open a vault first.')
+    return queueDistillWrite(root, async () => {
+      if (index !== owner) throw new Error('The vault changed.')
+      const plan = await planMergeFor(runId, 'merge')
+      if (index !== owner) throw new Error('The vault changed.')
+      // A tick is "same as the twin I was shown": pair each ticked name with the
+      // twin the dialog showed beside it, and let the merge keep only those that
+      // still hold against the fresh plan (`confirmedSameAs`).
+      // A tick with no remembered twin (the vault was closed and reopened in
+      // between, which clears what was shown) is dropped, never reinterpreted.
+      const twins = shownTwins.get(runId) ?? new Map<string, string>()
+      shownTwins.delete(runId)
+      const confirmations: { name: string; twin: string }[] = []
+      for (const name of opts?.sameAs ?? []) {
+        const twin = twins.get(name)
+        if (twin) confirmations.push({ name, twin })
       }
-    }
-    notifyVaultChanged()
-    notifyIndexChanged()
-    notifyTalkDirty()
-    return {
-      folder: manifest.folder,
-      count: manifest.files.length,
-      skipped: manifest.skipped?.length ?? 0
-    }
+      const { manifest, written } = mergeRun(root, runId, plan.entries, {
+        sameAs: confirmations
+      })
+      for (const p of written) {
+        try {
+          owner.indexFile(p, readFileSync(p, 'utf8'), 0)
+        } catch {
+          /* unreadable — the watcher will retry */
+        }
+      }
+      notifyVaultChanged()
+      notifyIndexChanged()
+      notifyTalkDirty()
+      return {
+        folder: manifest.folder,
+        count: manifest.files.filter((file) => !file.asset).length,
+        skipped: manifest.skipped?.length ?? 0
+      }
+    })
   })
 
   // Undo a merge: take back exactly what it wrote and de-index it. Notes the
   // user edited since merging go to the Trash instead of being deleted.
   ipcMain.handle('distill:unmerge', async (_e, runId: string): Promise<DistillUnmergeResult> => {
-    if (!vaultRoot || !index) return { removed: 0, trashed: 0 }
-    const { removed, trashed } = await unmergeRun(vaultRoot, runId, (p) => shell.trashItem(p))
-    for (const p of [...removed, ...trashed]) index.removeFile(p)
-    notifyVaultChanged()
-    notifyIndexChanged()
-    return { removed: removed.length, trashed: trashed.length }
+    const root = vaultRoot
+    const owner = index
+    if (!root || !owner) return { removed: 0, trashed: 0 }
+    return queueDistillWrite(root, async () => {
+      if (index !== owner) throw new Error('The vault changed.')
+      const { removed, trashed } = await unmergeRun(root, runId, (p) => shell.trashItem(p))
+      const removedNotes = removed.filter((path) => /\.md$/i.test(path))
+      const trashedNotes = trashed.filter((path) => /\.md$/i.test(path))
+      if (index === owner) {
+        for (const p of [...removedNotes, ...trashedNotes]) owner.removeFile(p)
+        notifyVaultChanged()
+        notifyIndexChanged()
+      }
+      return { removed: removedNotes.length, trashed: trashedNotes.length }
+    })
   })
 
   // Open the file a distilled document was converted from, in the system's own
@@ -1391,8 +1605,30 @@ function registerIpc(): void {
     if (!vaultRoot) return { merged: false }
     const m = readMergeManifest(vaultRoot, runId)
     // A half-written merge (crash between manifest and copy) is not "merged".
-    return m?.complete ? { merged: true, folder: m.folder, count: m.files.length } : { merged: false }
+    return m?.complete
+      ? { merged: true, folder: m.folder, count: m.files.filter((file) => !file.asset).length }
+      : { merged: false }
   })
+
+  ipcMain.handle(
+    'figure:analysisStatus',
+    (_e, path: string, id: string, runId?: string, context?: FigureContext): FigureAnalysisStatus => {
+      const root = vaultRoot
+      if (!root) return { analysis: null, available: false, reason: 'Figure unavailable.' }
+      const image = resolveNoteFigureBytes(root, path, id, runId, context)
+      return figureAnalyses.status(root, image?.ref, chatProviderConfig())
+    }
+  )
+
+  ipcMain.handle(
+    'figure:analyze',
+    async (_e, path: string, id: string, runId?: string, context?: FigureContext): Promise<FigureAnalysis> => {
+      const root = vaultRoot
+      const image = root && resolveNoteFigureBytes(root, path, id, runId, context)
+      if (!root || !image) throw new Error('Figure unavailable.')
+      return figureAnalyses.analyze(root, image.ref, image, chatProviderConfig())
+    }
+  )
 
   // --- Telemetry (measure everything) -------------------------------------
   // Reconcile the measurement to the settings flag (called by the renderer on
@@ -1475,7 +1711,9 @@ function applySettingsMigrations(): void {
   atomicWrite(marker, [...applied, id].join('\n') + '\n')
 }
 
+protocol.registerSchemesAsPrivileged([{ scheme: 'nodebook-figure', privileges: { standard: true, secure: true } }])
 app.whenReady().then(() => {
+  protocol.handle('nodebook-figure', (request) => handleFigureRequest(request, vaultRoot))
   applySettingsMigrations()
   registerIpc()
   refreshAppMenu()

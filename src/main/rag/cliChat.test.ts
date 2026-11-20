@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -410,5 +410,78 @@ describe.skipIf(process.platform === 'win32')('claudeCliChat (fake claude script
     await expect(collect(model.chat({ messages: [{ role: 'user', content: 'x' }] }))).rejects.toThrow(
       /Claude Code CLI not found/
     )
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('CLI figure attachments', () => {
+  let dir: string
+  const newCli = (type: string, body: string): string => {
+    const path = join(dir, type)
+    writeFileSync(path, `#!${process.execPath}\n${body}\n`, { mode: 0o700 })
+    return path
+  }
+  const req: ChatRequest = {
+    system: 'No tools. Use the image.',
+    messages: [{ role: 'user', content: 'Caption: attendance' }],
+    image: { bytes: new Uint8Array([1, 2, 3]), mime: 'image/png' }
+  }
+  beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'nodebook-cli-visions-')) })
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('lets Codex read just the selected image from private scratch and removes it afterward', async () => {
+    const executable = newCli('codex', `
+      const fs = require('node:fs')
+      const args = process.argv.slice(2)
+      const image = args[args.indexOf('--image') + 1]
+      const stat = fs.statSync(image)
+      console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Progress' } }))
+      const text = JSON.stringify({
+        args, image, mode: stat.mode & 0o777,
+        images: fs.readdirSync(process.cwd()),
+        bytes: [...fs.readFileSync(image)],
+        prompt: fs.readFileSync(0, 'utf8')
+      })
+      console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } }))
+    `)
+    const model = codexCliChat({ kind: 'codex-cli', model: 'fixture-vision', command: executable })
+    const report = JSON.parse(await collect(model.chat(req)))
+    expect(report.args).toEqual(expect.arrayContaining([
+      '--ephemeral', '--ignore-user-config', '--ignore-rules', '--sandbox', 'read-only', 'shell_tool',
+      'fixture-vision', '--image', report.image
+    ]))
+    expect(report.args.slice(-2)).toEqual(['--', '-'])
+    expect(report.images).toEqual(['figure.png'])
+    expect(report.mode).toBe(0o600)
+    expect(report.bytes).toEqual([1, 2, 3])
+    expect(report.prompt).toBe('No tools. Use the image.\n\nCaption: attendance')
+    expect(() => readFileSync(report.image)).toThrow(/ENOENT/)
+  })
+
+  it('sends a Claude user JSONL event with an embedded image, with tools and customizations off', async () => {
+    const executable = newCli('claude', `
+      const fs = require('node:fs')
+      const result = JSON.stringify({ input: fs.readFileSync(0, 'utf8'), args: process.argv.slice(2) })
+      console.log(JSON.stringify({ type: 'result', result }))
+    `)
+    const model = claudeCliChat({ kind: 'claude-cli', command: executable })
+    const report = JSON.parse(await collect(model.chat(req)))
+    expect(report.args).toEqual(expect.arrayContaining([
+      '--input-format', 'stream-json', '--safe-mode', '--no-session-persistence', '--no-chrome', '--tools', ''
+    ]))
+    expect(JSON.parse(report.input)).toMatchObject({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'No tools. Use the image.\n\nCaption: attendance' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AQID' } }
+        ]
+      }
+    })
+  })
+
+  it('rejects an image rather than silently sending a text-only generic CLI request', async () => {
+    const model = genericCliChat({ kind: 'cli', command: 'cat' })
+    await expect(collect(model.chat(req))).rejects.toThrow(/text only/)
   })
 })

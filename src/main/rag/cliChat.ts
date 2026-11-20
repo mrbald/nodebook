@@ -1,10 +1,12 @@
 import { spawn } from 'child_process'
 import { accessSync, constants, existsSync, mkdirSync } from 'fs'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { join, posix, win32 } from 'path'
 import { homedir, tmpdir } from 'os'
 import {
   ContextLengthError,
   isContextLengthMessage,
+  type ChatImage,
   type ChatModel,
   type ChatRequest,
   type ProviderConfig
@@ -99,7 +101,7 @@ interface CodexEvent {
 
 /** Parse `codex exec --json` JSONL: collect the agent's message(s), surface the
  *  first failure event. Unparseable lines are skipped (warnings, partial writes). */
-export function parseCodexEvents(stdout: string): { text: string; error: string | null } {
+export function parseCodexEvents(stdout: string, lastOnly = false): { text: string; error: string | null } {
   const texts: string[] = []
   let error: string | null = null
   for (const line of stdout.split(/\r?\n/)) {
@@ -119,7 +121,7 @@ export function parseCodexEvents(stdout: string): { text: string; error: string 
       error ??= ev.message ?? 'unknown error'
     }
   }
-  return { text: texts.join('\n\n'), error }
+  return { text: lastOnly ? (texts.at(-1) ?? '') : texts.join('\n\n'), error }
 }
 
 function abortError(): Error {
@@ -165,7 +167,7 @@ interface RunResult {
 function runCli(
   file: string,
   args: string[],
-  opts: { input?: string; signal?: AbortSignal; cwd?: string; env?: NodeJS.ProcessEnv } = {}
+  opts: { input?: string; signal?: AbortSignal; cwd?: string; env?: NodeJS.ProcessEnv; maxOutput?: number } = {}
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) return reject(abortError())
@@ -173,7 +175,15 @@ function runCli(
     // a shell. Args here are flag tokens from our own code/settings (the prompt
     // travels on stdin), so shell quoting is not a concern.
     const shell = /\.(cmd|bat)$/i.test(file)
-    const child = spawn(file, args, { cwd: opts.cwd, env: opts.env ?? process.env, shell })
+    if (shell && opts.maxOutput) return reject(new Error('Figure analysis requires a native CLI executable.'))
+    const detached = Boolean(opts.maxOutput) && process.platform !== 'win32'
+    const child = spawn(file, args, {
+      cwd: opts.cwd,
+      env: opts.env ?? process.env,
+      shell,
+      detached,
+      windowsHide: true
+    })
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -183,15 +193,37 @@ function runCli(
       opts.signal?.removeEventListener('abort', onAbort)
       fn()
     }
+    const stop = (): void => {
+      if (detached && child.pid) {
+        try {
+          process.kill(-child.pid, 'SIGKILL')
+        } catch {
+          /* already exited */
+        }
+      } else child.kill(opts.maxOutput ? 'SIGKILL' : 'SIGTERM')
+    }
     const onAbort = (): void => {
-      child.kill('SIGTERM')
+      stop()
       settle(() => reject(abortError()))
     }
     opts.signal?.addEventListener('abort', onAbort, { once: true })
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (d: string) => (stdout += d))
-    child.stderr.on('data', (d: string) => (stderr += d))
+    const checkOutputSize = (): void => {
+      if (!opts.maxOutput || stdout.length + stderr.length <= opts.maxOutput) return
+      stop()
+      settle(() => reject(new Error('Figure analysis exceeded the CLI output limit.')))
+    }
+    child.stdout.on('data', (d: string) => {
+      if (settled) return
+      stdout += d
+      checkOutputSize()
+    })
+    child.stderr.on('data', (d: string) => {
+      if (settled) return
+      stderr += d
+      checkOutputSize()
+    })
     child.on('error', (err) => settle(() => reject(err)))
     child.on('close', (code) => settle(() => resolve({ code, stdout, stderr })))
     // The child may exit before reading all of stdin (e.g. usage error) — an
@@ -275,6 +307,33 @@ async function* runCliLines(
   }
 }
 
+const IMAGE_CLI_OUTPUT_LIMIT = 512 * 1024
+
+async function codexImageResult(file: string, cfg: ProviderConfig, req: ChatRequest, image: ChatImage): Promise<RunResult> {
+  const cwd = await mkdtemp(join(tmpdir(), 'nodebook-vision-'))
+  try {
+    const extension = image.mime === 'image/jpeg' ? 'jpg' : image.mime.slice('image/'.length)
+    if (!/^(?:png|jpg|gif|webp)$/.test(extension)) throw new Error('Unsupported figure image type.')
+    const path = join(cwd, `figure.${extension}`)
+    await writeFile(path, image.bytes, { mode: 0o600, signal: req.signal })
+    const args = [
+      'exec', '--json', '--skip-git-repo-check', '--ephemeral',
+      '--ignore-user-config', '--ignore-rules', '--sandbox', 'read-only',
+      '-c', 'approval_policy="never"', '-c', 'web_search="disabled"',
+      '--disable', 'shell_tool', '--disable', 'unified_exec',
+      '--disable', 'hooks', '--disable', 'plugins', '--disable', 'remote_plugin',
+      '--disable', 'multi_agent', '--disable', 'multi_agent_v2',
+      ...(cfg.model ? ['-m', cfg.model] : []),
+      '--image', path, '--', '-'
+    ]
+    return await runCli(file, args, {
+      cwd, input: flattenChatRequest(req), signal: req.signal, maxOutput: IMAGE_CLI_OUTPUT_LIMIT
+    })
+  } finally {
+    await rm(cwd, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
 /** The user's own OpenAI Codex CLI (`codex exec`) under their ChatGPT sign-in. */
 export function codexCliChat(cfg: ProviderConfig): ChatModel {
   const cmd = cfg.command || 'codex'
@@ -299,12 +358,14 @@ export function codexCliChat(cfg: ProviderConfig): ChatModel {
         ...(cfg.model ? ['-m', cfg.model] : []),
         '-' // read the prompt from stdin
       ]
-      const { code, stdout, stderr } = await runCli(file, args, {
-        input: flattenChatRequest(req),
-        signal: req.signal,
-        cwd: scratchCwd()
-      })
-      const { text, error } = parseCodexEvents(stdout)
+      const { code, stdout, stderr } = req.image
+        ? await codexImageResult(file, cfg, req, req.image)
+        : await runCli(file, args, {
+          input: flattenChatRequest(req),
+          signal: req.signal,
+          cwd: scratchCwd()
+        })
+      const { text, error } = parseCodexEvents(stdout, Boolean(req.image))
       if (error)
         throw cliFailure(`Codex: ${error}`, error, { retryable: !isAuthMessage(error) })
       if (code !== 0)
@@ -382,6 +443,40 @@ function claudeEnv(): NodeJS.ProcessEnv {
   return { ...process.env, MAX_THINKING_TOKENS: process.env.MAX_THINKING_TOKENS ?? '0' }
 }
 
+async function claudeImageAnswer(file: string, cfg: ProviderConfig, req: ChatRequest, image: ChatImage): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), 'nodebook-vision-'))
+  try {
+    const args = [
+      '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+      '--safe-mode', '--no-session-persistence', '--strict-mcp-config', '--no-chrome',
+      '--disable-slash-commands', '--tools', '', '--system-prompt', CLAUDE_SYSTEM_PROMPT,
+      ...(cfg.model ? ['--model', cfg.model] : [])
+    ]
+    const content = [
+      { type: 'text', text: flattenChatRequest(req) },
+      { type: 'image', source: {
+        type: 'base64', media_type: image.mime, data: Buffer.from(image.bytes).toString('base64')
+      } }
+    ]
+    const input = JSON.stringify({
+      type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content }
+    }) + '\n'
+    const { code, stdout, stderr } = await runCli(file, args, {
+      cwd, input, signal: req.signal, env: claudeEnv(), maxOutput: IMAGE_CLI_OUTPUT_LIMIT
+    })
+    const result = stdout.split(/\r?\n/).map(parseClaudeLine).find((event) => event?.final || event?.error)
+    if (code !== 0 || !result?.final) {
+      const evidence = result?.error || stderr
+      throw cliFailure('Claude CLI could not analyze the figure.', evidence, {
+        exitCode: code, authFailure: isAuthMessage(evidence)
+      })
+    }
+    return result.final
+  } finally {
+    await rm(cwd, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
 /** The user's own Claude Code CLI (`claude -p`) under their Claude sign-in.
  *
  *  The flags make it a pure chat backend rather than a coding agent: no tools
@@ -405,6 +500,10 @@ export function claudeCliChat(cfg: ProviderConfig): ChatModel {
     id: `claude-cli:${cfg.model || 'default'}`,
     async *chat(req: ChatRequest): AsyncIterable<string> {
       const file = resolve()
+      if (req.image) {
+        yield await claudeImageAnswer(file, cfg, req, req.image)
+        return
+      }
       // Node does not quote arguments when it goes through a shell (the .cmd
       // case on Windows), where a bare empty string would vanish and `--tools`
       // would swallow the next flag.
@@ -483,6 +582,7 @@ export function genericCliChat(cfg: ProviderConfig): ChatModel {
   return {
     id: `cli:${cmd}`,
     async *chat(req: ChatRequest): AsyncIterable<string> {
+      if (req.image) throw new Error('The generic CLI provider accepts text only.')
       const file = resolve()
       const { code, stdout, stderr } = await runCli(file, cfg.args ?? [], {
         input: flattenChatRequest(req),

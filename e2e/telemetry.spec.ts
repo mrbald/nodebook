@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -27,10 +27,13 @@ test.beforeAll(async () => {
     '[telemetry]\nenabled = true\n\n[talk.chat]\nprovider = "anthropic"\nmodel = "claude-test"\n'
   )
 
-  app = await electron.launch({
-    args: [projectRoot],
+  const binary = process.env.NODEBOOK_SMOKE_BINARY
+  app = await launchElectron({
+    executablePath: binary,
+    args: binary ? [] : [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
+  if (binary) expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(true)
   await app.evaluate(async ({ dialog }, dir) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] })
   }, vaultDir)
@@ -52,7 +55,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('the widget renders in the status bar when telemetry is enabled', async () => {
@@ -79,6 +82,31 @@ test('clicking opens the popover with stats and the pfw credit link', async () =
     () => (globalThis as unknown as { __opened: string[] }).__opened
   )
   expect(opened).toContain('https://github.com/mrbald/pfw')
+})
+
+test('performance details stay inside a narrow toolbar and Escape returns focus', async () => {
+  const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize())
+  try {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(720, 460))
+    const button = page.getByRole('button', { name: 'Performance', exact: true })
+    if (await button.getAttribute('aria-expanded') === 'true') await button.press('Escape')
+    await button.press('Enter')
+    const panel = page.getByRole('region', { name: 'Performance details' })
+    await expect(panel).toBeVisible()
+    expect(await panel.evaluate((e) => {
+      const bounds = e.getBoundingClientRect()
+      const bar = e.closest('.status-bar')!.getBoundingClientRect()
+      return bounds.left >= bar.left && bounds.right <= bar.right && bounds.top >= 0 &&
+        e.contains(document.elementFromPoint(bounds.right - 3, bounds.top + 8))
+    })).toBe(true)
+    await page.keyboard.press('Tab')
+    await expect(panel.getByRole('button')).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(panel).toHaveCount(0)
+    await expect(button).toBeFocused()
+  } finally {
+    await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), size)
+  }
 })
 
 test('merging a whole book never stalls the app', async () => {

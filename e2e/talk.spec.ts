@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdtempSync, realpathSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -18,7 +18,7 @@ let vaultDir: string
 // Set NODEBOOK_SMOKE_BINARY to exercise an actual installed package.
 async function launchWithVault(userDataDir: string): Promise<void> {
   const binary = process.env.NODEBOOK_SMOKE_BINARY
-  app = await electron.launch({
+  app = await launchElectron({
     executablePath: binary,
     args: binary ? [] : [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
@@ -56,7 +56,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('off by default: an honest CTA, no dead toggles, keyword search only', async () => {
@@ -87,7 +87,7 @@ test('hybrid search surfaces a note and marks the meaning-matched hit with ✨',
   await expect(page.locator('.search-result-ai').first()).toBeVisible()
 
   // The hit opens its note.
-  await page.locator('.search-results li').first().click()
+  await page.locator('.search-hit').first().click()
   await expect(page.locator('.cm-content')).toContainText('claim')
   await page.locator('.search-box').fill('')
 })
@@ -141,7 +141,7 @@ test('stale embedding batches cannot write across an edit, model change, or vaul
 })
 
 test('a cold launch with semantic search enabled can open and search a vault', async () => {
-  await app.close()
+  await closeElectron(app)
   const profile = mkdtempSync(join(tmpdir(), 'nodebook-talk-cold-'))
   writeFileSync(join(profile, 'settings.toml'), '[talk]\nenabled = true\n')
   await launchWithVault(profile)

@@ -21,12 +21,18 @@ import {
   appendFileSync,
   rmSync,
   existsSync,
+  linkSync,
+  lstatSync,
+  realpathSync,
   readdirSync,
   readFileSync,
-  renameSync
+  renameSync,
+  rmdirSync
 } from 'fs'
-import { createHash } from 'crypto'
-import { basename, dirname, join, sep } from 'path'
+import { createHash, randomUUID } from 'crypto'
+import { basename, dirname, isAbsolute, join, normalize, sep } from 'path'
+import { figurePath, parseFigurePath, type FigureCoverage, type FigureRef } from '../../shared/figures'
+import { linkedFigurePaths, localDirectory, readFigureFile, readFigureRefs, readLocalFile, readFigureCoverage, rememberWrittenFigure } from './figureFiles'
 import { withinRoot } from '../paths'
 import { noteName, renderDocumentNote, sourceTitle, type EmittedNote } from './emit'
 import {
@@ -47,7 +53,8 @@ const RUN_ID_RE = /^[A-Za-z0-9][\w .-]*$/
 /** Names under `.distill/` that belong to something other than a run — the
  *  source store lives there too (`sources.ts`). A run may not take one, and
  *  `listRuns` never reports one as a run. */
-export const RESERVED_RUN_IDS: ReadonlySet<string> = new Set(['sources'])
+const FIGURE_MERGES_FOLDER = 'figure-merges'
+export const RESERVED_RUN_IDS: ReadonlySet<string> = new Set(['sources', FIGURE_MERGES_FOLDER])
 
 export function assertRunId(runId: string): void {
   if (!isRunId(runId)) throw new Error(`invalid distill run id: ${JSON.stringify(runId)}`)
@@ -118,10 +125,15 @@ export function migrateDistillRuns(vaultRoot: string): string[] {
 /** Write bytes so a reader never sees half a file: temp in the same dir, then
  *  rename (atomic on the same filesystem). Every write under `.distill/` goes
  *  through it — the run artifacts here, and the source store in `sources.ts`. */
-export function atomicWrite(path: string, data: string | Buffer): void {
-  const tmp = join(dirname(path), `.${basename(path)}.tmp`)
-  writeFileSync(tmp, data)
-  renameSync(tmp, path)
+export function atomicWrite(path: string, data: string | Buffer, exclusive = false): void {
+  const tmp = join(dirname(path), `.${randomUUID()}.tmp`)
+  try {
+    writeFileSync(tmp, data, { flag: 'wx' })
+    if (exclusive) linkSync(tmp, path)
+    else renameSync(tmp, path)
+  } finally {
+    rmSync(tmp, { force: true })
+  }
 }
 
 /** A run's own folder. Throws on an unsafe id. */
@@ -140,6 +152,8 @@ export function sourceNoteName(file: string): string {
 
 export interface RunSource {
   pdf?: PdfExtraction
+  figures?: FigureRef[]
+  figureCoverage?: FigureCoverage
   /** The document's raw file identifier (e.g. `Federalist.md`). Note names
    *  derive from it via `sourceNoteName`; `meta.json` keeps it as-is. */
   file: string
@@ -170,6 +184,8 @@ const META_FILE = 'meta.json'
 /** What `run.json` records: the run's identity, written at start. */
 export interface RunJson {
   pdf?: PdfExtraction
+  figures?: FigureRef[]
+  figureCoverage?: FigureCoverage
   /** The document's raw file identifier, exactly as given to the run. */
   file: string
   /** ISO timestamp of the run's start. */
@@ -198,19 +214,38 @@ export function beginRun(
   focus?: string
 ): string {
   const dir = runDir(vaultRoot, runId)
-  mkdirSync(dir, { recursive: true })
+  if (!localDirectory(vaultRoot, dir, true)) throw new Error('Staged run is unavailable.')
+  copyRunFigures(vaultRoot, join(distillRoot(vaultRoot), 'sources'), dir, source)
   const run: RunJson = {
     file: source.file,
     pdf: source.pdf,
+    ...(source.figures?.length ? { figures: source.figures } : {}),
+    ...(source.figureCoverage ? { figureCoverage: source.figureCoverage } : {}),
     createdAt: new Date().toISOString(),
     ...(source.hash ? { hash: source.hash } : {}),
     ...(source.originalPath ? { originalPath: source.originalPath } : {}),
     ...(settings ? { settings } : {}),
     ...(focus ? { focus } : {})
   }
-  atomicWrite(join(dir, RUN_FILE), JSON.stringify(run, null, 2))
   atomicWrite(join(dir, SOURCE_FILE), source.text)
+  atomicWrite(join(dir, RUN_FILE), JSON.stringify(run, null, 2))
   return dir
+}
+
+function copyRunFigures(vault: string, from: string, to: string, source: RunSource): void {
+  if (!source.figures?.length) return
+  if (!localDirectory(vault, join(to, 'figures'), true)) throw new Error('Figure folder is unavailable.')
+  const linked = linkedFigurePaths(source.text)
+  const copied = new Set<string>()
+  for (const ref of source.figures) {
+    const path = figurePath(ref)
+    if (copied.has(path)) continue
+    const staged = linked.has(path) && readFigureFile(vault, from, ref)
+    if (!staged) throw new Error(`Saved figure is unavailable: ${ref.label}`)
+    atomicWrite(join(to, path), staged.bytes)
+    rememberWrittenFigure(vault, to, ref)
+    copied.add(path)
+  }
 }
 
 /** A hand-edited or half-written run file can hold anything, so a `focus` that
@@ -227,9 +262,11 @@ function withCheckedFocus<T extends { focus?: unknown }>(m: T): T {
 /** A run's `run.json`, or null when it predates the start marker / is unreadable. */
 export function readRunJson(vaultRoot: string, runId: string): RunJson | null {
   try {
-    const m = JSON.parse(readFileSync(join(runDir(vaultRoot, runId), RUN_FILE), 'utf8')) as RunJson
+    const raw = readLocalFile(vaultRoot, join(runDir(vaultRoot, runId), RUN_FILE))
+    if (!raw) return null
+    const m = JSON.parse(raw.toString('utf8')) as RunJson
     if (typeof m.file !== 'string' || typeof m.createdAt !== 'string') return null
-    return withCheckedFocus(m)
+    return withCheckedFocus({ ...m, figures: readFigureRefs(m.figures), figureCoverage: readFigureCoverage(m.figureCoverage) })
   } catch {
     return null
   }
@@ -240,10 +277,14 @@ export function readRunSource(vaultRoot: string, runId: string): RunSource | nul
   const run = readRunJson(vaultRoot, runId)
   if (!run) return null
   try {
+    const raw = readLocalFile(vaultRoot, join(runDir(vaultRoot, runId), SOURCE_FILE))
+    if (!raw || (run.hash && contentHash(raw) !== run.hash)) return null
     return {
       file: run.file,
       pdf: readPdfExtraction(run.pdf),
-      text: readFileSync(join(runDir(vaultRoot, runId), SOURCE_FILE), 'utf8'),
+      text: raw.toString('utf8'),
+      ...(run.figures?.length ? { figures: run.figures } : {}),
+      ...(run.figureCoverage ? { figureCoverage: run.figureCoverage } : {}),
       ...(run.hash ? { hash: run.hash } : {}),
       ...(run.originalPath ? { originalPath: run.originalPath } : {})
     }
@@ -526,6 +567,7 @@ export function writeRunArtifact(
     beginRun(vaultRoot, runId, source, undefined, focus)
   rmSync(join(dir, 'notes'), { recursive: true, force: true })
   mkdirSync(join(dir, 'notes'), { recursive: true })
+  copyRunFigures(vaultRoot, dir, join(dir, 'notes'), source)
   const notePaths: string[] = []
   for (const f of planRunFiles(source, notes, stats, themes, focus)) {
     const abs = join(dir, f.relPath)
@@ -555,29 +597,40 @@ export interface StagedNote {
 /** Every note a run staged, in name order (the source book's copy included). */
 export function readRunNotes(vaultRoot: string, runId: string): StagedNote[] {
   const dir = notesDir(vaultRoot, runId)
-  if (!existsSync(dir)) return []
+  if (!localDirectory(vaultRoot, dir)) return []
   const out: StagedNote[] = []
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith('.md')) continue
-    const bytes = readFileSync(join(dir, file))
+    const bytes = readLocalFile(vaultRoot, join(dir, file))
+    if (!bytes) continue
     out.push({ name: file.replace(/\.md$/i, ''), content: bytes.toString('utf8'), hash: sha1(bytes) })
   }
   return out
 }
 
 /**
- * One staged note's text, by name — what the read-only staged pane renders.
- *
- * The name arrives from the renderer, so it is UNTRUSTED: the resolved path must
- * land inside this run's own `notes/` dir (`withinRoot`), which rules out both
- * `..` and an absolute path. Null when there is no such note.
+ * Resolve a legacy note name or an exact note path from this run's graph.
+ * The renderer supplies the selector, so require one direct child of `notes/`.
  */
-export function readStagedNote(vaultRoot: string, runId: string, name: string): string | null {
+export function stagedNotePath(vaultRoot: string, runId: string, note: string): string | null {
+  if (typeof runId !== 'string' || !isRunId(runId) || typeof note !== 'string' || !note) return null
   const dir = notesDir(vaultRoot, runId)
-  const abs = join(dir, `${name.replace(/\.md$/i, '')}.md`)
-  if (!withinRoot(dir, abs)) return null
+  const name = basename(note)
+  if (isAbsolute(note)) {
+    return note === join(dir, name) && /\.md$/i.test(name) ? note : null
+  }
+  if (name !== note) return null
+  return join(dir, `${name.replace(/\.md$/i, '')}.md`)
+}
+
+/** One staged note's text, for the read-only staged pane. */
+export function readStagedNote(vaultRoot: string, runId: string, note: string): string | null {
+  const abs = stagedNotePath(vaultRoot, runId, note)
+  if (!abs) return null
   try {
-    return readFileSync(abs, 'utf8')
+    const actual = realpathSync(abs)
+    if (!withinRoot(notesDir(realpathSync(vaultRoot), runId), actual)) return null
+    return readFileSync(actual, 'utf8')
   } catch {
     return null
   }
@@ -603,12 +656,20 @@ export function listRuns(vaultRoot: string): string[] {
 
 /** Whether `id` is a usable run id — what `assertRunId` accepts, as a test. */
 export function isRunId(id: string): boolean {
-  return RUN_ID_RE.test(id) && !id.includes('..') && !RESERVED_RUN_IDS.has(id.toLowerCase())
+  return typeof id === 'string' && RUN_ID_RE.test(id) && !id.includes('..') && !RESERVED_RUN_IDS.has(id.toLowerCase())
 }
 
 /** Delete a run's whole artifact. */
 export function removeRun(vaultRoot: string, runId: string): void {
-  rmSync(runDir(vaultRoot, runId), { recursive: true, force: true })
+  const dir = runDir(vaultRoot, runId)
+  if (!localDirectory(vaultRoot, dir)) return
+  const manifest = readMergeManifest(vaultRoot, runId)
+  if (manifest?.complete && manifest.figureSource) {
+    const folder = join(distillRoot(vaultRoot), FIGURE_MERGES_FOLDER)
+    if (!localDirectory(vaultRoot, folder, true)) throw new Error('Figure receipts are unavailable.')
+    atomicWrite(join(folder, `${runId}.json`), JSON.stringify(manifest, null, 2))
+  }
+  rmSync(dir, { recursive: true, force: true })
 }
 
 // --- Merge into the vault (reversible) -----------------------------------
@@ -639,6 +700,8 @@ export interface MergeFile {
    *  `collides` — renamed to sit beside a vault note of the same name — or
    *  `shared`, the document in `Sources/`. */
   action?: MergeFileAction
+  /** Whether this digest path was created by a merge or supplied by the user. */
+  asset?: 'owned' | 'existing'
 }
 
 /** Record of one merge, so it can be undone cleanly. Stored beside the run. */
@@ -658,6 +721,8 @@ export interface MergeManifest {
    *  that folder only then: a `Sources/` the user made and filled themselves is
    *  theirs, and an undo that happens to empty it must leave it standing. */
   createdSourcesDir?: boolean
+  createdFigureDirs?: string[]
+  figureSource?: { path: string; hash: string; citeOffset: number; figures: FigureRef[] }
 }
 
 /** The namespaced vault folder a run merges into (vault-relative). */
@@ -681,21 +746,17 @@ export function planSourceNote(
   hash: string
 ): { path: string; exists: boolean } {
   const dir = join(vaultRoot, SOURCES_FOLDER)
+  if (lstatSync(dir, { throwIfNoEntry: false }) && !localDirectory(vaultRoot, dir)) {
+    throw new Error('Sources folder is unavailable.')
+  }
   for (let n = 1; ; n++) {
     const name = n === 1 ? `${bookName}.md` : `${bookName} ${n}.md`
     const rel = join(SOURCES_FOLDER, name)
     const abs = join(dir, name)
-    let bytes: Buffer
-    try {
-      bytes = readFileSync(abs)
-    } catch (err) {
-      // Only "there is no such file" means the name is free. A permission
-      // error or an I/O failure must not be read as "nothing there", or the
-      // merge would happily write over a file it simply could not open.
-      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
-      return { path: rel, exists: false } // free — write it here
-    }
-    if (sha1(bytes) === hash) return { path: rel, exists: true } // already ours
+    if (!lstatSync(abs, { throwIfNoEntry: false })) return { path: rel, exists: false }
+    const bytes = readLocalFile(vaultRoot, abs)
+    if (!bytes) throw new Error(`Source note cannot be read: ${rel}`)
+    if (sha1(bytes) === hash) return { path: rel, exists: true }
   }
 }
 
@@ -724,11 +785,16 @@ export function contentHash(bytes: Buffer | string): string {
  * (`files: string[]`, no `complete`) normalises to hash-less, complete entries.
  */
 export function readMergeManifest(vaultRoot: string, runId: string): MergeManifest | null {
-  const p = manifestPath(vaultRoot, runId)
-  if (!existsSync(p)) return null
+  if (!isRunId(runId)) return null
+  return parseMergeManifest(vaultRoot, runId, manifestPath(vaultRoot, runId))
+}
+
+function parseMergeManifest(vaultRoot: string, runId: string, path: string): MergeManifest | null {
+  const bytes = readLocalFile(vaultRoot, path)
+  if (!bytes) return null
   let raw: unknown
   try {
-    raw = JSON.parse(readFileSync(p, 'utf8'))
+    raw = JSON.parse(bytes.toString('utf8'))
   } catch {
     return null
   }
@@ -742,29 +808,41 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
   }
   if (m.folder !== expectedFolder || !Array.isArray(m.files)) return null
 
-  const folderAbs = join(vaultRoot, expectedFolder)
-  const sourcesAbs = join(vaultRoot, SOURCES_FOLDER)
+  const allowedBases = [expectedFolder, SOURCES_FOLDER]
+  const allowedFigureDirs = allowedBases.map((base) => join(base, 'figures'))
   const legacy = m.files.every((e) => typeof e === 'string')
   const files: MergeFile[] = []
   const ACTIONS = new Set(['new', 'collides', 'identical', 'shared'])
   for (const e of m.files) {
-    const entry =
-      typeof e === 'string'
-        ? { path: e }
-        : (e as { path?: unknown; hash?: unknown; action?: unknown })
-    if (typeof entry.path !== 'string') return null
-    const abs = join(vaultRoot, entry.path)
-    if (!withinRoot(folderAbs, abs) && !withinRoot(sourcesAbs, abs)) return null
+    if (typeof e !== 'string' && (!e || typeof e !== 'object')) return null
+    const entry = typeof e === 'string' ? { path: e } :
+      (e as { path?: unknown; hash?: unknown; action?: unknown; asset?: unknown })
+    if (typeof entry.path !== 'string' || isAbsolute(entry.path) || normalize(entry.path) !== entry.path) return null
+    const parent = dirname(entry.path)
+    if (entry.asset === 'owned' || entry.asset === 'existing') {
+      if (!allowedFigureDirs.includes(parent) || !parseFigurePath(`figures/${basename(entry.path)}`)) return null
+    } else if (!allowedBases.includes(parent) || !/\.md$/i.test(entry.path)) return null
     const action = entry.action
     files.push({
       path: entry.path,
       ...(typeof entry.hash === 'string' ? { hash: entry.hash } : {}),
       ...(typeof action === 'string' && ACTIONS.has(action)
         ? { action: action as MergeFileAction }
-        : {})
+        : {}),
+      ...(entry.asset === 'owned' || entry.asset === 'existing' ? { asset: entry.asset } : {})
     })
   }
   const { skipped, createdSourcesDir } = m as { skipped?: unknown; createdSourcesDir?: unknown }
+  const rawFigureSource = (m as { figureSource?: MergeManifest['figureSource'] }).figureSource
+  const figures = readFigureRefs(rawFigureSource?.figures)
+  const figureSource = rawFigureSource && figures?.length && /^[0-9a-f]{40}$/.test(rawFigureSource.hash) &&
+    Number.isSafeInteger(rawFigureSource.citeOffset) && rawFigureSource.citeOffset >= 0 &&
+    files.some((f) => f.path === rawFigureSource.path && f.action === 'shared' && !f.asset &&
+      dirname(f.path) === SOURCES_FOLDER)
+    ? { path: rawFigureSource.path, hash: rawFigureSource.hash, citeOffset: rawFigureSource.citeOffset, figures }
+    : null
+  const rawDirs = (m as { createdFigureDirs?: unknown }).createdFigureDirs
+  const createdFigureDirs = Array.isArray(rawDirs) ? rawDirs.filter((dir) => allowedFigureDirs.includes(dir)) : []
   return {
     folder: expectedFolder,
     files,
@@ -772,8 +850,24 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
     ...(Array.isArray(skipped) && skipped.every((x) => typeof x === 'string')
       ? { skipped: skipped as string[] }
       : {}),
-    ...(createdSourcesDir === true ? { createdSourcesDir: true } : {})
+    ...(createdSourcesDir === true ? { createdSourcesDir: true } : {}),
+    ...(createdFigureDirs.length ? { createdFigureDirs } : {}),
+    ...(figureSource ? { figureSource } : {})
   }
+}
+
+export function archivedFigureRunIds(vaultRoot: string): string[] {
+  const folder = join(distillRoot(vaultRoot), FIGURE_MERGES_FOLDER)
+  if (!localDirectory(vaultRoot, folder)) return []
+  return readdirSync(folder, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name.slice(0, -5)).filter(isRunId)
+}
+
+export function archivedFigureMerge(vaultRoot: string, runId: string): MergeManifest | null {
+  if (!isRunId(runId)) return null
+  const archived = parseMergeManifest(vaultRoot, runId, join(distillRoot(vaultRoot), FIGURE_MERGES_FOLDER, `${runId}.json`))
+  return archived?.complete && archived.figureSource ? archived : null
 }
 
 /** The name of the staged note that holds the converted document itself — the
@@ -782,6 +876,58 @@ export function readMergeManifest(vaultRoot: string, runId: string): MergeManife
 function sourceNoteNameOf(vaultRoot: string, runId: string): string | null {
   const raw = readRunJson(vaultRoot, runId)?.file ?? readRunMeta(vaultRoot, runId)?.source
   return raw ? sourceNoteName(raw) : null
+}
+
+interface FigureProjection {
+  folder: string
+  links: Set<string>
+  shared: boolean
+}
+
+function planFigureProjection(
+  vault: string, stagedNotes: string, refs: FigureRef[], projects: FigureProjection[], prior: MergeManifest[]
+): { files: MergeFile[]; pending: Map<string, Buffer>; directories: string[] } {
+  const files: MergeFile[] = []
+  const pending = new Map<string, Buffer>()
+  const directories: string[] = []
+  const savedRefs = new Map(refs.map((ref) => [figurePath(ref), ref]))
+  const checked = new Map<string, { bytes: Buffer; hash: string }>()
+  for (const { folder, links, shared } of projects) {
+    const selected = [...links].filter((link) => savedRefs.has(link))
+    if (!selected.length) continue
+    const relativeDirectory = join(folder, 'figures')
+    const directory = join(vault, relativeDirectory)
+    const hasDirectory = !!lstatSync(directory, { throwIfNoEntry: false })
+    const base = join(vault, folder)
+    if ((hasDirectory && !localDirectory(vault, directory)) ||
+        (lstatSync(base, { throwIfNoEntry: false }) && !localDirectory(vault, base))) {
+      throw new Error(`Figure folder is unavailable: ${relativeDirectory}`)
+    }
+    if (!hasDirectory || prior.some((receipt) => receipt.createdFigureDirs?.includes(relativeDirectory))) {
+      directories.push(relativeDirectory)
+    }
+    for (const link of selected) {
+      const ref = savedRefs.get(link)!
+      const path = join(folder, link)
+      const present = !!lstatSync(join(vault, path), { throwIfNoEntry: false })
+      let image = checked.get(link)
+      if (!image) {
+        const saved = readFigureFile(vault, stagedNotes, ref)
+        if (!saved) throw new Error(`Saved figure is unavailable: ${ref.label}`)
+        image = { bytes: saved.bytes, hash: contentHash(saved.bytes) }
+        checked.set(link, image)
+      }
+      if (present && !readFigureFile(vault, base, ref)) {
+        throw new Error(`A different file already occupies this figure path: ${path}`)
+      }
+      const { hash } = image
+      const owned = !present || prior.some((receipt) => receipt.files.some(
+        (entry) => entry.path === path && entry.asset === 'owned' && entry.hash === hash))
+      files.push({ path, hash, action: shared ? 'shared' : 'new', asset: owned ? 'owned' : 'existing' })
+      if (!present) pending.set(path, image.bytes)
+    }
+  }
+  return { files, pending, directories }
 }
 
 /**
@@ -824,6 +970,10 @@ export function mergeRun(
 ): { manifest: MergeManifest; written: string[] } {
   const folder = mergeFolder(runId)
   const targetAbs = join(vaultRoot, folder)
+  const previous = readMergeManifest(vaultRoot, runId)
+  if (previous?.complete) return { manifest: previous, written: [] }
+  const stagedDir = runDir(vaultRoot, runId)
+  if (!localDirectory(vaultRoot, stagedDir)) throw new Error('Staged run is unavailable.')
   const staged = readRunNotes(vaultRoot, runId)
   const bookName = sourceNoteNameOf(vaultRoot, runId)
   const book = bookName
@@ -888,36 +1038,59 @@ export function mergeRun(
   if (book && sourceNote)
     files.push({ path: sourceNote.path, hash: book.hash, action: 'shared' })
 
+  const run = readRunSource(vaultRoot, runId)
+  const figureSource = run?.hash && run.figures?.length && sourceNote
+    ? { path: sourceNote.path, hash: run.hash, citeOffset: renderDocumentNote(run).citeOffset, figures: run.figures }
+    : undefined
+  const figures = figureSource && book ? planFigureProjection(
+    vaultRoot, join(stagedDir, 'notes'), figureSource.figures, [
+      { folder: SOURCES_FOLDER, links: linkedFigurePaths(book.content), shared: true },
+      { folder, links: linkedFigurePaths(planned.map(({ bytes }) => bytes.toString('utf8')).join('\n')), shared: false }
+    ], [...otherMerges(vaultRoot, runId), ...(previous ? [previous] : [])]
+  ) : undefined
+  if (figures) files.push(...figures.files)
+
   // Whether `Sources/` is this merge's doing, decided BEFORE anything is
   // written — that is the only moment the answer is knowable, and undo needs it.
-  const createdSourcesDir =
-    book !== null &&
-    sourceNote !== null &&
-    !sourceNote.exists &&
-    !existsSync(join(vaultRoot, SOURCES_FOLDER))
+  const createdSourcesDir = !!previous?.createdSourcesDir ||
+    (book !== null && sourceNote !== null && !sourceNote.exists && !existsSync(join(vaultRoot, SOURCES_FOLDER)))
+
+  const manifest: MergeManifest = { folder, files, complete: false, skipped, createdSourcesDir,
+    ...(figureSource ? { figureSource } : {}),
+    ...(figures?.directories.length ? { createdFigureDirs: figures.directories } : {}) }
 
   const mPath = manifestPath(vaultRoot, runId)
-  atomicWrite(
-    mPath,
-    JSON.stringify({ folder, files, complete: false, skipped, createdSourcesDir }, null, 2)
-  )
+  atomicWrite(mPath, JSON.stringify(manifest, null, 2))
 
-  mkdirSync(targetAbs, { recursive: true })
+  if (!localDirectory(vaultRoot, targetAbs, true)) throw new Error('Merge folder is unavailable.')
   const written: string[] = []
   const writeInto = (rel: string, bytes: Buffer): void => {
     const abs = join(vaultRoot, rel)
-    mkdirSync(dirname(abs), { recursive: true })
-    // Dot-prefixed: if a crash strands one, the vault scan and watcher skip it.
-    const tmp = join(dirname(abs), `.${basename(abs)}.merge-tmp`)
-    writeFileSync(tmp, bytes)
-    renameSync(tmp, abs)
+    if (!localDirectory(vaultRoot, dirname(abs), true)) throw new Error('Merge folder is unavailable.')
+    atomicWrite(abs, bytes)
     written.push(abs)
+  }
+  for (const [rel, bytes] of figures?.pending ?? []) {
+    const abs = join(vaultRoot, rel)
+    if (!localDirectory(vaultRoot, dirname(abs), true)) throw new Error('Figure folder is unavailable.')
+    // Another writer that appeared after planning must not be overwritten.
+    try {
+      atomicWrite(abs, bytes, true)
+      rememberWrittenFigure(vaultRoot, dirname(dirname(abs)), parseFigurePath(`figures/${basename(abs)}`)!)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') {
+        const entry = manifest.files.find((f) => f.path === rel)
+        if (entry) entry.asset = 'existing'
+        atomicWrite(mPath, JSON.stringify(manifest, null, 2))
+      }
+      throw err
+    }
   }
   for (const f of planned) writeInto(f.path, f.bytes)
   if (book && sourceNote && !sourceNote.exists)
     writeInto(sourceNote.path, Buffer.from(book.content, 'utf8'))
 
-  const manifest: MergeManifest = { folder, files, complete: true, skipped, createdSourcesDir }
+  manifest.complete = true
   atomicWrite(mPath, JSON.stringify(manifest, null, 2))
   return { manifest, written }
 }
@@ -948,15 +1121,18 @@ export async function unmergeRun(
   const stillWanted = pathsOtherRunsMerged(vaultRoot, runId)
   const removed: string[] = []
   const trashed: string[] = []
-  for (const entry of manifest.files) {
-    if (entry.action === 'shared' && stillWanted.has(entry.path)) continue
+  const retainedLinks = new Map<string, Set<string>>()
+  const entries = [...manifest.files.filter((entry) => !entry.asset), ...manifest.files.filter((entry) => entry.asset)]
+  for (const entry of entries) {
+    if (entry.asset === 'existing' || (entry.action === 'shared' && stillWanted.has(entry.path))) continue
     const abs = join(vaultRoot, entry.path)
-    let bytes: Buffer
-    try {
-      bytes = readFileSync(abs)
-    } catch {
-      continue // already gone — nothing to take back
+    if (entry.asset) {
+      const noteDir = dirname(dirname(abs))
+      if (!retainedLinks.has(noteDir)) retainedLinks.set(noteDir, siblingFigureLinks(vaultRoot, noteDir))
+      if (retainedLinks.get(noteDir)?.has(`figures/${basename(abs)}`)) continue
     }
+    const bytes = readLocalFile(vaultRoot, abs)
+    if (!bytes) continue // already gone or no longer a local file
     if (entry.hash && sha1(bytes) === entry.hash) {
       rmSync(abs, { force: true })
       removed.push(abs)
@@ -969,13 +1145,14 @@ export async function unmergeRun(
   // The run's own folder is always the merge's doing, so an empty one goes.
   // `Sources/` only goes if THIS merge made it: a folder the user created is
   // theirs, empty or not.
-  const folders = manifest.createdSourcesDir
-    ? [manifest.folder, SOURCES_FOLDER]
-    : [manifest.folder]
+  const folders = [
+    ...(manifest.createdFigureDirs ?? []), manifest.folder,
+    ...(manifest.createdSourcesDir ? [SOURCES_FOLDER] : [])
+  ]
   for (const folder of folders) {
     const abs = join(vaultRoot, folder)
     try {
-      if (readdirSync(abs).length === 0) rmSync(abs, { recursive: true, force: true })
+      if (localDirectory(vaultRoot, abs)) rmdirSync(abs)
     } catch {
       /* not there, or not empty — leave it */
     }
@@ -984,14 +1161,33 @@ export async function unmergeRun(
   return { removed, trashed }
 }
 
+function siblingFigureLinks(vault: string, directory: string): Set<string> {
+  const links = new Set<string>()
+  if (!localDirectory(vault, directory)) return links
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || entry.name.startsWith('.') || !/\.md$/i.test(entry.name)) continue
+    const text = readLocalFile(vault, join(directory, entry.name))?.toString('utf8')
+    if (text) for (const link of linkedFigurePaths(text)) links.add(link)
+  }
+  return links
+}
+
 /** Vault-relative paths that OTHER merged runs still list in their manifests —
  *  what an undo of `runId` must leave alone. */
 function pathsOtherRunsMerged(vaultRoot: string, runId: string): Set<string> {
-  const paths = new Set<string>()
+  return new Set(otherMerges(vaultRoot, runId).flatMap((manifest) => manifest.files.map((f) => f.path)))
+}
+
+function otherMerges(vaultRoot: string, runId: string): MergeManifest[] {
+  const manifests: MergeManifest[] = []
   for (const id of listRuns(vaultRoot)) {
     if (id === runId) continue
-    const other = readMergeManifest(vaultRoot, id)
-    if (other) for (const f of other.files) paths.add(f.path)
+    const manifest = readMergeManifest(vaultRoot, id)
+    if (manifest) manifests.push(manifest)
   }
-  return paths
+  for (const id of archivedFigureRunIds(vaultRoot)) {
+    const manifest = archivedFigureMerge(vaultRoot, id)
+    if (manifest) manifests.push(manifest)
+  }
+  return manifests
 }

@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from '../electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -34,7 +34,7 @@ test.beforeAll(async () => {
     join(userDataDir, 'settings.toml'),
     '[talk]\nenabled = true\n\n[talk.chat]\nprovider = "claude-cli"\nmodel = "sonnet"\n'
   )
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: {
       ...process.env,
@@ -54,7 +54,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('real vectors and a real model: every note under one theme, themes distinct and in the document language', async () => {

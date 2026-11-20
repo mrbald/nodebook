@@ -65,7 +65,11 @@ function cleanTarget(inner: string): string {
   return inner.split('|')[0].split('#')[0].trim()
 }
 
-export function harvest(path: string, content: string): Harvested {
+export function harvest(
+  path: string,
+  content: string,
+  { linkedFieldsOnly = false }: { linkedFieldsOnly?: boolean } = {}
+): Harvested {
   const noteName = basename(path).replace(/\.md$/i, '')
 
   // A `kind: document` note is a whole converted book — up to megabytes of
@@ -118,7 +122,7 @@ export function harvest(path: string, content: string): Harvested {
     let object = m[2].trim()
     const asLink = WIKILINK_ONLY.exec(object)
     if (asLink) object = cleanTarget(asLink[1])
-    if (object) triples.push({ subject: noteName, relation, object })
+    if (object && (asLink || !linkedFieldsOnly)) triples.push({ subject: noteName, relation, object })
   }
 
   return { title: title || noteName, text: content, triples, kind }

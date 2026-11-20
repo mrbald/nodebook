@@ -53,6 +53,7 @@ const GHOST = 'ghost:'
 export const SAME_NAME = 'same_name'
 /** The body field a merge writes when the user confirmed two notes are one thing. */
 export const SAME_AS = 'same_as'
+export const DEFAULT_GRAPH_CAP = 200
 
 /** Base note name from a path: strip directories and the `.md` extension. */
 export function noteName(path: string): string {
@@ -184,16 +185,27 @@ export function overlayGraph(
   return { ...g, nodes, edges }
 }
 
-export function buildGraph(
-  files: FileRow[],
-  triples: TripleRow[],
-  focus: string | null,
-  opts: { depth?: number; cap?: number; showSources?: boolean } = {}
-): GraphData {
-  const depth = opts.depth ?? 1
-  const cap = opts.cap ?? 200
-  const showSources = opts.showSources ?? false
+export interface ResolvedEdge {
+  subject: string
+  relation: string
+  object: string
+  /** The normalised target text, for counting ambiguous *targets* not edges. */
+  key: string
+  ambiguous: boolean
+}
 
+interface ResolvedGraph {
+  pathSet: Set<string>
+  kindOf: Map<string, NoteKind>
+  resolve: ReturnType<typeof targetResolver>
+  canon: SameAsGroups['canon']
+  aliasLabels: Map<string, Set<string>>
+  ghostLabel: Map<string, string>
+  edges: ResolvedEdge[]
+}
+
+/** Share path resolution and alias folding before a view hides or caps nodes. */
+export function resolveGraph(files: FileRow[], triples: TripleRow[]): ResolvedGraph {
   const pathSet = new Set(files.map((f) => f.path))
   // What each file IS (frontmatter `kind:`), for the document rule below and
   // for the map's node styling. Files with no recorded kind read as `note`.
@@ -219,19 +231,10 @@ export function buildGraph(
   const collapsed = (t: TripleRow, object: string): boolean =>
     t.relation === SAME_AS && pathSet.has(t.source_file) && pathSet.has(object)
 
-  interface Edge {
-    subject: string
-    relation: string
-    object: string
-    /** The normalised target text, for counting ambiguous *targets* not edges. */
-    key: string
-    ambiguous: boolean
-  }
-
   // De-dupe parallel triples (same subject/relation/object).
   const ghostLabel = new Map<string, string>()
   const seen = new Set<string>()
-  let allEdges: Edge[] = []
+  const allEdges: ResolvedEdge[] = []
   for (const t of triples) {
     const { id, key, ambiguous } = resolve(t.object, t.source_file)
     if (collapsed(t, id)) continue // the alias edge itself: the fold replaces it
@@ -253,9 +256,39 @@ export function buildGraph(
   for (const e of allEdges) {
     if (e.relation !== 'links_to') typedPairs.add(`${e.subject} ${e.object}`)
   }
-  allEdges = allEdges.filter(
+  const edges = allEdges.filter(
     (e) => e.relation !== 'links_to' || !typedPairs.has(`${e.subject} ${e.object}`)
   )
+  return { pathSet, kindOf, resolve, canon, aliasLabels, ghostLabel, edges }
+}
+
+function neighbourhood(focusId: string, depth: number, edges: ResolvedEdge[]): Set<string> {
+  const included = new Set<string>([focusId])
+  let frontier = new Set<string>([focusId])
+  for (let d = 0; d < depth && frontier.size > 0; d++) {
+    const next = new Set<string>()
+    for (const { subject, object } of edges) {
+      if (frontier.has(subject) && !included.has(object)) next.add(object)
+      if (frontier.has(object) && !included.has(subject)) next.add(subject)
+    }
+    for (const id of next) included.add(id)
+    frontier = next
+  }
+  return included
+}
+
+export function buildGraph(
+  files: FileRow[],
+  triples: TripleRow[],
+  focus: string | null,
+  opts: { depth?: number; cap?: number; showSources?: boolean } = {}
+): GraphData {
+  const depth = opts.depth ?? 1
+  const cap = opts.cap ?? DEFAULT_GRAPH_CAP
+  const showSources = opts.showSources ?? false
+  const resolved = resolveGraph(files, triples)
+  const { canon, kindOf, pathSet } = resolved
+  let shownEdges = resolved.edges
 
   // A `source` triple's (resolved) object is a source document — every note
   // distilled from it points back, so it collects one edge per note and turns the
@@ -266,15 +299,13 @@ export function buildGraph(
   // A focus that was itself folded into another note opens its surviving node.
   const focusId = focus ? canon(focus) : null
   const hubs = new Set<string>()
-  for (const e of allEdges) if (e.relation === 'source') hubs.add(e.object)
+  for (const e of resolved.edges) if (e.relation === 'source') hubs.add(e.object)
   // The user explicitly opened this node — never hide it, even if it's a hub.
   // Simplest correct fix: exempt it from the hub set, so both the node and its
   // edges survive (instead of special-casing "keep the node, drop its edges").
   if (focusId) hubs.delete(focusId)
   const hiddenSources = showSources ? 0 : hubs.size
-  if (!showSources && hubs.size > 0) {
-    allEdges = allEdges.filter((e) => !hubs.has(e.subject) && !hubs.has(e.object))
-  } else if (hubs.size > 0) {
+  if (hubs.size > 0) {
     // Shown, the hub still need not be a star. Once a run has themes, every
     // note already hangs under a theme (`part_of::`) and every theme links to
     // the book — so the note → book edges say nothing the map does not already
@@ -283,34 +314,30 @@ export function buildGraph(
     // `source::` line stays in the note; only the drawing changes. A hub with
     // no theme edges (a run too small to be themed) keeps its star.
     const themed = new Set<string>()
-    for (const e of allEdges)
+    for (const e of resolved.edges)
       if (e.relation === 'source' && hubs.has(e.object) && kindOf.get(e.subject) === 'theme')
         themed.add(e.object)
     if (themed.size > 0) {
-      allEdges = allEdges.filter(
+      shownEdges = shownEdges.filter(
         (e) => e.relation !== 'source' || !themed.has(e.object) || kindOf.get(e.subject) === 'theme'
       )
     }
   }
+  let allEdges = showSources ? shownEdges : resolved.edges
+  if (!showSources && hubs.size > 0) {
+    allEdges = allEdges.filter((e) => !hubs.has(e.subject) && !hubs.has(e.object))
+  }
 
   let nodeIds: Set<string>
+  let hasSources: boolean
   let total: number // candidate nodes available (≥ shown when the global cap bites)
   if (focusId && pathSet.has(focusId)) {
     // BFS out from the focus note to `depth` hops (edges are undirected for reach).
-    const included = new Set<string>([focusId])
-    let frontier = new Set<string>([focusId])
-    for (let d = 0; d < depth; d++) {
-      const next = new Set<string>()
-      for (const e of allEdges) {
-        if (frontier.has(e.subject) && !included.has(e.object)) next.add(e.object)
-        if (frontier.has(e.object) && !included.has(e.subject)) next.add(e.subject)
-      }
-      for (const n of next) included.add(n)
-      frontier = next
-      if (frontier.size === 0) break
-    }
-    nodeIds = included
-    total = included.size // local slices are never capped
+    nodeIds = neighbourhood(focusId, depth, allEdges)
+    total = nodeIds.size // local slices are never capped
+    // Keep the toggle available in both states when a hub can join this slice.
+    const withSources = showSources || !hubs.size ? nodeIds : neighbourhood(focusId, depth, shownEdges)
+    hasSources = [...hubs].some((id) => withSources.has(id))
   } else {
     // Global: rank every referenced node by raw degree and keep the top `cap`.
     //
@@ -326,16 +353,29 @@ export function buildGraph(
       deg.set(e.subject, (deg.get(e.subject) ?? 0) + 1)
       deg.set(e.object, (deg.get(e.object) ?? 0) + 1)
     }
-    const ranked = showSources
-      ? [...deg.keys()]
-      : [...deg.keys()].filter((id) => kindOf.get(id) !== 'document')
+    const candidates = [...deg.keys()]
+    const ranked = showSources ? candidates : candidates.filter((id) => kindOf.get(id) !== 'document')
+    hasSources = hubs.size > 0 || candidates.some((id) => kindOf.get(id) === 'document')
     total = ranked.length
     nodeIds = new Set(
       ranked.sort((a, b) => (deg.get(b) ?? 0) - (deg.get(a) ?? 0)).slice(0, cap)
     )
   }
 
-  const keptEdges = allEdges.filter((e) => nodeIds.has(e.subject) && nodeIds.has(e.object))
+  return { ...graphSlice(resolved, nodeIds, allEdges, { focusId, total, hiddenSources }), hasSources }
+}
+
+export function graphSlice(
+  { pathSet, kindOf, aliasLabels, ghostLabel }: ResolvedGraph,
+  nodeIds: Set<string>,
+  candidateEdges: ResolvedEdge[],
+  { focusId = null, total = nodeIds.size, hiddenSources = 0 }: {
+    focusId?: string | null
+    total?: number
+    hiddenSources?: number
+  } = {}
+): GraphData {
+  const keptEdges = candidateEdges.filter((e) => nodeIds.has(e.subject) && nodeIds.has(e.object))
 
   // Degree within the returned slice.
   const degree = new Map<string, number>()

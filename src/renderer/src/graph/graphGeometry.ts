@@ -75,9 +75,9 @@ function boxPort(centre: Point, toward: Point, size: NodeSize, scale: number): P
 }
 
 /** A temporary connector between the actual node borders after dragging or pinning. */
-export function manualEdgePath(
+export function manualConnector(
   a: Point, b: Point, from: NodeSize, to: NodeSize, scale: number, lane: number
-): string {
+): { path: string; points: [Point, Point, Point] | [Point, Point, Point, Point] } {
   const dx = b.x - a.x
   const dy = b.y - a.y
   const distance = Math.hypot(dx, dy)
@@ -85,11 +85,23 @@ export function manualEdgePath(
     const start = { x: a.x + from.width * scale / 2, y: a.y + from.height * scale / 4 }
     const end = { x: b.x + to.width * scale / 2, y: b.y - to.height * scale / 4 }
     const bendX = Math.max(start.x, end.x) + Math.max(8, 16 + lane * 5) * scale
-    return `M${start.x} ${start.y} C${bendX} ${start.y} ${bendX} ${end.y} ${end.x} ${end.y}`
+    return {
+      path: `M${start.x} ${start.y} C${bendX} ${start.y} ${bendX} ${end.y} ${end.x} ${end.y}`,
+      points: [start, { x: bendX, y: start.y }, { x: bendX, y: end.y }, end]
+    }
   }
   const offset = lane * 14 * scale / distance
   const middle = { x: (a.x + b.x) / 2 - dy * offset, y: (a.y + b.y) / 2 + dx * offset }
   const start = boxPort(a, middle, from, scale)
   const end = boxPort(b, middle, to, scale)
-  return `M${start.x} ${start.y} Q${middle.x} ${middle.y} ${end.x} ${end.y}`
+  return {
+    path: `M${start.x} ${start.y} Q${middle.x} ${middle.y} ${end.x} ${end.y}`,
+    points: [start, middle, end]
+  }
+}
+
+export function manualEdgePath(
+  a: Point, b: Point, from: NodeSize, to: NodeSize, scale: number, lane: number
+): string {
+  return manualConnector(a, b, from, to, scale, lane).path
 }

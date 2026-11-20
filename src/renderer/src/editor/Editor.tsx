@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { OpenFigure } from '../Figures'
+import { useContext, useEffect, useMemo, useRef } from 'react'
 import { EditorView, keymap, drawSelection, highlightActiveLine } from '@codemirror/view'
 import { EditorState, type Extension } from '@codemirror/state'
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
@@ -26,6 +27,7 @@ export type ViewMode = 'code' | 'live' | 'reading'
 
 interface Props {
   initialDoc: string
+  notePath?: string
   noteNames: string[]
   /** Receives the editor's current text on every change; debounced internally. */
   onChange: (doc: string) => void
@@ -45,6 +47,7 @@ interface Props {
 
 export function Editor({
   initialDoc,
+  notePath,
   noteNames,
   onChange,
   onOpenLink,
@@ -54,6 +57,7 @@ export function Editor({
   mode,
   revealRange
 }: Props) {
+  const openFigure = useContext(OpenFigure)
   // Live note list for autocomplete without rebuilding the editor.
   const namesRef = useRef(noteNames)
   namesRef.current = noteNames
@@ -97,7 +101,8 @@ export function Editor({
         (target) => onOpenLinkRef.current?.(target),
         (url) => onOpenUrlRef.current?.(url),
         reveal,
-        (target) => linkExistsRef.current?.(target) ?? true
+        (target) => linkExistsRef.current?.(target) ?? true,
+        notePath ? { path: notePath, open: (id, label, occurrence) => openFigure({ path: notePath, id, label, occurrence }) } : undefined
       )
     switch (mode) {
       case 'code':
@@ -114,7 +119,7 @@ export function Editor({
       case 'reading':
         return [preview(false), EditorState.readOnly.of(true), EditorView.editable.of(false)]
     }
-  }, [mode])
+  }, [mode, notePath, openFigure])
 
   const { containerRef, viewRef } = useCodeMirror({
     initialDoc,

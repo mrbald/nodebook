@@ -30,6 +30,7 @@ body {
 .app {
   display: grid;
   grid-template-columns: 260px 1fr 260px;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
 }
 /* No right panel (map / settings / help / empty): drop the third column so the
@@ -37,6 +38,28 @@ body {
 .app--no-right {
   grid-template-columns: 260px 1fr;
 }
+
+.app > :is(.sidebar, .editor-pane, .backlinks) { grid-row: 2; }
+.app-notices {
+  grid-area: 1 / 1 / 2 / -1;
+  max-height: 25vh;
+  overflow: auto;
+}
+.app-notices:empty { display: none; }
+.app-notices > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+}
+.app-notices > div > span:first-child { overflow-wrap: anywhere; }
+.app-notices > .error-banner { border-left-color: #d9534f; }
+.app-notices > .distill-merged-banner { border-left-color: #7ec699; }
 
 /* --- Sidebar ------------------------------------------------------------- */
 
@@ -72,8 +95,26 @@ body {
   background: rgba(122, 162, 247, 0.24);
 }
 
-.vault-path {
+.vault-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  justify-content: space-between;
   padding: 0 14px 8px;
+}
+.vault-map-link,
+.search-hit-map {
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.vault-map-link {
+  flex: none;
+}
+.vault-path {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
@@ -118,7 +159,8 @@ body {
 /* Visible keyboard focus on the interactive list rows (tree, search, links). */
 .tree-folder:focus-visible,
 .tree-file:focus-visible,
-.search-results li:focus-visible,
+.search-hit:focus-visible,
+.search-hit-map:focus-visible,
 .outbound-item:focus-visible,
 .backlinks-item:focus-visible {
   outline: 2px solid var(--accent);
@@ -281,6 +323,17 @@ body {
   text-align: center;
 }
 
+.reader-map-host { height: 100%; }
+.reader-map-host[hidden], .graph-view[hidden] { display: none; }
+.reader-return {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding-inline: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.reader-return ~ :is(.note-pane, .map-view, .empty) { height: calc(100% - 36px); }
+
 .note-pane {
   display: flex;
   flex-direction: column;
@@ -312,6 +365,7 @@ body {
   font-size: 12px;
   color: var(--muted);
 }
+.settings-close,
 .settings-reset,
 .settings-reveal {
   background: transparent;
@@ -382,15 +436,15 @@ body {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 2px;
-  padding: 2px 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 4px 8px;
   border-top: 1px solid var(--border);
   background: var(--bg-elev);
 }
-/* Telemetry widget — sits at the far left of the status bar. */
+/* Global controls share the trailing end of each toolbar. */
 .telemetry {
   position: relative;
-  margin-right: auto;
 }
 .telemetry-mini {
   display: flex;
@@ -434,7 +488,8 @@ body {
   bottom: calc(100% + 6px);
   left: 0;
   z-index: 40;
-  width: 220px;
+  width: min(220px, var(--popup-width, 100vw));
+  overflow: auto;
   padding: 10px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -526,7 +581,10 @@ body {
   position: absolute;
   bottom: calc(100% + 4px);
   right: 0;
-  min-width: 140px;
+  width: max-content;
+  min-width: min(140px, var(--popup-width, 100vw));
+  max-width: var(--popup-width, 100vw);
+  overflow: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -562,7 +620,15 @@ body {
 .status-menu-item.active {
   color: var(--accent);
 }
-.status-menu-item.active::after {
+.status-menu-item small {
+  display: block;
+  max-width: 24ch;
+  white-space: normal;
+  color: var(--muted);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+.status-menu-item.active .status-option-label::after {
   content: ' ✓';
 }
 
@@ -708,26 +774,48 @@ body {
 /* Map pane = a canvas column (with bottom toolbar) + a right inspector, so the
    chrome matches the editor: a bottom status bar and a right-hand panel. */
 .graph-view {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
   min-height: 0;
 }
-.graph-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
+.graph-main { display: contents; }
+.graph-main > .graph-scope { grid-area: 1 / 1; }
+.graph-main > :is(.graph-canvas-host, .graph-empty) { grid-area: 2 / 1; height: 100%; min-width: 0; }
+.graph-main > .graph-toolbar { grid-area: 3 / 1 / 4 / -1; }
 .graph-inspector {
-  flex: none;
-  width: 260px;
+  grid-area: 1 / 2 / 3 / 3;
+  min-height: 0;
   border-left: 1px solid var(--border);
   background: var(--bg-elev);
   overflow-y: auto;
   padding: 12px;
   font-size: 12px;
 }
+.graph-scope {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 7px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.graph-scope strong { color: var(--text); font-weight: 550; }
+.graph-insp-excerpt { line-height: 1.5; overflow-wrap: anywhere; }
+.graph-insp-link {
+  color: var(--accent);
+  text-align: start;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+.graph-insp-link:hover { text-decoration: underline; }
 .graph-insp-title {
   font-weight: 600;
   font-size: 13px;
@@ -826,17 +914,6 @@ body {
   font-size: 11px;
   padding: 1px 5px;
 }
-/* The clicked node gets a ring — distinct from the focus node's fill emphasis. */
-.graph-node.is-selected :is(circle, rect) {
-  stroke: var(--accent);
-  stroke-width: 2.5px;
-}
-/* A pinned node is anchored — a dashed ring marks it as held in place. */
-.graph-node.is-pinned :is(circle, rect) {
-  stroke: var(--accent);
-  stroke-width: 1.5px;
-  stroke-dasharray: 3 2;
-}
 /* The map's shape key: a theme is a group of notes, drawn as a diamond. */
 .graph-shape-key {
   display: flex;
@@ -856,8 +933,7 @@ body {
   flex-direction: column;
   gap: 5px;
 }
-/* The map's controls sit at the bottom of the canvas column to match the
-   editor's bottom status bar — consistent chrome placement across views. */
+/* A single footer runs beneath both the map canvas and its inspector. */
 .graph-toolbar {
   flex: none;
   display: flex;
@@ -875,8 +951,10 @@ body {
   align-items: center;
   gap: 6px;
 }
-.graph-toolbar-right .telemetry {
-  margin-right: 0; /* override the editor-status-bar left-float in this context */
+.graph-toolbar-right,
+.graph-controls {
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 .graph-title {
   font-weight: 600;
@@ -888,7 +966,8 @@ body {
   color: var(--muted);
   font-size: 11px;
 }
-.graph-depth {
+.graph-depth,
+.graph-zoom {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -915,7 +994,8 @@ body {
   touch-action: none;
   cursor: grab;
 }
-.graph-canvas:active {
+.graph-canvas:active,
+.graph-canvas:active .graph-node {
   cursor: grabbing;
 }
 .graph-legend {
@@ -969,29 +1049,33 @@ body {
   background: var(--bg);
 }
 .graph-edge {
-  stroke-width: 1.2;
-  opacity: 0.5;
+  fill: none;
+  stroke-width: 0.75;
+  opacity: 0.26;
+  pointer-events: none;
 }
 .graph-edge-path {
-  fill: none;
   stroke-width: 1;
   stroke-linejoin: round;
-  opacity: 0.8;
+  opacity: 0.38;
 }
 .graph-edge-related {
-  stroke-dasharray: 5 4;
-  opacity: 0.85;
+  stroke-dasharray: 4 3;
 }
 /* Overlay only: the two notes joined by this line share a name. */
 .graph-edge-samename {
-  stroke-dasharray: 2 5;
-  opacity: 0.9;
+  stroke-dasharray: 2 4;
 }
-.graph-edge-path.is-dim {
-  opacity: 0.16;
+.graph-routed-overview .graph-edge {
+  stroke-width: 0.75;
+  opacity: 0.22;
 }
-.graph-edge-path.is-incident {
-  opacity: 1;
+.graph-canvas .graph-edge.is-dim {
+  opacity: 0.14;
+}
+.graph-canvas .graph-edge.is-incident {
+  stroke-width: 1.25;
+  opacity: 0.95;
 }
 .graph-ctl.is-on {
   color: var(--accent);
@@ -1000,56 +1084,76 @@ body {
 .graph-node {
   cursor: grab;
 }
-.graph-node :is(circle, rect) {
-  fill: var(--accent-bg);
-  stroke: var(--accent);
-  stroke-width: 1.5;
+.graph-node:focus {
+  outline: none;
 }
-.graph-node text {
-  fill: var(--text);
-  font-size: 11px;
-  text-anchor: middle;
-  pointer-events: none;
-  user-select: none;
-}
-.graph-node:hover :is(circle, rect) {
-  stroke: var(--text);
-  stroke-width: 2.5;
-}
-.graph-node.is-focus :is(circle, rect) {
-  stroke: var(--text);
-  stroke-width: 3;
-}
-.graph-node.is-ghost :is(circle, rect) {
+.graph-node :is(.graph-point-hit, .graph-note-hit) {
   fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+.graph-point-dot,
+.graph-note-glyph {
+  fill: var(--accent-bg);
+  stroke: var(--bg);
+  stroke-width: 0.8;
+  pointer-events: none;
+}
+.graph-note-glyph {
+  vector-effect: non-scaling-stroke;
+}
+.graph-node.is-ghost :is(.graph-point-dot, .graph-note-glyph, .graph-note-box) {
+  fill: var(--bg);
   stroke: var(--muted);
-  stroke-dasharray: 3 2;
-  cursor: default;
+  stroke-dasharray: 2 1;
 }
-.graph-node.is-ghost text {
-  fill: var(--muted);
-}
-.graph-node .graph-note-box {
+.graph-note-box {
   fill: var(--bg-elev);
   stroke: var(--border);
   stroke-width: 1;
 }
-.graph-node .graph-note-glyph {
-  fill: var(--accent);
-  stroke: none;
+.graph-routed-overview .graph-note-box {
+  fill: color-mix(in srgb, var(--bg-elev) 65%, var(--bg));
+  stroke: color-mix(in srgb, var(--border) 65%, var(--bg));
 }
-.graph-node.is-ghost .graph-note-glyph {
-  fill: var(--muted);
+.graph-node.is-focus :is(.graph-point-dot, .graph-note-box) {
+  stroke: var(--text);
+  stroke-width: 1.25;
+}
+.graph-node.is-pinned :is(.graph-point-dot, .graph-note-box) {
+  stroke: var(--text);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+}
+.graph-node:is(.is-hovered, :focus-visible, .is-selected) :is(.graph-point-dot, .graph-note-box) {
+  stroke: var(--text);
+  stroke-width: 1.8;
 }
 .graph-elk-node text {
-  text-anchor: start;
+  fill: var(--text);
+  pointer-events: none;
+  user-select: none;
 }
-.graph-node:focus-visible {
-  outline: none;
+.graph-node.is-ghost text {
+  fill: var(--muted);
 }
-.graph-node:focus-visible :is(.graph-note-box, circle, rect) {
-  stroke: var(--text);
-  stroke-width: 3;
+.graph-screen-label {
+  user-select: none;
+}
+.graph-screen-label text {
+  fill: var(--text);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+.graph-screen-label.is-active rect {
+  fill: var(--bg-elev);
+  stroke: var(--border);
+}
+.graph-screen-label.is-active text {
+  stroke: none;
 }
 .graph-empty {
   flex: 1;
@@ -1106,14 +1210,32 @@ body {
   border-radius: 5px;
   font-size: 12px;
   color: var(--text);
+}
+.run-item[data-open-disabled='false'] {
   cursor: pointer;
 }
-.run-item:hover {
+.run-item[data-open-disabled='false']:hover {
   background: rgba(127, 127, 127, 0.12);
 }
-.run-item:focus-visible {
+.run-item:focus-visible,
+.run-item button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
+}
+.run-item-open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: inherit;
 }
 .run-item-name {
   flex: 1;
@@ -1164,7 +1286,9 @@ body {
   color: var(--text);
   border-color: var(--muted);
 }
-.run-item-resume:disabled {
+.run-item-resume:disabled,
+.run-item-del:disabled,
+.distill-cancel:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -1178,7 +1302,7 @@ body {
   padding: 1px 3px;
   border-radius: 4px;
 }
-.run-item-del:hover {
+.run-item-del:hover:not(:disabled) {
   color: var(--text);
   background: rgba(127, 127, 127, 0.2);
 }
@@ -1295,9 +1419,21 @@ body {
   flex: 1;
 }
 .search-results li {
-  padding: 5px 14px;
+  padding: 4px 12px;
+}
+.search-hit {
+  display: block;
+  width: 100%;
+  padding: 2px;
+  border: 0;
+  text-align: start;
+  font: inherit;
+  background: transparent;
   cursor: pointer;
 }
+.search-hit-map { padding: 2px; }
+.search-hit-map:hover, .vault-map-link:hover { text-decoration: underline; }
+.search-result-title, .search-result-path { display: block; }
 .search-results li:hover {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -1589,25 +1725,6 @@ body {
 }
 
 /* A calm, dismissible error notice (e.g. a note that vanished under us). */
-.error-banner {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 70%;
-  padding: 8px 12px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-left: 3px solid #d9534f;
-  border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  font-size: 13px;
-  color: var(--text);
-}
 .error-banner-close {
   background: none;
   border: none;
@@ -1622,24 +1739,6 @@ body {
 
 /* --- Distill progress toast ---------------------------------------------- */
 
-.distill-toast {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent, #7aa2f7);
-  border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  font-size: 13px;
-  color: var(--text);
-}
 /* Two lines in the toast: what the run will cost, then where it has got to. */
 .distill-toast-lines {
   display: flex;
@@ -1672,30 +1771,12 @@ body {
   padding: 2px 8px;
   border-radius: 4px;
 }
-.distill-cancel:hover {
+.distill-cancel:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--muted);
 }
 
 /* Merged-into-vault confirmation with Undo. */
-.distill-merged-banner {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-left: 3px solid #7ec699;
-  border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  font-size: 13px;
-  color: var(--text);
-}
 .distill-merged-banner code {
   font-size: 12px;
   color: var(--muted);
@@ -1727,24 +1808,6 @@ body {
 /* What just happened to a distill run: what it staged (including coverage
    honesty when it sampled rather than read in full — distill/run.ts
    stats.coverage), or that it was cancelled or undone. Dismissible. */
-.distill-coverage-banner {
-  position: fixed;
-  top: 56px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent, #7aa2f7);
-  border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  font-size: 13px;
-  color: var(--text);
-}
 .distill-coverage-close {
   background: none;
   border: none;
@@ -1782,6 +1845,50 @@ body {
   color: var(--text);
   line-height: 1.5;
 }
+.modal:has(.encoding-preview) {
+  width: min(34rem, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.encoding-preview {
+  margin-block: 16px 12px;
+  font-size: 13px;
+}
+.encoding-preview label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--text);
+}
+.encoding-preview select {
+  max-width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+}
+.encoding-preview pre {
+  margin: 10px 0 0;
+  padding: 10px;
+  max-height: 9em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font: inherit;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.encoding-preview p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.modal-btn-primary:disabled { opacity: .55; cursor: default; }
 .modal-btn-danger {
   background: rgba(247, 118, 142, 0.16);
   color: #f7768e;
@@ -1987,6 +2094,9 @@ body {
 
 @media print {
   /* Print/Export-PDF shows only the fully-rendered note, nothing else. */
+  .app-notices,
+  .reader-return,
+  .reader-map-host,
   .sidebar,
   .backlinks,
   .status-bar,
@@ -2125,4 +2235,22 @@ body {
   padding: 8px 16px 12px;
   max-height: 30%;
   overflow-y: auto;
+}
+
+.editor-controls, .app-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: 100%;
+  gap: 4px;
+}
+.editor-controls { margin-right: auto; }
+.editor-pane:has(> .utility-status-bar) {
+  display: flex;
+  flex-direction: column;
+}
+.editor-pane:has(> .utility-status-bar) > :is(.empty, .settings-pane, .ask-pane, .map-view) {
+  flex: 1;
+  min-height: 0;
+  height: auto;
 }

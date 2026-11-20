@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import ELK from 'elkjs/lib/elk-api.js'
 import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url'
 import type { GraphData } from '@shared/types'
@@ -9,7 +9,8 @@ export function useRoutedLayout(
   graph: Pick<GraphData, 'nodes' | 'edges'> | null,
   width: number,
   height: number,
-  direction: ElkRequest['direction']
+  direction: ElkRequest['direction'],
+  active: boolean
 ) {
   const [result, setResult] = useState<{ request: ElkRequest; reply: ElkReply } | null>(null)
   const labels = useMemo(() => {
@@ -32,8 +33,11 @@ export function useRoutedLayout(
     }
   }, [graph, labels, width, height, direction])
 
+  const reply = request && result?.request === request ? result.reply : null
+  const hasReply = useEffectEvent(() => reply !== null)
+
   useEffect(() => {
-    if (!request) return
+    if (!active || !request || hasReply()) return
     let worker: Worker | undefined
     let live = true
     const finish = (reply: ElkReply): void => {
@@ -60,9 +64,8 @@ export function useRoutedLayout(
       live = false
       worker?.terminate()
     }
-  }, [request])
+  }, [active, request])
 
-  const reply = request && result?.request === request ? result.reply : null
   return {
     labels,
     routed: reply && 'layout' in reply ? reply.layout : null,

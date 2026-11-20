@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, writeFileSync, readFileSync } from 'fs'
 import { parse as parseToml } from 'smol-toml'
-import { DEFAULT_EMBED_MODEL, type Settings } from '../shared/types'
+import { DEFAULT_EMBED_MODEL, DEFAULT_THEME_OVERVIEW_THRESHOLD, type Settings } from '../shared/types'
 import type { ProviderConfig } from './rag/provider'
 
 export { DEFAULT_EMBED_MODEL }
@@ -30,7 +30,7 @@ export const DEFAULTS: Settings = {
     embed: { runtime: 'wasm', model: DEFAULT_EMBED_MODEL, threads: 0 },
     chat: { provider: 'none', model: '', baseUrl: '', command: '', args: [], contextTokens: 0 }
   },
-  distill: { windowSize: 0, maxCalls: 120 },
+  distill: { windowSize: 0, maxCalls: 120, themeOverviewThreshold: DEFAULT_THEME_OVERVIEW_THRESHOLD },
   telemetry: { enabled: false }
 }
 
@@ -148,6 +148,9 @@ windowSize = 0
 # this is read in evenly spaced steps instead, and Nodebook asks you first and
 # then says what share of the text it read.
 maxCalls = 120
+# For books with usable themes, open Themes above this many content notes.
+# Use 0 to start on Themes for every eligible book. Switch views in Standalone.
+themeOverviewThreshold = ${DEFAULT_THEME_OVERVIEW_THRESHOLD}
 
 [telemetry]
 # Show a tiny status-bar widget with event-loop lag (a log-bucketed histogram),
@@ -250,7 +253,8 @@ export function parseSettings(raw: string): Settings {
     distill: {
       windowSize: count(distill.windowSize, DEFAULTS.distill.windowSize),
       // 0 calls would read nothing at all; the planner clamps it, and so does this.
-      maxCalls: Math.max(1, count(distill.maxCalls, DEFAULTS.distill.maxCalls))
+      maxCalls: Math.max(1, count(distill.maxCalls, DEFAULTS.distill.maxCalls)),
+      themeOverviewThreshold: count(distill.themeOverviewThreshold, DEFAULT_THEME_OVERVIEW_THRESHOLD)
     },
     telemetry: {
       enabled:
