@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -85,8 +85,19 @@ afterEach(() => {
 })
 
 describe('pdfToMarkdown', () => {
-  // This first conversion also loads pdf.js; the cold import exceeds five seconds on hosted Intel Macs.
-  it('extracts text with a per-page heading (page = provenance)', { timeout: 30_000 }, async () => {
+  // Cold PDF.js startup includes loading its Node worker and can take tens of
+  // seconds on hosted runners. Give that setup its own budget.
+  beforeAll(async () => {
+    const { PDFWorker } = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const worker = new PDFWorker()
+    try {
+      await worker.promise
+    } finally {
+      worker.destroy()
+    }
+  }, 90_000)
+
+  it('extracts text with a per-page heading (page = provenance)', async () => {
     const md = await pdfToMarkdown(enc(PDF))
     expect(md).toContain('## Page 1')
     expect(md).toContain('Hello Faction world')

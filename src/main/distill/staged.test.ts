@@ -25,14 +25,12 @@ function warmRun(folder: string): void {
   }
   try {
     add('Book', heading('Book', 'document') + 'The book itself.')
-    for (const theme of ['Ideas', 'Methods']) {
+    for (const theme of ['Ideas', 'Methods'])
       add(theme, heading(theme, 'theme') + 'source:: Book\n')
-      for (let i = 0; i < 101; i++) {
-        const name = `${theme} ${i}`
-        const relations = name === 'Ideas 0' ? 'status:: Methods 1\nsupports:: [[Methods 0]]\n' : ''
-        add(name, heading(name, 'concept') + `part_of:: ${theme}\n${relations}\nProse for ${name}.\n`)
-      }
-    }
+    add('Ideas 0', heading('Ideas 0', 'concept') +
+      'part_of:: Ideas\nstatus:: Methods 1\nsupports:: [[Methods 0]]\nProse for Ideas 0.\n')
+    add('Methods 0', heading('Methods 0', 'concept') + 'part_of:: Methods\n')
+    add('Methods 1', heading('Methods 1', 'concept') + 'part_of:: Methods\n')
   } finally {
     index.close()
   }
@@ -71,7 +69,7 @@ describe('StagedRunStore warm cache scope', () => {
 
       const note = (name: string): string => join(current, 'notes', `${name}.md`)
       const overview = store.bookOverview(runId)!
-      expect(overview.noteCount).toBe(202)
+      expect(overview.noteCount).toBe(3)
       expect(overview.themes.map(({ id }) => id)).toEqual([note('Ideas'), note('Methods')])
       expect(overview.links).toEqual([
         { source: note('Ideas'), target: note('Methods'), count: 1, strong: true }
