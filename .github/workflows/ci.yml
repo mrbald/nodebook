@@ -6,11 +6,32 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test dependency policy
+        run: |
+          python3 -B scripts/check-npm-release-age.test.py
+          ruby scripts/github-dependency-age.test.rb
+      - name: Check npm release age
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/check-npm-release-age.py "$BASE_SHA"
+      - name: Check GitHub Actions and pre-commit release age
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ruby scripts/github-dependency-age.rb "$BASE_SHA"
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
