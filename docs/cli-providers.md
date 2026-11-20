@@ -1,198 +1,45 @@
-# CLI chat providers — use the AI subscription you already have
+# Use a command-line app for chat
 
-*Status: designed 2026-07-04; shipping `codex-cli`, `claude-cli` and generic
-`cli`.*
+Nodebook can use your signed-in Codex or Claude Code app for **Ask your notes** and **Distill a document**. The command runs on your computer and sends the request to the service that handles your account. Usage counts against that account's limits. Search by meaning runs locally and has its own setting. [Search, Ask and what gets sent](talk-to-docs.md)
 
-## Why
+## Connect your account
 
-Distill and Ask need a capable chat model. Retail users typically do not have
-API keys — they have a ChatGPT or Claude *subscription*, and often already have
-the vendor's command-line app installed and signed in (`codex`, `claude`).
-Nodebook can spawn that CLI locally and use it as the chat backend: no API key,
-no new account, the model bill lands on the plan the user already pays for.
+1. Install the command-line app you want to use. In a terminal, run `codex login` for Codex or `claude auth login` for Claude Code.
+2. Choose **Settings** at the bottom of the Nodebook sidebar. In the existing `[talk.chat]` section, set `provider` to `"codex-cli"` or `"claude-cli"` and save. For example, these values use your Codex default model.
 
-The distill "try a stronger chat model" banner is the concrete trigger: a
-subscription user's strongest available model is usually behind their CLI, not
-behind an API key they don't have.
+   ```toml
+   [talk.chat]
+   provider = "codex-cli"
+   model = ""
+   ```
 
-## What ships
+3. Open a vault. Save a note containing “The launch date is 18 April.” Choose **Ask your notes** and ask “What is the launch date?” Open the citation to check the answer. Codex shows the completed answer. Claude Code streams text as it arrives.
 
-Three values for `[talk.chat] provider`:
+Both presets take an optional `model` setting. Leave it empty to use the CLI's default, or enter a model your account can use. Claude Code also accepts aliases such as `sonnet`.
 
-- **`codex-cli`** — a named, tested preset for the OpenAI Codex CLI. Runs
-  `codex exec --json` with the prompt on stdin, under the user's ChatGPT
-  sign-in. Zero config beyond flipping the provider; `model` empty means "the
-  user's own Codex default".
-- **`claude-cli`** — the same deal for Anthropic's Claude Code CLI, under the
-  user's Claude sign-in. Runs `claude -p` with the prompt on stdin and streams
-  the answer back token by token. `model` empty means the user's own default;
-  it also takes an alias like `opus` or `sonnet`.
-- **`cli`** — the generic escape hatch, nerdified per the explainability
-  filter (advanced option, out of the default path). The user supplies
-  `command` (+ optional `args`); Nodebook writes the prompt to stdin and reads
-  the whole answer from stdout. Any tool with that contract works — including
-  a user's own wrapper script.
+## If the command fails
 
-All three are chat-only. Embeddings stay on the existing local WASM path; a CLI
-provider changes nothing about indexing or search.
-
-Every provider is off by default and switched on by the user. Nodebook never
-handles credentials for any of them: sign-in happens in the user's own terminal
-(`codex login`, `claude auth login`), before Nodebook is in the picture, and the
-traffic is the user's own subscription talking to the vendor directly.
-
-## How it works
-
-One new main-process module, `src/main/rag/cliChat.ts`, implementing the
-existing `ChatModel` interface from `src/main/rag/provider.ts`. Everything
-downstream (Ask streaming, distill extraction, the pre-flight probe) is
-provider-agnostic and unchanged.
-
-- **Spawning.** `child_process.spawn` with an argument array (never a shell),
-  the prompt written to stdin, `cwd` pointed at an empty scratch directory so
-  the CLI does not pick up `AGENTS.md`/`CLAUDE.md` context from wherever the
-  app happened to start. The process is killed when the request's
-  `AbortSignal` fires.
-- **PATH resolution.** A GUI-launched Electron app does not inherit the shell
-  PATH (on macOS it sees `/usr/bin:/bin:...` only), so a bare `codex` would be
-  ENOENT even when installed. `resolveCommand()` searches PATH plus the usual
-  install dirs (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`,
-  `~/bin`). `[talk.chat] command` overrides with a full path.
-- **Flattening.** `ChatRequest` is a system prompt + message array; a CLI call
-  is one prompt string. `flattenChatRequest()` concatenates the system text and
-  the turns (role-labelled only when there is more than one). The distill
-  JSON-repair retry — user, assistant, user — survives as a labelled
-  transcript.
-- **Codex output.** `codex exec --json` emits JSONL events; there are **no
-  incremental text deltas** — the answer arrives as one `item.completed`
-  `agent_message`. `parseCodexEvents()` (pure, unit-tested against a recorded
-  real transcript) collects agent messages and surfaces `turn.failed`/`error`
-  events. Consequence: with `codex-cli`, Ask shows the whole answer at once
-  instead of streaming. Token streaming exists behind `codex app-server`
-  (persistent JSON-RPC process) — deferred until the spinner actually hurts.
-- **Claude output — and why it streams.** `claude -p --output-format
-  stream-json --include-partial-messages --verbose` emits JSONL that *does*
-  carry `content_block_delta` / `text_delta` events, so Ask streams normally.
-  `parseClaudeLine()` (pure, unit-tested against a recorded real transcript)
-  reads one line at a time; `runCliLines()` is the streaming sibling of
-  `runCli()`, yielding stdout lines as they arrive instead of buffering. The
-  `assistant` event is deliberately ignored — it repeats the text the deltas
-  already carried, and taking both would duplicate the answer. If a future
-  build stops emitting partial messages, the final `result` event still holds
-  the whole answer and is used as a fallback.
-- **Claude runs as a chat model, not a coding agent.** Four flags do that, and
-  they are load-bearing rather than cosmetic: `--tools ""` (no file access, no
-  web — the backend can only answer the question it was handed),
-  `--strict-mcp-config` (the user's MCP servers stay out of it),
-  `--disable-slash-commands` (a note starting with `/` is text, not a command),
-  and `--system-prompt` replacing Claude Code's own agent prompt. Windows note:
-  Node does not quote arguments when it goes through a shell for a `.cmd` shim,
-  where a bare empty string would vanish and `--tools` would swallow the next
-  flag — so the empty value is passed as `""` on that path.
-- **Cheap pre-flight.** A chat round-trip through Codex costs ~12k input
-  tokens of harness overhead against the user's plan, so the distill
-  pre-flight must not "ping" the model. `ChatModel` gained an optional
-  `probe()`: `codex-cli` runs `codex login status` (instant, free, exits
-  non-zero when signed out); `claude-cli` runs `claude auth status --json` and
-  trusts its `loggedIn` field over the exit code; `cli` just resolves the
-  command. `probeChat()` in `src/main/distill/run.ts` prefers `probe()` and
-  falls back to the old first-token pull for HTTP providers.
-
-## Configuration
-
-```toml
-[talk.chat]
-# ChatGPT subscriber with the Codex CLI installed and signed in:
-provider = "codex-cli"
-model = ""            # empty = your Codex default (~/.codex/config.toml)
-command = ""          # optional: full path to codex if not on a standard PATH
-
-# Claude subscriber with the Claude Code CLI installed and signed in:
-# provider = "claude-cli"
-# model = ""          # empty = your Claude default; or an alias like "opus"
-# command = ""        # optional: full path to claude
-
-# Advanced: any command that reads the question on stdin and prints the
-# answer on stdout. You supply it; Nodebook just runs it.
-# provider = "cli"
-# command = "my-wrapper.sh"
-```
-
-`model` now defaults to empty everywhere, meaning "the provider's own
-default" (`anthropic` falls back to Claude Sonnet in the adapter; `ollama` and
-`openai-compat` fail with a clear message instead of sending an Anthropic model
-id to a non-Anthropic server, which is what the old default did).
-
-## Costs and limits — honest notes
-
-- CLI calls draw on the subscription's usage windows (both vendors meter in
-  5-hour windows, plus weekly caps). A large distill run makes one extraction
-  call per cluster (capped at 24) and can consume a visible slice of a Plus
-  plan's window. Help says this plainly: "uses your plan's limits".
-- Each `codex exec` call re-sends Codex's own system harness (~12k input
-  tokens, mostly cache-hits). That is the vendor's design, not tunable from
-  here.
-- **`claude -p` overhead is tunable, and the difference is large.** Measured
-  against claude-code 2.1.233 on a trivial round-trip: **51,216** input tokens
-  with default flags, **537** with the four isolation flags above, and 0 new
-  tokens on the next call (a 537-token cache read). Almost all of the
-  difference was the developer's own MCP servers being loaded into a chat call
-  that has no use for them. A distill run makes one call per cluster (capped at
-  24), so this is the difference between a visible slice of a plan's window and
-  a rounding error. Anyone changing those flags should re-measure. (The
-  "capped at 24" above predates the whole-document pipeline: a run now makes
-  one call per window, up to `[distill] maxCalls`.)
-- **`claude -p` thinks by default, and that is most of a distill call.** Claude
-  Code lets the model reason at length before every answer — the right default
-  for a coding agent, and pure overhead for an extraction prompt that asks for
-  JSON. Measured against claude-code 2.1.258 on one real distill window (~8k
-  characters of a pandas book, Haiku): **11,410 thinking tokens** to produce a
-  1,339-token answer, 74 s, $0.066; the same prompt with thinking capped at
-  1,024 tokens: 243 thinking tokens, 10 s, $0.010. Over a 26-page slice of
-  that book (8 windows, Haiku, same converter and matcher): thinking on took
-  882 s and produced 70 items of which 64 grounded (59 notes, 1 ghost link);
-  thinking off took 117 s and produced 50 items of which 50 grounded (46 notes,
-  0 ghost links). Fewer items, every one of them cited, at a seventh of the
-  time and quota — single runs, so the yield gap is within a model's run-to-run
-  spread. The adapter therefore runs the child with `MAX_THINKING_TOKENS=0` —
-  thinking off, which is also what the HTTP adapters send — unless that
-  variable is already set in Nodebook's environment, in which case the user's
-  value wins. Over a 120-call run this is the difference between hours and
-  twenty minutes, and between a real dent in a plan's 5-hour window and a
-  small one. The `--effort` flag was tried and does not bound Haiku's thinking
-  (it went up).
-- Latency: a trivial `codex exec` round-trip measured ~6.5 s wall (process
-  start is small; the model call dominates); the same through `claude -p`
-  measured ~3 s. The distill pre-flight timeout is 30 s to accommodate cold
-  starts.
-
-## Failure modes
-
-All fail fast in the pre-flight, before any embedding work:
-
-| Failure | Behaviour |
+| Symptom | What to do |
 | --- | --- |
-| Binary not found | "Codex CLI not found — install it, or set its full path in `[talk.chat] command`." Same shape for Claude, naming `npm install -g @anthropic-ai/claude-code`. |
-| Signed out | "Codex isn't signed in — run `codex login` in a terminal, then try again." / "Claude Code isn't signed in — run `claude auth login`…". |
-| Bad `model` value | Fails on the first extraction call with the CLI's own error (a sign-in check can't validate model ids). `claude` exits 1 with `[claude-code:unrecognized_model]` on stderr, which is surfaced verbatim. |
-| Mid-run abort | Process killed via the run's `AbortSignal`, same path as HTTP cancellation. |
+| The app works in a terminal but Nodebook cannot find it | Set `command` in `[talk.chat]` to the full path of the executable. Nodebook searches its own PATH and common installation directories. |
+| Nodebook reports that you are signed out | Run the login command above. Check the account with `codex login status` or `claude auth status --json`, then try again. |
+| The account check passes but the request fails | Read the CLI error. Check the model name and account access. Distill checks sign-in before extraction. Only a model request tests whether that model works. |
+| Figure analysis is unavailable | The named presets require a native executable and a model that accepts images. A Windows command shim can handle text requests only. [Figure analysis](distill-documents.md) |
 
-## Testing
+## Use your own text command
 
-- Pure parts (`flattenChatRequest`, `parseCodexEvents`, `parseClaudeLine`,
-  `resolveCommand`) are unit-tested; both CLI parsers against real recorded
-  transcripts.
-- The spawn path is tested for real in vitest by running `node -e` scripts as
-  the generic provider (echo, non-zero exit, abort) and fake `codex` / `claude`
-  executables emitting the recorded JSONL — no network, no quota. The Claude
-  fakes cover the cases the parser alone can't: chunk-by-chunk streaming, the
-  prompt reaching stdin, the no-partial-messages fallback, abort, and a
-  `auth status` that exits 0 while reporting `loggedIn: false`.
-- e2e is unchanged: `NODEBOOK_E2E` still short-circuits `makeChatModel` to the
-  deterministic stub before any CLI code runs.
+Set `provider = "cli"` and `command` to your executable. If it needs arguments, supply them as a TOML string array in `args`. The command reads the complete prompt from standard input and writes its answer to standard output. A nonzero exit or an empty answer is an error. Distill checks that the command exists before it starts. Your command determines which service receives the text.
 
-## Future
+## Adapter behavior and earlier measurements
 
-- `codex app-server` for streamed Ask answers, if whole-answer display feels
-  bad in practice.
-- Other CLIs (e.g. Gemini) need no code — they are `provider = "cli"` recipes.
+Text requests start in a temporary working directory outside the vault. Codex uses `exec --json` with a read-only sandbox. Claude Code runs in print mode with tools and slash commands disabled, a replacement system prompt and strict MCP configuration. The adapter reads text deltas and falls back to the final answer when there are no deltas. Cancellation stops the child process. Tests cover recorded CLI output, sign-in checks, streaming, aborts and process failures using local executables. [Adapters](../src/main/rag/cliChat.ts) · [Tests](../src/main/rag/cliChat.test.ts)
+
+Two Claude Code trials informed those defaults. These figures describe the recorded runs.
+
+| Trial | Result |
+| --- | --- |
+| Claude Code 2.1.233, one short request | Default settings sent 51,216 input tokens. Disabling tools, external MCP configuration and slash commands and replacing the system prompt reduced that to 537. |
+| Claude Code 2.1.258, Haiku, one extraction window | Default thinking used 11,410 thinking tokens in 74 seconds (CLI estimate $0.066). A 1,024-token limit used 243 thinking tokens in 10 seconds ($0.010). |
+| Same version, 26 pages of a pandas book, eight windows | With thinking enabled, 64 of 70 items had matching evidence in 882 seconds. With thinking off, 50 of 50 had matching evidence in 117 seconds. Each condition ran once. |
+
+The adapter supplies `MAX_THINKING_TOKENS=0` for Claude Code unless Nodebook already has a value in its environment. An earlier short Codex request incurred about 12,000 input tokens of CLI overhead. Both named presets check login status without sending a model prompt. For more recent import measurements, see [Quality trials](quality-trials.md).

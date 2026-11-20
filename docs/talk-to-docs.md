@@ -1,211 +1,51 @@
-# Talk to docs — design
+# Search by meaning and ask your notes
 
-**Goal:** AI-assisted **semantic search** + **chat** over the vault — ask in
-natural language, get answers grounded in your notes with clickable citations.
-**Local-first** (private, no API key needed for search), aligned with Nodebook's
-plain-files + rebuildable-index philosophy.
+Use sidebar search to find a note. Turn on **Search by meaning** to find similar passages even when the wording or language differs. Use **Ask your notes** when you want a written answer with citations. Search by meaning and chat have separate settings. Either can work on its own.
 
-## Fits the existing architecture
+## Turn on local search by meaning
 
-Everything lives in the single SQLite index at `<vault>/.nodebook/index.db`
-(Discipline #3: rebuildable, never a second source of truth). We add two tables:
+1. In an open vault, choose **Search by meaning — set up AI** under the search box, then **Enable**.
+2. Nodebook downloads the default multilingual E5 model (about 285 MB) and indexes the notes on your computer. The sidebar shows download and indexing progress. Use **Retry** if the model fails to load.
+3. Search in the same sidebar box. Nodebook combines keyword and meaning matches. A sparkle marks results found by meaning. You can continue using keyword search while the background index builds.
 
-- `chunks(id, file, heading, start, end, text)` — notes split into embeddable slices.
-- a **sqlite-vec** `vec0` virtual table holding each chunk's embedding vector,
-  keyed to `chunks.id`. (No separate vector DB — `sqlite-vec` keeps vectors in the
-  same file; loads into `better-sqlite3` via `db.loadExtension()`.)
+Search by meaning sends no note text to a chat service. New and changed notes are indexed after save. **Turn off** removes the derived passages and vectors from the open vault's index. You can rebuild them by enabling search by meaning again.
 
-Why sqlite-vec over a standalone vector DB (LanceDB/Chroma/Qdrant): it preserves
-the "one rebuildable SQLite index" discipline — embeddings are *derived* data, so
-they belong in `.nodebook`, re-creatable by re-embedding.
+## Set up Ask
 
-## Components
+Choose **Settings** at the bottom of the sidebar, edit the existing `[talk.chat]` section and save. The default `provider = "none"` keeps chat off. Choose a provider based on where you want your questions and passages processed.
 
-- **Embeddings — local, on-device** via `@huggingface/transformers` (transformers.js,
-  ONNX Runtime). No API key; notes never leave the machine. Default model:
-  **multilingual-e5-base** (~285 MB one-time download) — one vector space across
-  ~100 languages, so notes retrieve by meaning whatever language they (or the
-  query) are in. Configurable in settings; cheaper trade-offs below.
-- **Retrieval — hybrid.** Fuse our existing **FTS5 BM25** (exact terms) with
-  **sqlite-vec KNN** (meaning) via Reciprocal Rank Fusion. Hybrid beats pure-vector
-  for notes (you want both the keyword and the concept).
-- **Chat (RAG) — pluggable LLM.** Retrieved chunks + question → LLM → answer with
-  `[[note]]` citations. Providers:
-  - **Cloud (Anthropic Claude)** — best quality; API key in settings; sends the
-    *retrieved chunks* (not the whole vault) to the API.
-  - **Local (node-llama-cpp / Ollama)** — fully private; heavier (multi-GB model).
-  - **Search-only** — retrieval with no LLM is useful on its own and 100% local;
-    chat is opt-in once a provider is configured.
+| Provider | What to set |
+| --- | --- |
+| `ollama` | Start Ollama on your computer and install a model, for example with `ollama pull llama3.2`. Set `model = "llama3.2"`. The default server is `http://localhost:11434/v1`. If you change `baseUrl`, requests go to that address. |
+| `anthropic` | Set `ANTHROPIC_API_KEY` in Nodebook's environment. An empty `model` uses the app's Claude Sonnet default. |
+| `openai-compat` | Set `baseUrl` to the local or remote server's API base and `model` to a model it serves. Set `OPENAI_API_KEY` if the server needs a key. |
+| `codex-cli`, `claude-cli` | Sign in to the installed CLI. The service behind that account processes the request. [CLI setup](cli-providers.md) |
+| `cli` | Supply a text command. The command determines where the request goes. [Custom command](cli-providers.md#use-your-own-text-command) |
 
-## Connecting models — three patterns + one abstraction
-
-The feature is **off by default** (`[talk] enabled = false`) and **config-driven**.
-Everything goes through one small abstraction (`src/main/rag/provider.ts`):
-`Embedder { embed(texts) }` and `ChatModel { chat(req) -> stream }`, produced by a
-`ModelProvider` from a `ProviderConfig`. Three provider kinds cover the realistic
-"top 3 ways to connect a model to an app":
-
-1. **In-process / embedded** (`kind: 'local'`) — the model runs inside the app:
-   **transformers.js**(ONNX) for embeddings, **node-llama-cpp** for chat. Private,
-   offline, no key, no per-call cost; costs CPU/RAM + model download. *Default for
-   embeddings.*
-2. **Remote HTTP, OpenAI-compatible** (`kind: 'openai-compat'`) — one client speaks
-   the `/v1/embeddings` + `/v1/chat/completions` wire format pointed at **any base
-   URL**: OpenAI, Together, Groq, Mistral, **or a local server** (Ollama, LM Studio,
-   llama.cpp, vLLM — all expose OpenAI-compat endpoints). One adapter → dozens of
-   backends by changing `baseUrl`/`apiKey`/`model`. (`kind: 'anthropic'` is a thin
-   sibling for Claude's native API; OpenAI-compat gateways/LiteLLM can also front it.)
-3. **MCP client** (`kind: 'mcp'`) — pull a model/tool from an MCP server as another
-   backend transport.
-
-**Scope discipline (one subsystem per concern — they have different trust,
-lifecycle, and error models; don't fold them into one kind):**
-- `provider.ts` is **model backends only** — `Embedder` + `ChatModel`. The three
-  kinds above are *how a model is reached*, nothing more.
-- **Document conversion** (book → markdown) is its **own** `DocumentConverter`
-  interface (see [distill-documents.md](distill-documents.md)) — *not* a provider kind,
-  even when its transport happens to be MCP.
-- **Nodebook-as-an-MCP-server** (exposing the vault + search as tools for other
-  hosts) is a **separate outbound feature**, not part of this abstraction at all.
-  Strategically interesting, tracked elsewhere.
-
-**Default model pairs** (configurable): *local* — embed
-`Xenova/multilingual-e5-base` (as shipped: ~285 MB, ~100 languages — ask in
-Russian, find the English note). Cheaper alternatives, one TOML line away
-(`[talk.embed] model`; a swap re-indexes automatically):
-`Xenova/multilingual-e5-small` (~115 MB, still multilingual, a quality notch
-down) and `Xenova/bge-small-en-v1.5` (~34 MB, **English-only** — the old
-default; fine when the whole vault is English). Chat (later) a small local
-model (`Qwen2.5-3B`/`Llama-3.2-3B`) via llama.cpp; *cloud* — embed
-`text-embedding-3-small`/`voyage-3`, chat Claude or GPT. (EmbeddingGemma is
-*not* recommended: it wants prompt prefixes our prefix table doesn't emit, so
-it retrieves below its benchmark numbers here.)
-
-e5, bge-small and nomic-embed are *asymmetric* retrieval models — trained with
-different query/document wording — so the renderer embedder tags each call
-with a role (`'query'` for search/ask, `'document'` for note-chunk indexing)
-and prepends the matching prefix (a small table keyed by model id substring:
-e5 gets `query: `/`passage: ` on both sides, bge-en a query-side instruction,
-nomic `search_query: `/`search_document: `; bge-m3, MiniLM and anything
-unrecognized get no prefix). The prefix convention is part of the vector
-space: if it ever changes for a model, the stored model id must change with it
-(see `needsEmbeddingReset`).
-
-Embedding uses a WASM thread pool when the platform allows it (about half the
-cores, capped at 4 — raise `[talk.embed] threads` for a faster first index of
-a big vault). Chunk budgets are token-cost-weighted so CJK text doesn't
-overflow the model's 512-token window (see `chunk.ts`).
-
-## Pipeline (and the event-loop angle)
-
-On index (save / chokidar / first-open scan): main chunks → the **renderer**
-embeds → main upserts into `chunks` + the vec table. **As shipped, embedding runs
-in a renderer Web Worker on `onnxruntime-web` (WASM)** — a different process from
-the main event loop entirely, so IPC/UI stay responsive (telemetry confirms the
-main loop stays healthy). Pull-based bridge: renderer pulls `talk:pending` → embeds
-→ pushes `talk:putEmbeddings`. First-open is a one-time batch with progress;
-thereafter only changed notes re-embed (content-hash gated).
-
-## UX — how the feature is exposed (UX/UI hat)
-
-Category exemplars: Obsidian (Smart Connections / Copilot), Notion AI, NotebookLM,
-Mem, Reflect, Logseq. The convergent convention: **semantic search *augments* the
-existing search** (the good ones make search "just smarter", not a mode you
-babysit); **chat is a dedicated "Ask" panel**; and enabling AI is a **deliberate,
-clearly-private opt-in**.
-
-1. **Discovery + enable — an honest affordance, no dead toggles.** While off, the
-   sidebar search shows one subtle line under the box:
-   *"✨ Search by meaning — set up AI (local & private)."* It opens a small setup
-   card: "Runs entirely on your machine — your notes never leave it. Downloads a
-   model once (~285 MB; it understands ~100 languages), then indexes in the
-   background." `[Enable]` + an **Advanced** disclosure (model choice; the
-   runtime is WASM, and no native one is built). Also in Settings (`[talk]`). The
-   entry only promises what enabling delivers.
-2. **Activation states are designed.** Enable → model-download progress →
-   "Indexing 120/450…" (background, non-blocking) → ready. Offline/error → message
-   + Retry. Disable → stop + offer to delete the embeddings (they live in
-   `.nodebook`, rebuildable — Discipline #3; fully reversible).
-3. **Once enabled, search is hybrid + automatic.** The *same* search box fuses
-   keyword (FTS) ⊕ meaning (vector, RRF) — **no mode the user manages**. A small ✨
-   marks AI-contributed hits; semantic hits show the matching passage. Keyword
-   search still works with AI off.
-4. **"Ask" (Phase 2) is a dedicated panel.** An "Ask" entry opens a chat in the
-   center pane (like Help): question → grounded answer + **clickable cited notes**,
-   rendered through reading-mode. Plain-click a citation to open it (navigation
-   convention, like backlinks).
-5. **Lead with privacy.** "Local & private" is the headline wherever AI appears —
-   honest (local embeddings) and the category's #1 user concern.
-
-Avoid: a permanent "AI" tab cluttering the chrome; a keyword/meaning toggle the
-user must manage; any AI control visible-but-inert before setup.
-
-## Config (off by default, runtime selectable, lazy)
+For example, with that Ollama model installed, use these values in Preferences.
 
 ```toml
-[talk]
-enabled = false            # whole feature is opt-in; nothing loads until true
-
-[talk.embed]
-runtime = "wasm"           # wasm — the only runtime that is built. The key is
-                           # parsed and "native" is accepted, but no native
-                           # adapter is shipped (see Build / packaging below), so
-                           # the embedder runs on WASM either way.
-model = "Xenova/multilingual-e5-base"  # ~100 languages; see alternatives above
-threads = 0                # embedding CPU threads; 0 = auto (≈half the cores, max 4)
-# provider = "local"       # local | openai-compat (baseUrl/apiKey) for remote
-
 [talk.chat]
-provider = "none"          # none (search-only) | openai-compat | anthropic | local
-contextTokens = 0          # prompt tokens this model accepts; 0 = the provider
-                           # family's default (16 000 weight units for cloud and
-                           # CLI backends, 6 000 for ollama; a token ≈ 3 units).
-                           # Distill sizes its reading windows from this.
-
-[distill]
-windowSize = 0             # weight units of source text per reading window;
-                           # 0 = derived from the chat model's context budget
-maxCalls = 120             # ceiling on model calls per run; over it, windows are
-                           # sampled at an even stride and coverage is reported
+provider = "ollama"
+model = "llama3.2"
 ```
 
-## Build / packaging — as shipped (decisions resolved)
+For HTTP providers, Nodebook reads the key from its environment first. If you set `apiKey` in the settings file, the file stores the key in plain text.
 
-The runtime fork below was **decided in favour of WASM** and is live:
-- **Embeddings: `onnxruntime-web` (WASM) in a renderer Web Worker** — no native
-  per-OS binary, one cross-platform blob, **lazy** (the 1.27 MB transformers.js
-  chunk loads only when the feature is enabled; 0 bytes of it in the eager entry).
-  `onnxruntime-node` (native) is *not* shipped; it remains a future "fast mode".
-- **`sqlite-vec`** loadable extension — `asarUnpack`-ed (`**/node_modules/sqlite-vec*/**`),
-  loaded into `better-sqlite3` in main (vec0 rowids bind as **BigInt**).
-- **Model** — downloads on first *enable* (renderer Cache API), keeping the base
-  installer lean; bundling is a later option.
+### Check an answer
 
-Verified end-to-end (stub-embedder e2e + a real-model run): enable → chunk → embed
-→ store → hybrid search, with the main loop staying healthy throughout.
+Open **Ask your notes**, type a question and choose **Ask**. Nodebook finds passages by keyword and adds meaning matches when current vectors are available. It sends the provider your question and selected passages. Each passage includes its text, heading, ID and note name, including its folder path within the vault. If it finds no passage that fits the model’s input budget, it tells you without contacting the provider.
 
-## Phases
+Select an inline citation or an entry under **Cited** to inspect the source. **Also sent to the model** lists passages the answer did not cite. For managed source documents with captured figures, search can find recognized image text. Ask uses the authored passages for evidence and excludes managed image references and generated OCR text.
 
-- **P0 — spike ✅** verified `sqlite-vec` + transformers.js under Electron.
-- **P1 — semantic search ✅ SHIPPED (fully local, no LLM):** chunk + renderer-WASM
-  embed pipeline + sqlite-vec store + hybrid FTS⊕vector (RRF) in the sidebar. Off by
-  default; zero cloud/keys.
-- **P2 — "Ask" chat ✅ SHIPPED:** the Ask panel + pluggable LLM (anthropic +
-  openai-compat, key in env/settings) + cited, streamed answers. The answer
-  **renders as markdown** with **clickable inline `[[citations]]`**, and grounding
-  is **hybrid** (chunk-level FTS⊕vector fused with the same RRF as the search box).
-- **P3 — lean slices ✅ SHIPPED:** a ✨-relatedness **distance threshold**
-  (`relatedMinScore`) so sparse vaults don't flag unrelated notes; a **model-
-  download progress** bar (real % from transformers.js); and a first-class
-  **Ollama** local-LLM preset (`provider = "ollama"` → openai-compat at the
-  default local URL, no key). Incremental re-embed shipped back in P1 (content-
-  hash gated). *Deferred: in-process **node-llama-cpp** (the `local` kind) —
-  leaning on Ollama gives private/offline chat without the heavy per-OS native
-  dependency, keeping the WASM-over-native discipline; bundling the embedding
-  model in the installer.*
+**Distill a document** uses the same chat provider for a different task. For extraction it sends source passages, your optional focus and previously identified concept names. It may also send generated note titles and summaries for theme naming. Optional figure analysis sends the selected image and available context, including its label, location, caption and recognized text. Choose a provider suitable for the document before starting. [Document import](distill-documents.md)
 
-## Resolved decisions (for the record)
+## Tune local indexing
 
-1. **Runtime / packaging** → WASM in a renderer worker, model-on-enable (above).
-2. **Chat provider** → **search-only for now**; chat is P2 via the provider
-   abstraction (Claude default when built).
+In `[talk.embed]`, the default `model` is `Xenova/multilingual-e5-base`. A lighter multilingual option is `Xenova/multilingual-e5-small` (about 115 MB). For English-only notes and queries, `Xenova/bge-small-en-v1.5` is about 34 MB. Changing the model rebuilds its vectors. The default `threads = 0` uses about half the CPU cores, up to four, when threading is available. [Settings defaults](../src/main/settings.ts) · [Local search trials](quality-trials.md)
+
+## How retrieval works
+
+The main process splits each note into passages and stores them with source offsets in the vault's rebuildable SQLite index. A renderer worker runs the embedding model with WebAssembly and returns a vector for each passage. SQLite full-text search ranks keyword matches. The sqlite-vec extension ranks similar vectors. Nodebook combines the two rankings using reciprocal rank fusion. This keeps keyword search usable when vectors are missing or out of date. [Index](../src/main/indexer.ts) · [Vector store](../src/main/rag/store.ts)
+
+Chunk sizes account for the token cost of different scripts. The worker uses different text prefixes for queries and indexed passages when the model requires them, including E5's `query: ` and `passage: `. A change to these conventions requires a fresh vector index. The shipped runtime uses WASM. Native embedding, remote embeddings, in-process chat and an MCP model backend remain design options. Document conversion has its own interface. [Embedding worker](../src/renderer/src/talk/embed.worker.ts) · [Model interfaces](../src/main/rag/provider.ts)

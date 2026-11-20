@@ -1,477 +1,118 @@
-# Distill a document — book → cited mindmap of editable notes
+# Turn a document into cited notes
 
-> A third capability that **composes** the other two. [talk-to-docs.md](talk-to-docs.md)
-> pulls answers *from* documents; this pushes a whole document's key knowledge
-> *out* into structured, editable, **cited** notes — which then flow through the
-> normal index and the derived map ([auto-mindmap.md](auto-mindmap.md)).
+Open a vault and choose **File → Distill a Document…**. Nodebook asks a model to draft notes from the document. You can open each note beside its source passage, check the quote, and decide whether to add the notes to your vault. Each import gets its own saved run, so you can read the same book with a different focus.
 
-## The idea
+## Choose a file and a provider
 
-Feed Nodebook a book (PDF / EPUB / DOCX / HTML / long markdown). It distills the
-key knowledge — concepts, claims, entities, and how they relate — into a cluster
-of **editable markdown notes**, each carrying a **reference back to the exact
-source span** it came from. The "mindmap of the book" is then just the normal
-derived map over those generated notes.
+Nodebook reads PDF, EPUB, Word `.docx`, HTML, Markdown and plain text. Save an older Word `.doc` as `.docx` first. Keep the original file if you will need its layout, pagination or illustrations. The source that Nodebook saves is a Markdown conversion.
 
-> **Status: built and shipped.** A run reads the **whole** document, stages its
-> notes in `<vault>/.distill/<run>/` behind that run's own database, and **Merge**
-> is the promote step that copies them into the vault. Staging is not a `scope`
-> column — it is a separate database, which is a stronger firewall; see
-> [state-and-scopes.md](state-and-scopes.md). What is still research is the
-> *cumulative* side: making one concept out of two books' notes automatically
-> ([body-of-knowledge.md](body-of-knowledge.md)). Merge only ever proposes; a
-> name clash is never treated as identity without the user's tick.
+For a document with text, open **Settings**, set a provider under `[talk.chat]`, and save. Extraction sends passages, your optional focus and previously identified concept names to that provider. To name themes, Nodebook can also send draft titles and summaries. Ollama uses a local server by default. For Ollama and OpenAI-compatible servers, the configured address determines the destination. Anthropic and signed-in Codex or Claude Code use their provider services. A custom `cli` receives the prompt through the command you set. [Command-line provider setup](cli-providers.md)
 
-## Why it fits (and reuses almost everything)
+1. Select the file. For text, Markdown or HTML, read the encoding preview. If the letters look wrong, select another encoding and check again. Nodebook reads the original bytes locally.
+2. Leave the focus blank for a general reading, select **Arguments**, **Timeline** or **People**, or enter your own request. For example, enter “Which conclusions do the authors support with experiments?” Select **Distill**.
+3. Read any warnings about missing PDF text, skipped figures or pages the importer could not inspect for figures. Continue if the available material is enough. Otherwise cancel and choose a more complete edition. An OCR edition can supply searchable page text for a scanned PDF. When a file has preserved figures but no usable authored passages, Nodebook can stage the source and images without calling a model.
+4. If the reading exceeds your budget, the dialog shows how many evenly spaced steps it will read and the estimated share of the extracted text. Accept that reading or cancel, raise `[distill] maxCalls` in Settings, and start again. The default is 120 planned reading steps. Retries, splitting a long step, and naming themes can add provider calls.
 
-- **Provenance is already in the chunker.** `chunk.ts` stores `start`/`end` offsets
-  and the heading path for every chunk. A generated note keeps provenance in
-  **frontmatter** — the source name plus each `cite:` block (chunk id, offset
-  range, the exact quote, and `where:` — the page or section a person would name)
-  — in single-colon YAML, which `harvest()` never turns into a graph edge; the
-  note's **body** carries the real edge, `source:: [[Book]]`.
-  `Book` is one short, human title used everywhere — frontmatter, body link, and
-  the source's own note file (derived from the filename: a library-dump's
-  `Title -- Author -- ...` convention is cut down to title + author, underscores
-  become spaces) — so the link always resolves to a real note, never a ghost; the
-  original file's path survives in the source store. Clicking a citation opens
-  Nodebook's **converted copy** at that span — the *same* citation mechanism
-  talk-to-docs P2 chat uses — and the document's own note carries an **Open
-  original** button that hands the real file to the OS.
-  The derived map hides the source-document node by default (every note in a run
-  points to it, so it's a trivial hub, not a useful edge) — a per-run toggle
-  brings it back.
-- **Themes come after extraction, not before.** The model reads the document in
-  order (below); embeddings no longer decide what it reads. Once the notes exist,
-  *they* are embedded and grouped, and each group gets a **theme note** its
-  members point at with `part_of::`. The map then reads book → themes → notes
-  instead of one flat star. Embeddings organise the result; extraction reads
-  everything.
-- **The output is notes, not a locked artifact** — one source of truth, and the
-  user can *correct* the LLM. The book is the *source*; the notes are
-  *derived-but-adopted* (a first draft you own). They land in the run's own index
-  under `<vault>/.distill/<run>/` and drive *that run's* map; only an explicit
-  **Merge** copies them into the vault, where the normal index, search, backlinks
-  and canonical graph pick them up (so throwaway runs don't distort it — see
-  [state-and-scopes.md](state-and-scopes.md)).
+A run reads the selected passages in document order. The completion message reports how much extracted text received a usable answer and counts missing or ambiguous quotes. A PDF can have missing pages even when the model reads 100% of the extracted text.
 
-## The pipeline (as built)
+## Pause or resume a run
 
-`src/main/distill/run.ts` wires it. Every step below is a pure, dependency-free
-module with unit tests; the two impure steps — the chat model and the embedder —
-arrive as injected interfaces, so the whole orchestrator runs under vitest with
-stubs.
+Choose **Pause** in the progress indicator. Completed steps stay in the vault. Switching to a different vault also pauses the run. Open the same vault and choose **Resume** under **Distilled runs** to continue. If the provider stopped responding, check its address, credentials or CLI sign-in in Settings before resuming. Only one run can be active at a time.
 
-1. **Convert → markdown** (`convert.ts`). One switch on the file extension: PDF
-   via pdf.js (`## Page N` per page), EPUB via fflate + turndown, DOCX via
-   mammoth + turndown, HTML via turndown, markdown/text as-is. A PDF's text
-   layer is read with its geometry: items on a line are joined by the gap
-   between them (pdf.js already inserts the spaces it saw; joining every item
-   with another space doubled them), a duplicate item pdf.js emits for a list
-   bullet is dropped, and a line set entirely in a fixed-pitch font is a **code
-   listing** — re-laid on a character grid from its x positions and marked
-   with markdown's four-space indent, unless the whole document is monospace
-   (then it is prose in a typewriter face). The text is then cleaned
-   (`cleanPdf.ts`): lines that repeat on 30 % of pages (the running header) and
-   bare page numbers are dropped; so is a header or footer that prints the page
-   number beside a title that changes every chapter (`102 | Chapter 4: …`),
-   found by the one thing that does repeat — the number counting up with the
-   pages; a word cut across a line break (ASCII hyphen or the U+2010 hyphen
-   InDesign-style layout uses) is rejoined when the joined word occurs
-   elsewhere in the text; printed line breaks become real paragraphs; a code
-   listing passes through verbatim (never furniture, never joined); and a
-   paragraph that would open like a markdown heading or fence is escaped, so a
-   `#` in the index never becomes a heading in the chunker's path. The `## Page
-   N` headings stay — that heading is the page provenance.
-2. **Store the source** (`sources.ts`). The converted text is content-addressed:
-   `.distill/sources/<sha1>.md`, plus `.distill/sources.json` mapping the hash to
-   the original path, title, format, and the original's size and mtime. The same
-   unchanged file converts once and every later run reuses the text. This is also
-   what makes **Open original** possible, and what lets two runs of one book share
-   a single copy in `Sources/`.
-3. **Chunk** (`chunkMarkdown`) — about 1000 weight units with 10 % overlap; each
-   chunk keeps its exact offsets (`content.slice(start, end)` is the chunk) and
-   its heading path. That is the citation provenance.
-4. **Plan the windows** (`windows.ts`). Consecutive chunks are packed, in document
-   order, into **windows** as large as the model's declared prompt budget allows.
-   The budget is `ChatModel.inputBudget`, overridden by `[talk.chat]
-   contextTokens`; the planner first subtracts the fixed prompt text, the concept
-   registry and the expected output, so a packed window still fits. **The whole
-   document is read** — nothing is sampled — unless it needs more windows than
-   `[distill] maxCalls` (default 120). Only then are windows kept at an even
-   stride, and `coverage` reports the share of the text, **by weight**, that the
-   model was actually shown. The family default budget (16 000 weight, ≈5k tokens)
-   is deliberately small for a big-context model: measured on 26 pages of a
-   pandas book through `claude-cli`, four-times-larger windows halved the yield
-   (Haiku 50 → 24 items, Sonnet 30 at the larger size) — a model writes about as
-   many items per call whatever the call's length, so a bigger window buys
-   fewer calls at the price of fewer notes per page. A document that needs more
-   windows than `maxCalls` is better served by raising `maxCalls` than
-   `contextTokens`.
-5. **Extract, one call per window, sequentially** (`extract.ts`). Each call carries
-   the **concept registry** (`registry.ts`): every title grounded so far, most
-   recent first, cut to a weight budget. Without it a model meeting the same idea
-   in chapter 9 invents a fresh name for it, and cross-window links are impossible
-   — a note cannot link to a title it has never seen. The prompt offers a fixed
-   relation vocabulary (`defines`, `part_of`, `example_of`, `causes`,
-   `depends_on`, `supports`, `contrasts_with`, `about`); anything else the model
-   writes is kept as an edge but typed `related_to`. The reply is read
-   leniently (`lenientJson.ts`): a quote the model forgot to escape inside a
-   string — Python's `df["data1"]` in a summary — is mended before parsing,
-   because a quote only closes a string where the grammar allows one to, and a
-   comma only where one of the reply's own keys follows (so prose quoting a
-   dict literal cannot end a field early). Over
-   the 171-window book that was 4 replies (2 %), each of which had cost a
-   second, repair call that recovered fewer items than the first reply held.
-   Text a machine cannot mend still gets that one repair call.
-6. **Ground every item** (`extract.ts`). A quote must be found in the source text.
-   The search widens — the cited chunk, then the window's other chunks, then the
-   whole document — and a match is accepted **only when it is unique**: a quote
-   that occurs twice is dropped as ambiguous rather than guessed at, and a quote
-   found in a different chunk re-attributes the citation instead of being thrown
-   away. Matching ignores whitespace entirely, folds every quotation mark to
-   one, drops a hyphen or dash standing between two letters (a word cut at a
-   line end, a compound the model spelt closed), folds ellipses, ligatures and
-   the converter's markdown escapes, but never weakens to a partial match — and
-   the citation always shows the source span, not the model's copy. Drops are counted by
-   reason (`noEvidence`, `notFound`, `ambiguous`, plus recoveries) and the banner
-   says so. *No evidence, no item.*
-7. **Dedup and link** (`dedup.ts`, `link.ts`). Near-duplicate titles absorb into
-   one surviving note — titles only: a shared citation span used to count as
-   identity too, from the days when two sampled clusters quoting one passage
-   had extracted the same thing twice, but a window that reads a passage whole
-   takes several items from it on purpose (the person and the term they
-   coined, `shape` and `dtype` from one sentence). On the pandas book that rule
-   made 85 of 132 merges and every one of them was wrong; a shared passage is
-   relatedness, which the links already carry. Every `[[target]]` is then remapped through dedup's aliases
-   and the final (de-collided) note names, so a rename never leaves a dead link; a
-   target that still matches nothing snaps to the nearest name only above a high
-   similarity, and otherwise stays a **counted ghost** rather than becoming a
-   wrong edge. On top of that, deterministic **mention links**: if note A's own
-   text names note B specifically enough, that is an edge the model simply forgot
-   to write down.
-8. **Theme** (`themes.ts`). The emitted notes are embedded, grouped (about √n
-   groups, 3–16), and **all** groups are named in one model call — naming is
-   presentation and should not cost a call per group. Both this prompt and the
-   extraction prompt make the model **state the source's language first**
-   (the schema's first field) before writing anything in it: asked only to
-   "write in the same language as the notes", Sonnet without extended thinking
-   named an English book's groups in Russian, Polish and Turkish on identical
-   prompts (2 of 3 tries); made to state the language, 3 of 3 came back in
-   English. The rule names no language of its own — an example language in
-   the rule became the output language once. A group whose name never
-   arrives falls back to its medoid note's title, so a failed naming call costs
-   names, not notes. Each note gets a primary `part_of:: [[Theme]]`.
-9. **Emit editable notes** (`emit.ts`). Body `key:: value` edges — `source::`, each
-   typed relation, `part_of::`, `mentions::` — drive the `[[links]]` and the map.
-   Frontmatter carries `kind:` (`concept|claim|entity|theme|document`), the
-   `source:` name and the `cite:` blocks, in single-colon YAML that `harvest()`
-   ignores → normal index → the derived mindmap appears for free.
+## Check a claim against its source
 
-**Resilience.** A call that fails for a passing reason (429, 5xx, a dropped
-connection, a CLI non-zero exit) is retried with backoff. A call rejected *for
-length* is not retried but **split in two, and both halves are read** — an
-optimistic budget costs an extra call and never a passage; splitting is bounded by
-a depth limit, and a window still rejected at the bound is marked failed and
-counted. A window that keeps failing costs its own window, not the run. Every
-finished window is checkpointed to `progress.jsonl`, so a cancelled or crashed run
-**resumes** from where it stopped. The one thing that does stop a run is three
-failing windows in a row: an expired key should cost three slow calls, not a
-hundred.
+1. Under **Distilled runs**, open the run. Choose **Scope → Standalone** to see its book. On a note map, double-click a content note or focus it and press Enter. In a theme overview, select a theme and open a note from its list.
+2. Under **Sources**, choose a page or section and its quote. Read the highlighted passage in context. Check whether the summary follows from it and whether relationships point in the right direction. Each extracted concept, claim or entity needs a matching quote. Theme names and links are suggestions to review.
+3. Return to the note using the button with its name, then go back to the map. **Scope → Overlay** puts the staged book and your existing notes in the same view. The **Origin** colour key identifies the two sets. A dotted line joins notes with the same name for review.
 
-**Staging, then merge.** A run is a self-contained folder under `<vault>/.distill/`
-— a dot-dir the vault scan and the file watcher already skip, which *is* the
-firewall. It holds the notes as markdown, `meta.json` (source hash, model,
-provider, prompt version, date, settings, coverage) and a `run.db` that is only a
-cache of that markdown: delete it and it rebuilds. Staged notes are readable
-before merge in a read-only pane, with their citations resolving against the run's
-own copy of the document. **Merge** computes a plan first (`mergePlan.ts`): each
-note is `new`, `identical` (same bytes — skipped), or `collides` (that name exists
-in the vault). A collision is written beside the existing note under a
-disambiguated name — `Options (Sapiens)` — because *a name clash is not evidence
-of identity*; the dialog offers a per-item "same as the existing note" tick, and
-only a tick writes `same_as:: [[Options]]`, which is what `buildGraph` collapses
-into one dot. The same idea under *another* name never clashes, so with talk on
-the plan also proposes a twin for a `new` note (`sameAs.ts`): the staged notes
-are embedded as the index embeds a note and a vault note is proposed only when
-the two are each other's closest match — mutual nearest neighbour, floored by
-the vault's own "related" threshold, no cutoff to tune. Shown unticked; a tick
-writes the same `same_as::` line. A tick means "same as the twin I was shown":
-the plan is recomputed at merge time, and a tick whose entry no longer has that
-twin — a note of the exact name appeared meanwhile, turning the proposal into a
-clash with a stranger — is dropped, never redirected (`confirmedSameAs`). Merge writes its manifest first and copies via temp + rename, so a
-crash never leaves un-undoable files; **Undo** hashes each file and sends anything
-you edited to the Trash instead of deleting it.
+**View → Themes** is available when the book has at least two themes and at least one note clearly belongs to a single theme. Select a theme to see its members. Choose **Explore** for the member map or a list of subthemes. Select a link count between two themes to see the note pairs behind it. **Unassigned notes** lists notes outside these groups when there are any. Choose **View → Note map** for the whole book. By default, eligible books with more than 200 content notes open on Themes. Change `[distill] themeOverviewThreshold` in Settings and reopen the book to use a different threshold. Use `0` to start on Themes whenever available.
 
-**Two notes, one reading.** A confirmed `same_as` group is one thing everywhere,
-not only on the map: opening any member shows the others' summary, quotes and
-citations in the right-hand panel, each borrowed citation marked with the note it
-came from. The group is computed by `sameAsGroups()` in `graph.ts` — the same
-union-find, the same target resolution the map folds by, so the two views cannot
-disagree — and the panel reads the twins' files at display time. Nothing is
-written: an append would have the merge rewrite files it does not own, and undo
-would have to unpick one run's additions from another's.
+### Read charts and illustrations
 
-## Ingestion — the converter seam
+PDF, EPUB, Word and HTML imports can preserve figures. HTML import reads supported local or inline images and skips remote images. PDF figures may be cropped from a page or kept as a page image. The importer reports skipped candidates and uninspected pages when applicable.
 
-The seam is `convertDocument()` in `convert.ts`: **one switch on the file
-extension**, each arm a pure-JS library. No native build, no Python — the
-lean-installer discipline from [talk-to-docs.md](talk-to-docs.md). That switch is
-the whole abstraction, and it is deliberately small: adding a format is one more
-arm, and everything downstream is format-agnostic. A scanned PDF (no text layer)
-fails loudly, so the user re-digitizes it instead of getting a silent empty run.
+Open an image in the source, or choose one from **Figures** beside a note that cites its page or section. **Actual size** enlarges small labels. When the list has several figures, use **Find a figure** to search by label, caption or recognized words. Open **Text recognized in figure** to read the available transcription. After merge, use the vault search box and choose **View figure**. Text recognition runs locally with Apple Vision on macOS or an installed Tesseract on other platforms. It can miss or misread labels.
 
-MarkItDown (Python) is the fidelity bar we compare against, and it stays an
-**option, not a promise**:
+Choose **Analyze figure** to send that image, its label, location, caption and available recognized text to the displayed provider. The model must accept images. The answer appears under **AI interpretation** and is saved in this app profile. Check numbers, units and trends against the image. Ordinary text distillation uses authored passages and excludes the generated image links and recognized text as evidence.
 
-- **MarkItDown via its MCP server** (`markitdown-mcp`, runnable over NPX, no
-  Docker) could become another arm of the switch for users who run it —
-  Python-grade fidelity without us shipping Python. Nothing in the app depends on
-  it today, and no `DocumentConverter` interface is built: there is one function,
-  because one function is what the callers need. If a second converter ever ships
-  it gets its own trust / lifecycle / error model, and it stays **out** of
-  `provider.ts`, which is embed/chat only.
-- The pure-JS Node ports (`markitdown-ts`, `markitdown-js`) are the same kind of
-  option — a swap of one arm.
-- **Avoid** wrappers that shell out to the Python package (e.g.
-  `@mote-software/markitdown`) as a default: they reintroduce a Python dependency.
+## Merge the notes you reviewed
 
-## What's genuinely new vs. risky
+Choose **Merge book…** on the run's toolbar. Read the preview before choosing **Merge**.
 
-- **Format ingestion** is the one real new dependency surface — mitigated by the
-  one-function seam above; markdown/text books need none of it.
-- **Fidelity.** Grounding every claim in a clickable span is the anti-hallucination
-  safeguard — the user *verifies*, not trusts. Unique-match grounding is what makes
-  that real: a quote that could be in two places is dropped, not attached to a
-  guess.
-- **Cost.** A whole book is many chunks, and the model now sees all of them. The
-  bound is `maxCalls`, not sampling: one call per window, windows as large as the
-  model's context allows, and an honest coverage number when a document exceeds
-  the budget. The provider abstraction lets the user pick local vs cloud.
+| What the preview finds | What Merge does |
+| --- | --- |
+| A new note | Copies it into `Distilled/<run>/` as editable Markdown. |
+| A note with the same name and identical content | Skips the copy. |
+| The same name with different content | Keeps both. The new file gets the name shown in the preview, such as `Options (Sapiens)`. |
+| A possible match under another name | Offers a checkbox when semantic search finds a close match. Leaving it empty keeps the notes separate. |
 
-## Many maps per vault — perspectives, versions, seeds
+For any suggested match, tick the checkbox only when both notes describe the same thing. Merge writes `same_as:: [[Other note]]` into the new copy. The map shows one dot. Opening either note brings the other's summary, quotes and sources into the side panel. Both files remain editable. Delete the `same_as` line to separate them again.
 
-A distillation **run is not "the map" — it's *a* map**, and that's the right model.
-Users understand an LLM run is a fresh generation, so re-running to get a brand-new
-map is expected, not a surprise to guard against. This falls straight out of the
-existing model where **`.map.md` is just a file**: a vault can hold many.
+The converted document goes into `Sources/`, with its figure files under `Sources/figures/`. Runs can share an identical source. Open a merged note's **Sources** to read a citation. Open the source note itself and choose **Open original** to launch the file in its usual app if it is still at the recorded path. The **Source** toggle shows source documents on a vault map.
 
-So a run = a **named, self-contained artifact**. As built, that artifact is
-`<vault>/.distill/<runId>/` — the run's notes plus its own `run.db`, rendered by
-the same `GraphView` the vault map uses; re-distilling the same document gives
-`<name>-2`, `<name>-3`, side by side. (The design originally wrote the view as a
-`.map.md` file per run; a per-run database renders the same picture and needs no
-round-trip rules.) Because each run lives in its own namespace:
+## Undo, discard or restore
 
-- **No clobbering** — re-running as v2 never touches your edits in v1; you keep,
-  compare, or discard whole runs.
-- **Perspectives are first-class** — the same book distilled "by theme" vs "by
-  chronology" vs "by argument" (different extraction prompts) are just different
-  artifacts side by side. Several lenses on one source coexisting *is* the
-  knowledge-management win. A lens is a **focus given per run**: one line, asked
-  once when the run starts — three named lenses (Arguments, Timeline, People) or
-  free text, normalised and capped at 300 characters. It rides in the user half of
-  every extraction prompt, is saved in `run.json` so a resume reads the document
-  the same way, and is recorded in `meta.json` so the runs list can say what a
-  reading was for.
-- **Comparable** — each run's `meta.json` stamps the source hash, model, provider,
-  prompt version, date, settings and coverage, so runs can be told apart and a
-  stale one recognised.
+| What you want to do | What happens |
+| --- | --- |
+| Remove a merge | Open the merged run and choose **Undo** in the banner. If you dismissed it, choose **Undo merge** in the book toolbar. Nodebook removes unchanged files added by the merge. It sends edited merged files to the system Trash for recovery. It keeps sources shared by other recorded merges and figure assets still in use. You can merge the staged run again. |
+| Remove a staged run | Choose the discard button beside the run and confirm **Discard**. This deletes its staged notes and its checkpoint. A paused run loses its progress. Discarding a merged run leaves the vault copies in place **and removes the Undo merge action**. Undo first if you want to remove those copies too. |
+| Restore a vault from backup | Restore the vault folder with `Distilled/`, `Sources/`, their figure files and the hidden `.distill/` folder, then use **File → Open Vault…**. `.distill/` holds unmerged work and undo records. The vault index in `.nodebook/` can be rebuilt. For **Open original**, keep the original document at its recorded path. To recover saved reading copies and figure interpretations, restore the app profile too and open the vault at its original path. |
 
-This generalizes beyond distillation: "multiple saved views/perspectives" is
-equally useful for the hand-curated map (mindmap-mode's "Save view → `.map.md`" can
-write many).
+### Recover readable text from an older import
 
-## Phasing
+For an older staged plain-text or Markdown source with damaged characters, choose **Scope → Standalone**, then **View → Note map** if the book opens on its themes. Open the source document node. Choose **Locate original…** and select the original text or Markdown file. Nodebook checks that its bytes reproduce the damaged text. A newly saved copy containing only replacement characters cannot restore the missing letters.
 
-The original D-phases, and where they landed:
+Check the encoding preview and choose **Use reading copy**. **Show run text** lets you see the earlier text. Nodebook saves the corrected display copy in this app profile. The old notes, their citations and the merged source still use the historical text. To generate corrected notes and citations, distill the original file as a new run with the right encoding.
 
-- ✅ **D1. Markdown/text books** → cited notes as a named run artifact. Shipped,
-  then rebuilt: the pipeline no longer clusters chunks to decide what to read.
-- ✅ **D2. Provenance UX** — a citation opens the source at its span; the panel
-  lists a note's sources with `where:` ("Page 42"), and the document's note has
-  **Open original**.
-- ✅ **D3. PDF/EPUB/DOCX/HTML ingestion** via the extension switch, plus page
-  anchors and PDF text cleanup.
-- ◐ **D4. Perspectives & quality** — per-run metadata, extractive grounding and
-  intra-run dedup shipped; **extraction prompt presets** and a "maps in this
-  vault" browser are still open (the runs list in the sidebar is the browser's
-  first half).
+## Maintainer reference
 
-Later work landed outside those phases: reading the whole document with a concept
-registry, retry/resume, the merge plan with confirmed `same_as`, the source store,
-and themes.
+### Files and recovery contracts
 
-Depends on talk-to-docs (embeddings + the model-provider abstraction) and composes
-with auto-mindmap (clustering + map). Effectively **talk-to-docs inverted**:
-exhaustive push-distill instead of question-pull, sharing the same substrate.
+| Location under the vault | What depends on it |
+| --- | --- |
+| `.distill/sources/<sha1>.md`, `.distill/sources.json` | The converted text is identified by its hash. The source record tracks the original file and its revision, conversion details and figure inventory. Validated images use `sources/figures/<sha256>.<ext>` within `.distill/`. A preview can read a prior conversion. Starting the run publishes a new one. |
+| `.distill/<run>/run.json`, `source.md`, `progress.jsonl` | The run records its source, start time, provider/model and optional focus. Resume uses the saved text, window plan and completed steps. A different focus starts a separate run. |
+| `.distill/<run>/notes/`, `meta.json`, `run.db` | The Markdown files and referenced figures are the staged book. `meta.json` marks completion and records the source, note count and available hash, focus, themes and statistics. `run.db` is a rebuildable index for this run. Staged notes stay outside vault search and backlinks until merge. |
+| `.distill/<run>/merge.json` | Merge records destination paths and hashes before copying. Writes use temporary files and rename. Undo uses the record to remove unchanged files and send edited or unverifiable files to Trash. Merge rechecks a proposed `same_as` against the named target before writing it. |
 
-## Measurement — the eval harness
+Citations use single-colon frontmatter fields for source, chunk, offsets, quote and page or section. The Markdown body has `source:: [[Book]]` and other `key:: value` relationships for the index. A citation resolves against the converted source note, including its generated header. Conversion retains page headings and preserves fixed-pitch PDF code listings where recognized. [Note format](../src/main/distill/emit.ts) · [Source storage](../src/main/distill/sources.ts) · [Run files and merge](../src/main/distill/artifact.ts)
 
-`npm run eval:distill` runs the real `distill()` pipeline over three fixtures —
-`book-en` (seven Federalist Papers essays), `paper.pdf` (a generated ~20-page PDF
-with a running header, page-number footers, and deliberately hyphenated line
-breaks), and `chapter-ru.md` (a Chekhov story) — against hand-curated golden
-concepts and edges (`e2e/fixtures/distill/golden.json`), and reports the metrics in
-`src/main/distill/eval/metrics.ts`.
+### Reading and checking the text
 
-Both tables below use the deterministic stand-ins
-(`src/main/distill/eval/stubs.ts`): a feature-hashing embedder and a regex-based
-heuristic "chat" model, neither of which understands the text. **These are a floor,
-not a target** — they measure the *plumbing* (does everything get read, do quotes
-ground, do links resolve), not the quality of a real model's reading. A real
-provider run is the actual quality signal to watch.
+The planner packs consecutive chunks into windows. A window includes the focus and titles already found. An oversized request can split into shorter ones. Persistent provider failures across three successive windows stop the run. Coverage counts the weight of text for which the model returned a usable response. Missing pages, sampled windows and failed requests measure different losses. [Planner and retries](../src/main/distill/run.ts)
 
-Reproduce with `npm run eval:distill` — it is deterministic (no network, no key)
-and finishes in under a second. To score a real provider instead of the stub, set
-`DISTILL_EVAL_PROVIDER` (plus `DISTILL_EVAL_MODEL` / `DISTILL_EVAL_BASE_URL` /
-`DISTILL_EVAL_COMMAND` and the usual `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` as
-needed), e.g.
-`DISTILL_EVAL_PROVIDER=anthropic DISTILL_EVAL_MODEL=claude-sonnet-4-6 npm run eval:distill`.
+Extraction checks the chunk named in the reply first. If the quote is missing there, it searches the rest of that window and then the document, accepting only a unique fallback match. It keeps the actual source span and drops an item with no surviving evidence. It combines near-duplicate titles, remaps their links, and adds links for explicit mentions. Distinct concepts may cite the same passage. Local embeddings group larger results into themes after extraction. A failed theme pass can leave a usable run of cited notes. [Quote matching](../src/main/distill/extract.ts) · [Figure evidence tests](../src/main/distill/sourceEvidence.test.ts) · [Duplicate handling](../src/main/distill/dedup.ts)
 
-### Live run — the real app, real vectors, a real model (2026-09-02)
+### Reproduce the measurements
 
-`npm run test:e2e:live` (`e2e/live/distill-live.spec.ts`) drives the built app
-over one essay (`federalist-84.md`, 25 KB) with the renderer's real embedding
-model and Claude Code's CLI (Sonnet) as the chat provider — the two things the
-stubbed suites cannot exercise. It is not part of `npm run test:e2e` (network, a
-signed-in `claude`, minutes). It asserts what themes and dedup owe the reader:
-every note under exactly one theme, theme names distinct from each other and
-from every note's name, and in the document's language. Measured:
+Run `npm run eval:distill` for an offline check of conversion, coverage, citations and links. The fixtures are seven Federalist essays (`book-en`), a generated PDF (`paper.pdf`) with running headers and broken lines, and a Chekhov story (`chapter-ru.md`). The default uses a deterministic text extractor and a hashing embedder. A real chat provider replaces the extractor while the embedder stays fixed. The harness saves the scores and the notes used to compute them under `scripts/out/`. [Harness](../scripts/distill-eval.test.ts) · [Golden concepts and edges](../e2e/fixtures/distill/golden.json) · [Scoring](../src/main/distill/eval/metrics.ts)
 
-| windows | extracted | grounded | dropped | merged | notes | themes | edges | ghosts | wall |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 5 | 49 | 49 | 0 | 5 | 44 | 7 | 136 | 0 | 6.4 min, first model download included |
+```sh
+# Use a signed-in provider. This uses its account limits.
+DISTILL_EVAL_PROVIDER=claude-cli DISTILL_EVAL_MODEL=sonnet npm run eval:distill
 
-Themes named: Federalist 84 Bill of Rights · Press Liberty Debate · Government
-Expense Objection · Impeachment and Treason Provisions · Answering the Distance
-Objection · Expanding National Powers · Cited Legal Authorities.
+# Re-score the saved outputs for that provider without another model run.
+DISTILL_EVAL_PROVIDER=claude-cli DISTILL_EVAL_REPLAY=1 npm run eval:distill
+```
 
-### Real provider — claude-cli, Sonnet, thinking off (2026-09-03)
+Other providers use `DISTILL_EVAL_MODEL`, `DISTILL_EVAL_BASE_URL`, `DISTILL_EVAL_COMMAND` and the corresponding API key as needed. `npm run test:e2e` exercises the app with test providers. `npm run test:e2e:live` exercises the built app with real embeddings and a signed-in Claude Code CLI. It uses the network and checks whether each note belongs to one theme and whether theme names are distinct and in the document's language. [Live test](../e2e/live/distill-live.spec.ts)
 
-`DISTILL_EVAL_PROVIDER=claude-cli DISTILL_EVAL_MODEL=sonnet npm run eval:distill`
-— the first run of the harness against a real model. The embedder stays the
-hash stub (a headless run has no renderer). 24 minutes for the three fixtures.
+The offline evaluation checks conversion, passage coverage, quote matching and links. The stub extracts items with fixed rules. Use real-provider trials to assess how well a model understood the text.
 
-| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgeRecall |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| book-en | 21.79 | 1.00 | 1.00 | 0.00 | 2.00 | 2.86 | 0.00 | 1.00 | 0.00 | 0.45 | 0.01 | 0.27 |
-| paper.pdf | 21.13 | 1.00 | 0.00 | 0.00 | 6.00 | 2.68 | 0.00 | 1.00 | 0.00 | 0.43 | 0.01 | 0.18 |
-| chapter-ru.md | 22.17 | 1.00 | 0.00 | 0.00 | 0.00 | 2.95 | 0.01 | 1.00 | 0.00 | 0.32 | 0.03 | 0.19 |
+### Recorded results, September 2026
 
-Read against the stub tables below. **Yield** is about one note per 460
-characters on all three fixtures, twice the stub's on the English ones; the
-stub's higher figure on the Russian story came from its short lines, not from
-reading it. **Merges** fall from hundreds to 2 / 6 / 0: a model names a concept
-once and reuses the name through the registry, so dedup has little left to do.
-**Edges per note** settle near 3, and every fixture is one component with no
-duplicate titles and at most one dropped quote. **`conceptRecall`** rises by
-0.06–0.14 against the same hand-curated golden, **`edgeRecall`** three- to
-fivefold. **`edgePrecision`** stays near 0.01, and that is a fact about the
-golden, not the model: it lists a few dozen edges per fixture while a model
-writes about three per note, so nearly every edge written is one the golden
-never listed. The metric was redefined the next day — see below — and the
-same three runs re-scored under the new rule.
+In the 2 September fixture runs, sampling four passages per cluster covered 34% of the English essays, 39% of the PDF and 56% of the Russian story. Reading consecutive windows covered 100% on all three with the deterministic extractor. On the English essays, the note count per 10,000 characters rose from 5.36 to 10.34, and five disconnected groups became one. On a separate 26-page pandas sample, fourfold larger windows reduced Haiku's output from 50 to 24 items. An earlier rule merged notes whenever they shared a quote. It made 85 of 132 merges on the pandas book, all judged incorrect in that inspection. These observations informed the window budget and title-based duplicate handling.
 
-### `edgePrecision` redefined — judged edges only (2026-09-03)
+The 2 September live app run used `federalist-84.md` (25 KB), real local embeddings and Claude Code with Sonnet. Five windows yielded 49 extracted items with matching quotes. After five merges, the map contained 44 notes, seven themes, 136 edges and no unresolved targets. The run took 6.4 minutes including the first model download.
 
-The old rule counted every predicted edge in the denominator, so an edge
-between two concepts the golden never listed counted as wrong. A golden of
-twenty-odd concepts has no opinion on most of a book, and a model that links
-its notes three times each was scored against that silence. The new rule
-scores only the edges the golden can judge:
+On 3 September the harness changed edge precision to count only predicted links whose endpoints map to two distinct concepts in the curated answer set. A missing expected link counts against recall. An unlisted relationship between two known concepts counts against precision even if the relationship is valid. The answer set covers few pairs, so read precision with its denominator. The table uses the revised scoring rule.
 
-- **`edgePrecision`** = of the predicted edges whose both endpoints resolve to
-  two different golden concepts, the share that is a golden edge. An edge with
-  an endpoint outside the golden is neither a hit nor a miss. Nothing judged
-  scores 0, not 1.
-- **`edgesJudged`** (new column) = how many predicted edges that was. A
-  precision figure over 5 edges and one over 50 are not the same evidence, so
-  the count sits beside it.
-- Still a lower bound: the golden's edge list is a curated sample, not every
-  true relation among its concepts. A real relation it happens not to list is
-  scored as wrong. Growing the golden's edge list raises the ceiling; the
-  concept list can stay as it is.
+| Fixture | Stub concept recall | Stub edge precision (pairs judged) | Sonnet concept recall | Sonnet edge precision (pairs judged) | Sonnet edge recall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| English essays | 0.32 | 0.17 (6) | 0.27 | 0.50 (6) | 0.14 |
+| Generated PDF | 0.29 | 0.00 (2) | 0.43 | 0.50 (4) | 0.09 |
+| Russian story | 0.26 | 0.60 (5) | 0.26 | 0.75 (4) | 0.14 |
 
-Tables dated before 2026-09-03 use the old rule. Every eval run now saves what
-it scored (`scripts/out/run-<provider>-<fixture>.json`), and the same command
-with `DISTILL_EVAL_REPLAY=1` re-scores those files instead of running the
-pipeline, so the next metric change can be read against a real model's output
-without paying for the model again.
+Two Sonnet runs on the same English essays produced concept recalls of 0.45 and 0.27, with two and nine merges respectively. The full three-fixture runs took 24 and 23 minutes. The second run supplied the Sonnet values in the table. The November trials include direct review of claims and link direction on shorter excerpts. [Quality trials](quality-trials.md)
 
-Stub, re-scored (the pipeline is unchanged; only the last three columns moved):
-
-| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgesJudged | edgeRecall |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| book-en | 10.34 | 1.00 | 0.00 | 0.00 | 339.00 | 7.44 | 0.00 | 1.00 | 0.00 | 0.32 | 0.17 | 6.00 | 0.05 |
-| paper.pdf | 14.00 | 1.00 | 0.00 | 0.00 | 225.00 | 6.85 | 0.00 | 1.00 | 0.00 | 0.29 | 0.00 | 2.00 | 0.00 |
-| chapter-ru.md | 25.20 | 1.00 | 0.00 | 0.00 | 38.00 | 3.20 | 0.00 | 1.00 | 0.00 | 0.26 | 0.60 | 5.00 | 0.14 |
-
-The stub's regex links land on golden pairs a handful of times per fixture —
-too few judged edges to mean anything, which is the point of printing the
-count.
-
-Real provider, run again under the new rule — `DISTILL_EVAL_PROVIDER=claude-cli
-DISTILL_EVAL_MODEL=sonnet npm run eval:distill`, 23 minutes, 2026-09-03:
-
-| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgesJudged | edgeRecall |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| book-en | 22.17 | 1.00 | 0.00 | 0.00 | 9.00 | 2.80 | 0.00 | 1.00 | 0.00 | 0.27 | 0.50 | 6.00 | 0.14 |
-| paper.pdf | 21.65 | 1.00 | 0.00 | 0.00 | 9.00 | 2.89 | 0.00 | 1.00 | 0.01 | 0.43 | 0.50 | 4.00 | 0.09 |
-| chapter-ru.md | 22.68 | 1.00 | 3.00 | 0.00 | 0.00 | 2.44 | 0.04 | 1.00 | 0.00 | 0.26 | 0.75 | 4.00 | 0.14 |
-
-Two things to read off it. First, of the edges the golden can judge, the
-model gets half to three quarters right — a lower bound, as said above, and
-still only four to six judged edges per fixture, because a golden of twenty
-concepts meets a run of a hundred notes at a few pairs. The number to grow is
-`edgesJudged`, by listing more golden pairs among the concepts already there.
-Second, this is a fresh run of the same model over the same fixtures as the
-table above, and it is not the same run: `conceptRecall` on `book-en` came
-out 0.27 where the earlier run had 0.45, and dedup merged 9 notes where it
-had merged 2. Nothing in the pipeline between the two runs touched
-extraction; that spread is the model's own. One run is one sample — compare
-runs of the same fixture before reading a difference of a few hundredths as
-a change in the pipeline.
-
-### Baseline — Phase 1 (2026-09-02, cluster-sampling pipeline)
-
-The starting point, kept for comparison: chunks were embedded, clustered, and only
-four representatives per cluster reached the model. The column now called
-`failedWindows` was `failedClusters` here — the same metric, renamed when windows
-replaced clusters as the unit of reading.
-
-| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgeRecall |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| book-en | 5.36 | 0.34 | 0.00 | 0.00 | 84.00 | 1.83 | 0.01 | 5.00 | 0.00 | 0.27 | 0.00 | 0.00 |
-| paper.pdf | 5.89 | 0.39 | 0.00 | 0.00 | 63.00 | 2.07 | 0.01 | 1.00 | 0.00 | 0.14 | 0.00 | 0.00 |
-| chapter-ru.md | 13.61 | 0.56 | 0.00 | 0.00 | 18.00 | 1.48 | 0.00 | 1.00 | 0.00 | 0.21 | 0.06 | 0.10 |
-
-### Final — after Phases 2–8 (2026-09-02, whole-document pipeline)
-
-| fixture | yieldPer10k | coverage | dropped | failedWindows | merged | edgesPerNote | ghostLinkRate | components | duplicateTitleRate | conceptRecall | edgePrecision | edgeRecall |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| book-en | 10.34 | 1.00 | 0.00 | 0.00 | 339.00 | 7.47 | 0.00 | 1.00 | 0.00 | 0.32 | 0.00 | 0.05 |
-| paper.pdf | 14.00 | 1.00 | 0.00 | 0.00 | 225.00 | 6.82 | 0.00 | 1.00 | 0.02 | 0.29 | 0.00 | 0.00 |
-| chapter-ru.md | 25.20 | 1.00 | 0.00 | 0.00 | 38.00 | 3.20 | 0.00 | 1.00 | 0.00 | 0.26 | 0.02 | 0.14 |
-
-(Re-taken after the real-book fixes below: dedup no longer merges on a shared
-span — a few fewer merges, a few more notes and edges; the stub's regex
-extraction is otherwise untouched by them.)
-
-What changed, and why:
-
-- **`coverage` 0.34–0.56 → 1.00.** The whole document is read now. This is the
-  headline result of the rebuild.
-- **`yieldPer10k` roughly doubled** on every fixture — more of the text reaches the
-  model, so more grounded notes come out of it.
-- **`ghostLinkRate` → 0.00 and `components` 5 → 1** on `book-en`. Link remap plus
-  the concept registry mean targets resolve and the run is one connected map, not
-  five islands.
-- **`edgesPerNote` 1.5–2.1 → 3.2–7.4** — the registry lets a window link to
-  concepts named in earlier windows, and mention links add the edges the model
-  forgot.
-- **`conceptRecall` up, `edgePrecision`/`edgeRecall` still near zero.** Recall
-  improves because more text is read; the edge scores stay low because the stub
-  model writes relations from a regex, not from meaning. Only a real provider run
-  can move those, which is exactly why they are reported separately: an acceptance
-  gate on edges cannot be met by inventing links.
+The [archived measurement tables](https://github.com/mrbald/nodebook/blob/v0.1.1/docs/distill-documents.md#L309-L457) include all recorded metrics and the earlier scoring rules.
