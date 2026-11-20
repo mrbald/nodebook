@@ -20,10 +20,17 @@ export interface ChatTurn {
   content: string
 }
 
+export interface ChatImage {
+  bytes: Uint8Array
+  mime: string
+}
+
 export interface ChatRequest {
   /** Grounding instruction + the retrieved note chunks as context. */
   system?: string
   messages: ChatTurn[]
+  /** A single image attached to the final user turn. Only used by figure analysis. */
+  image?: ChatImage
   /** Optional cancellation — adapters pass it through to `fetch`. */
   signal?: AbortSignal
 }

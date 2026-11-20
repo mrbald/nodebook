@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -27,7 +27,7 @@ test.beforeAll(async () => {
   writeFileSync(beta, `# Twin\n\n${evidence}\n`)
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-ask-userdata-'))
   writeFileSync(join(userDataDir, 'settings.toml'), '[talk.chat]\nprovider = "none"\n')
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: {
       ...process.env,
@@ -46,7 +46,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('saving a provider enables keyword-only Ask and its citations select the exact note passage', async () => {

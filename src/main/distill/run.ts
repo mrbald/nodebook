@@ -38,7 +38,8 @@ import {
   type ChatModel,
   type ChatRequest
 } from '../rag/provider'
-import { chunkMarkdown, weightOf, type Chunk } from '../rag/chunk'
+import type { FigureRef } from '../../shared/figures'
+import { weightOf, type Chunk } from '../rag/chunk'
 import { coverageOf, planWindows } from './windows'
 import { ConceptRegistry } from './registry'
 import {
@@ -72,6 +73,7 @@ import {
 } from './themes'
 import { sourceNoteName, type CheckpointStore, type WindowGroup } from './artifact'
 import { withRetry, type RetryOptions } from './retry'
+import { chunkDistillSource, distillEvidence } from './sourceEvidence'
 
 /** Thrown when a run is cancelled via its AbortSignal. */
 export class DistillAborted extends Error {
@@ -93,6 +95,7 @@ export interface DistillProgress {
 export interface DistillSource {
   file: string
   text: string
+  figures?: readonly FigureRef[]
   /** sha1 of `text` — the document's identity in the source store
    *  (`sources.ts`). Absent for a caller that has no store (tests, the eval). */
   hash?: string
@@ -260,8 +263,12 @@ function planFor(
  * the run uses. Cheap and deterministic, so the estimate the user sees is the
  * plan the run then follows.
  */
-export function estimateDistill(text: string, opts: DistillOptions = {}): DistillEstimate {
-  const chunks = chunkMarkdown(text)
+export function estimateDistill(
+  text: string,
+  opts: DistillOptions = {},
+  figures?: readonly FigureRef[]
+): DistillEstimate {
+  const chunks = chunkDistillSource(text, figures)
   const maxCalls = opts.maxCalls ?? DEFAULT_MAX_CALLS
   if (chunks.length === 0)
     return { chunks: 0, calls: 0, coverage: 1, totalWindows: 0, maxCalls }
@@ -315,6 +322,35 @@ export interface DistillResult {
     components: number
     /** Share (0..1) of the document's text, by weight, that was read. */
     coverage: number
+  }
+}
+
+/** A visual document with no passages still stages its source and figures. */
+export function figureOnlyResult(): DistillResult {
+  return {
+    notes: [],
+    themes: [],
+    stats: {
+      chunks: 0,
+      windows: 0,
+      calls: 0,
+      splits: 0,
+      extracted: 0,
+      grounded: 0,
+      dropped: 0,
+      droppedByReason: { noEvidence: 0, notFound: 0, ambiguous: 0 },
+      recovered: 0,
+      merged: 0,
+      notes: 0,
+      themes: 0,
+      themesSkipped: 0,
+      failedWindows: 0,
+      edges: 0,
+      ghostLinks: 0,
+      mentions: 0,
+      components: 0,
+      coverage: 1
+    }
   }
 }
 
@@ -650,8 +686,12 @@ export async function distill(
   throwIfAborted(opts.signal)
 
   // 1. Chunk (pure). Chunk id = its index; provenance maps id → source span.
-  const chunks: Chunk[] = chunkMarkdown(source.text)
+  const { chunks, allowSpan } = distillEvidence(source.text, source.figures)
   report('chunking', chunks.length, chunks.length)
+  if (chunks.length === 0 && source.figures?.length) {
+    report('done', 1, 1)
+    return figureOnlyResult()
+  }
   const prov = new Map<number, ChunkProvenance>()
   // The chunk's heading rides along: it is where a reader would say the quote
   // is ("Page 42", a chapter name), and that is what the citation reports.
@@ -779,7 +819,8 @@ export async function distill(
     recovered
   } = groundItems(extracted, prov, {
     windowOf: (chunkId) => ctx.windowOf.get(chunkId) ?? [],
-    fullText: source.text
+    fullText: source.text,
+    allowSpan
   })
   // dedup renames notes and emit de-collides them, so a link written earlier
   // can name a note that no longer exists; `aliases` lets link.ts (inside

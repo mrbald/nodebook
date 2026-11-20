@@ -3,16 +3,27 @@
  * markdown the distill pipeline already understands; the messy, format-specific
  * step lives here so everything downstream stays format-agnostic.
  *
- * Pure-JS converters only — no native build, no Python (the lean-installer
- * discipline). pdf.js extracts PDF text with no canvas, so it runs in the main
- * process and unit-tests in node. A scanned PDF (no text layer) fails loudly so
- * the user re-digitizes it first, rather than getting a silent empty run.
+ * Rendered PDF extracts and embedded raster assets are collected as portable
+ * companion files. The original text and its provenance stay in Markdown.
  */
 
 import { readFileSync } from 'fs'
-import { extname } from 'path'
+import { createHash } from 'crypto'
+import { createRequire } from 'module'
+import { dirname, extname, posix, sep } from 'path'
+import { setImmediate } from 'timers/promises'
+import { figureMarkdown, type CapturedFigure, type FigureCoverage } from '../../shared/figures'
 import type { PdfExtraction } from '../../shared/pdfExtraction'
+import { cleanFigureText, figureOcrMarkdown, FigureCapture, MAX_FIGURE_BYTES } from './captureFigures'
 import { cleanPdf } from './cleanPdf'
+import { htmlBodyToMarkdown, isLocalHtmlImagePath, readLocalHtmlImage, relativeImagePath, type ReadImage } from './htmlFigures'
+import { PdfFigureCapture, type PageCaption } from './pdfFigures'
+import { decodeImportText } from './textEncoding'
+
+export interface ConvertedTextEncoding {
+  name: string
+  uncertain: boolean
+}
 
 /** One text item as pdf.js hands it back: the string, whether a line ends
  *  after it, its font, and where it sits on the page. */
@@ -145,7 +156,8 @@ function trimBlankLines(text: string): string {
 /**
  * Extract a PDF's text as markdown — one `## Page N` section per page, so the
  * existing chunker carries the page in each chunk's heading path (that's the
- * provenance, for free). Throws when no text is extractable (a scanned PDF).
+ * provenance, for free). Image-only pages retain a visual source while
+ * remaining missing from the PDF text-layer coverage.
  *
  * What comes out of a PDF is lines painted at positions, not prose: a running
  * header on every page, a page-number footer, words cut in half at the line
@@ -166,25 +178,76 @@ function trimBlankLines(text: string): string {
 export interface ConvertedDocument {
   text: string
   pdf?: PdfExtraction
+  encoding?: ConvertedTextEncoding
+  figures?: CapturedFigure[]
+  figureCoverage?: FigureCoverage
+  externalImages?: true
 }
 
-async function convertPdf(data: Uint8Array): Promise<ConvertedDocument> {
+function captured(capture: FigureCapture): Pick<ConvertedDocument, 'figures' | 'figureCoverage'> {
+  return {
+    ...(capture.figures.length ? { figures: capture.figures } : {}),
+    ...(capture.coverage ? { figureCoverage: capture.coverage } : {})
+  }
+}
+
+async function convertPdf(data: Uint8Array, signal?: AbortSignal): Promise<ConvertedDocument> {
   // Lazy + the *legacy* build (node-friendly, no DOM globals); loaded only when
   // a PDF is actually distilled, so it never costs startup.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
   // verbosity 0 = errors only: silences pdf.js's noisy per-font warnings (e.g.
   // "TT: undefined function") that are irrelevant to text extraction.
-  const doc = await pdfjs.getDocument({ data, verbosity: 0 }).promise
+  const resources = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'))
+  const task = pdfjs.getDocument({
+    data, verbosity: 0, maxImageSize: 20_000_000, canvasMaxAreaInBytes: 16_000_000,
+    standardFontDataUrl: `${resources}${sep}standard_fonts/`,
+    cMapUrl: `${resources}${sep}cmaps/`,
+    wasmUrl: `${resources}${sep}wasm/`
+  })
+  const capture = new FigureCapture(signal)
+  const visual = new PdfFigureCapture(pdfjs, capture)
   const pages: PdfLine[][] = []
-  for (let p = 1; p <= doc.numPages; p++) {
-    const page = await doc.getPage(p)
-    const tc = await page.getTextContent()
-    const items = (tc.items as Partial<TextItem>[]).filter(
-      (it): it is TextItem => typeof it.str === 'string'
-    )
-    pages.push(groupLines(items, tc.styles as FontStyles))
+  const pageFigures: CapturedFigure[][] = []
+  let teardown: Promise<void> | undefined
+  const destroy = (): Promise<void> => teardown ??= task.destroy()
+  const abort = (): void => { void destroy().catch(() => {}) }
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    signal?.throwIfAborted()
+    const doc = await task.promise
+    for (let p = 1; p <= doc.numPages; p++) {
+      await setImmediate()
+      signal?.throwIfAborted()
+      const page = await doc.getPage(p)
+      try {
+        const tc = await page.getTextContent()
+        const items = (tc.items as Partial<TextItem>[]).filter(
+          (it): it is TextItem => typeof it.str === 'string'
+        )
+        const lines = groupLines(items, tc.styles as FontStyles)
+        pages.push(lines)
+        const captions: PageCaption[] = []
+        for (const line of lines) {
+          const text = proseText(line.items)
+          const first = line.items[0]
+          if (first && /^(?:fig(?:ure)?\.?|chart|diagram|illustration|plate)\s+[\w-]+\s*[.:—–]/i.test(text)) {
+            captions.push({ text: cleanFigureText(text), x: first.transform[4], y: first.transform[5] })
+          }
+        }
+        pageFigures.push(await visual.page(page, captions))
+      } finally {
+        page.cleanup()
+      }
+    }
+  } catch (error) {
+    signal?.throwIfAborted()
+    throw error
+  } finally {
+    signal?.removeEventListener('abort', abort)
+    await destroy().catch((error: unknown) => {
+      if (!signal?.aborted) throw error
+    })
   }
-  await doc.cleanup()
 
   let monoChars = 0
   let allChars = 0
@@ -218,14 +281,16 @@ async function convertPdf(data: Uint8Array): Promise<ConvertedDocument> {
   const missing: number[] = []
   const sections: string[] = []
   cleaned.forEach((text, i) => {
-    if (text.trim()) sections.push(`## Page ${i + 1}\n\n${text}`)
-    else missing.push(i + 1)
+    if (!text.trim()) missing.push(i + 1)
+    const content = [text, ...pageFigures[i].flatMap((figure) => [figureMarkdown(figure), figureOcrMarkdown(figure)])]
+      .filter(Boolean).join('\n\n')
+    if (content) sections.push(`## Page ${i + 1}\n\n${content}`)
   })
   const md = sections.join('\n\n')
   if (!md.trim()) {
     throw new Error('No extractable text — this PDF looks scanned. Re-digitize (OCR) it first.')
   }
-  return { text: md, pdf: { pages: pages.length, missing } }
+  return { text: md, pdf: { pages: pages.length, missing }, ...captured(capture) }
 }
 
 export async function pdfToMarkdown(data: Uint8Array): Promise<string> {
@@ -238,25 +303,20 @@ function xmlAttr(tag: string, name: string): string {
   return m ? m[1] : ''
 }
 
-/** HTML → markdown (turndown): body-only, scripts/styles/head dropped. The
- *  shared last leg of the EPUB, HTML, and DOCX converters. */
-async function htmlBodyToMarkdown(html: string): Promise<string> {
-  const TurndownService = (await import('turndown')).default
-  const td = new TurndownService({ headingStyle: 'atx' })
-  td.remove(['script', 'style', 'noscript'])
-  const body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html
-  return td.turndown(body).trim()
-}
-
 /**
  * Convert an HTML file's text to markdown. Real headings survive (turndown
  * keeps h1-h6), so the chunker's heading paths give provenance for free —
  * no artificial `## Section N` needed.
  */
 export async function htmlToMarkdown(html: string): Promise<string> {
-  const md = await htmlBodyToMarkdown(html)
-  if (!md) throw new Error('No extractable text in this HTML file.')
-  return md
+  return (await convertHtml(html)).text
+}
+
+async function convertHtml(html: string, readImage?: ReadImage, signal?: AbortSignal): Promise<ConvertedDocument> {
+  const capture = new FigureCapture(signal)
+  const text = await htmlBodyToMarkdown(html, capture, { readImage })
+  if (!text) throw new Error('No extractable text or figures in this HTML file.')
+  return { text, ...captured(capture) }
 }
 
 /**
@@ -266,11 +326,65 @@ export async function htmlToMarkdown(html: string): Promise<string> {
  * `convertDocument` (no dependable pure-JS reader exists for it).
  */
 export async function docxToMarkdown(data: Uint8Array): Promise<string> {
+  return (await convertDocx(data)).text
+}
+
+const MAX_ARCHIVE_BYTES = 160 * 1024 * 1024
+const MAX_ARCHIVE_ENTRIES = 12_000
+const MAX_ENTRY_BYTES = 32 * 1024 * 1024
+
+async function convertDocx(data: Uint8Array, signal?: AbortSignal): Promise<ConvertedDocument> {
+  // Check central-directory sizes without expanding the archive. Mammoth's
+  // image hook receives already-decoded bytes, so it cannot enforce this cap.
+  const { unzipSync } = await import('fflate')
+  let total = 0
+  let count = 0
+  unzipSync(data, { filter({ originalSize }) {
+    total += originalSize
+    if (++count > MAX_ARCHIVE_ENTRIES || originalSize > MAX_ENTRY_BYTES || total > MAX_ARCHIVE_BYTES) {
+      throw new Error('This Word document is too large to convert.')
+    }
+    return false
+  } })
+  const capture = new FigureCapture(signal)
+  const assets = new Map<string, Uint8Array>()
+  let assetBytes = 0
+  let placements = 0
   const mammoth = await import('mammoth')
-  const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(data) })
-  const md = await htmlBodyToMarkdown(html)
-  if (!md) throw new Error('No extractable text in this Word document.')
-  return md
+  const convertImage = mammoth.images.imgElement(async (image) => {
+    await setImmediate()
+    signal?.throwIfAborted()
+    if (++placements > 1024 || !/^image\/(?:png|jpeg|jpg|gif|webp)$/i.test(image.contentType)) {
+      capture.skip()
+      return { src: '' }
+    }
+    try {
+      const bytes = await image.readAsBuffer()
+      const src = `word-figure-${createHash('sha256').update(bytes).digest('hex')}`
+      if (!assets.has(src)) {
+        if (bytes.length > MAX_FIGURE_BYTES || assetBytes + bytes.length > 64 * 1024 * 1024) {
+          capture.skip()
+          return { src: '' }
+        }
+        assets.set(src, bytes)
+        assetBytes += bytes.length
+      }
+      return { src }
+    } catch {
+      signal?.throwIfAborted()
+      capture.skip()
+      return { src: '' }
+    }
+  })
+  const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(data) }, {
+    externalFileAccess: false,
+    convertImage,
+    styleMap: ["p[style-name='Caption'] => figcaption:fresh"]
+  })
+  signal?.throwIfAborted()
+  const text = await htmlBodyToMarkdown(html, capture, { readImage: (src) => assets.get(src), wordCaptions: true })
+  if (!text) throw new Error('No extractable text or figures in this Word document.')
+  return { text, ...captured(capture) }
 }
 
 /** Strip XML tags and decode the handful of entities a title can carry. */
@@ -358,9 +472,43 @@ export function epubNavTitles(
  * does not. Books with no usable TOC fall back to `## Section N`.
  */
 export async function epubToMarkdown(data: Uint8Array): Promise<string> {
-  const { unzipSync, strFromU8 } = await import('fflate')
-  const files = unzipSync(data)
-  const read = (p: string): string => (files[p] ? strFromU8(files[p]) : '')
+  return (await convertEpub(data)).text
+}
+
+function archiveImagePath(chapter: string, src: string): string | undefined {
+  const absolute = src.startsWith('/') && !src.startsWith('//')
+  const path = relativeImagePath(absolute ? src.slice(1) : src)
+  if (!path) return undefined
+  const entry = posix.join(absolute ? '' : posix.dirname(chapter), path)
+  return entry !== '..' && !entry.startsWith('../') ? entry : undefined
+}
+
+async function convertEpub(data: Uint8Array, signal?: AbortSignal): Promise<ConvertedDocument> {
+  const { unzipSync } = await import('fflate')
+  let total = 0
+  let count = 0
+  const files = unzipSync(data, { filter({ name, originalSize }) {
+    if (++count > MAX_ARCHIVE_ENTRIES) throw new Error('This EPUB has too many archive entries to convert.')
+    if (/\.(?:png|jpe?g|gif|webp)$/i.test(name) && originalSize > MAX_FIGURE_BYTES) return false
+    total += originalSize
+    if (originalSize > MAX_ENTRY_BYTES || total > MAX_ARCHIVE_BYTES) {
+      throw new Error('This EPUB is too large to convert.')
+    }
+    return true
+  } })
+  const capture = new FigureCapture(signal)
+  const read = (p: string, html = false): string => {
+    if (!Object.hasOwn(files, p)) return ''
+    try {
+      const decoded = decodeImportText(files[p], { xml: true, html })
+      if (decoded.uncertain) throw new Error('The text encoding is uncertain. Export the EPUB as UTF-8.')
+      return decoded.text
+    } catch (err) {
+      throw new Error(`Couldn’t read EPUB entry ${p}. ${err instanceof Error ? err.message : String(err)}`, {
+        cause: err
+      })
+    }
+  }
 
   const container = read('META-INF/container.xml')
   const opfPath = xmlAttr(/<rootfile\b[^>]*>/.exec(container)?.[0] ?? '', 'full-path')
@@ -386,44 +534,80 @@ export async function epubToMarkdown(data: Uint8Array): Promise<string> {
   // own path goes with it: its hrefs are relative to IT, not to the OPF.
   const ncxPath = resolveHref(opfDir, ncxHref || 'toc.ncx')
   const navPath = resolveHref(opfDir, navHref || 'nav.xhtml')
-  const titles = epubNavTitles(read(ncxPath), read(navPath), { ncxPath, navPath })
+  const titles = epubNavTitles(read(ncxPath), read(navPath, true), { ncxPath, navPath })
 
   const sections: string[] = []
   let n = 0
   for (const m of opf.matchAll(/<itemref\b[^>]*>/g)) {
+    await setImmediate()
+    signal?.throwIfAborted()
     const href = manifest.get(xmlAttr(m[0], 'idref'))
     if (!href) continue
     // The manifest's hrefs are relative to the OPF; the titles are keyed by
     // zip-relative path, so both sides are resolved the same way.
     const path = resolveHref(opfDir, href)
-    const html = read(path)
+    const html = read(path, true)
     if (!html) continue
-    const md = await htmlBodyToMarkdown(html)
+    const location = titles.get(path) ?? `Section ${n + 1}`
+    const md = await htmlBodyToMarkdown(html, capture, {
+      location,
+      readImage: (src) => {
+        const entry = archiveImagePath(path, src)
+        return entry && Object.hasOwn(files, entry) ? files[entry] : undefined
+      }
+    })
     if (!md) continue
     n++
-    sections.push(`## ${titles.get(path) ?? `Section ${n}`}\n\n${md}`)
+    sections.push(`## ${location}\n\n${md}`)
   }
 
   const out = sections.join('\n\n')
-  if (!out.trim()) throw new Error('No extractable text in this EPUB.')
-  return out
+  if (!out.trim()) throw new Error('No extractable text or figures in this EPUB.')
+  return { text: out, ...captured(capture) }
 }
 
 const TEXT_EXT = new Set(['.md', '.markdown', '.txt', '.text'])
 const HTML_EXT = new Set(['.html', '.htm', '.xhtml'])
+
+export function supportsImportTextEncoding(filePath: string): boolean {
+  const ext = extname(filePath).toLowerCase()
+  return TEXT_EXT.has(ext) || HTML_EXT.has(ext)
+}
 
 /** Convert a document at `filePath` into the markdown the distill pipeline reads. */
 export async function convertDocument(filePath: string): Promise<string> {
   return (await convertDocumentWithCoverage(filePath)).text
 }
 
-export async function convertDocumentWithCoverage(filePath: string): Promise<ConvertedDocument> {
+export async function convertDocumentWithCoverage(
+  filePath: string,
+  encoding?: string,
+  readBytes: (path: string) => Uint8Array = readFileSync,
+  signal?: AbortSignal
+): Promise<ConvertedDocument> {
+  signal?.throwIfAborted()
   const ext = extname(filePath).toLowerCase()
-  if (ext === '.pdf') return convertPdf(new Uint8Array(readFileSync(filePath)))
-  if (ext === '.epub') return { text: await epubToMarkdown(new Uint8Array(readFileSync(filePath))) }
-  if (ext === '.docx') return { text: await docxToMarkdown(new Uint8Array(readFileSync(filePath))) }
-  if (HTML_EXT.has(ext)) return { text: await htmlToMarkdown(readFileSync(filePath, 'utf8')) }
-  if (TEXT_EXT.has(ext)) return { text: readFileSync(filePath, 'utf8') }
+  const html = HTML_EXT.has(ext)
+  if (html || TEXT_EXT.has(ext)) {
+    const decoded = decodeImportText(readBytes(filePath), { encoding, html, xml: ext === '.xhtml' })
+    let externalImages = false
+    const converted = html
+      ? await convertHtml(decoded.text, (src) => {
+        if (!isLocalHtmlImagePath(src)) return undefined
+        externalImages = true
+        return readLocalHtmlImage(filePath, src)
+      }, signal)
+      : { text: decoded.text }
+    return {
+      ...converted,
+      ...(externalImages ? { externalImages: true } : {}),
+      encoding: { name: decoded.encoding, uncertain: decoded.uncertain ?? false }
+    }
+  }
+  if (encoding !== undefined) throw new Error('An encoding can only be chosen for text, Markdown, or HTML.')
+  if (ext === '.pdf') return convertPdf(new Uint8Array(readBytes(filePath)), signal)
+  if (ext === '.epub') return convertEpub(readBytes(filePath), signal)
+  if (ext === '.docx') return convertDocx(readBytes(filePath), signal)
   if (ext === '.doc') {
     throw new Error(
       'Legacy .doc isn’t supported — open it in Word or LibreOffice and save as .docx first.'

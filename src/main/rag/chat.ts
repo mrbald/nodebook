@@ -2,6 +2,7 @@ import {
   ContextLengthError,
   inputBudgetFor,
   isContextLengthMessage,
+  type ChatImage,
   type ChatModel,
   type ChatRequest,
   type ProviderConfig
@@ -18,21 +19,31 @@ import { ASK_SYSTEM } from './ask'
  */
 
 /** Parse a Server-Sent-Events response, yielding each `data:` payload line. */
-async function* sseData(res: Response): AsyncIterable<string> {
+async function* sseData(res: Response, maxBytes?: number): AsyncIterable<string> {
   if (!res.body) return
   const reader = res.body.getReader()
   const dec = new TextDecoder()
   let buf = ''
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += dec.decode(value, { stream: true })
-    let nl: number
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim()
-      buf = buf.slice(nl + 1)
-      if (line.startsWith('data:')) yield line.slice(5).trim()
+  let bytes = 0
+  try {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      if (maxBytes !== undefined) {
+        bytes += value.length
+        if (bytes > maxBytes) throw new Error('Figure analysis exceeded its response limit.')
+      }
+      buf += dec.decode(value, { stream: true })
+      let nl: number
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (line.startsWith('data:')) yield line.slice(5).trim()
+      }
     }
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }
 
@@ -42,9 +53,27 @@ interface DeltaEvent {
   choices?: Array<{ delta?: { content?: string } }>
 }
 
+/** Attach the image to the latest user turn, preserving ordinary text requests. */
+function withImage<T extends { role: string; content: string }>(
+  messages: T[],
+  image: ChatImage | undefined,
+  imageBlock: (mime: string, data: string) => unknown
+): (T | { role: string; content: unknown[] })[] {
+  if (!image) return messages
+  const at = messages.map((message) => message.role).lastIndexOf('user')
+  if (at < 0) throw new Error('An image requires a user message.')
+  const block = imageBlock(image.mime, Buffer.from(image.bytes).toString('base64'))
+  return messages.map((message, i) => i === at
+    ? { role: message.role, content: [{ type: 'text', text: message.content }, block] }
+    : message)
+}
+
+export const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-6'
+const IMAGE_RESPONSE_BYTES = 512 * 1024
+
 function anthropicChat(cfg: ProviderConfig): ChatModel {
   // Empty cfg.model means "provider default" (see ProviderConfig doc).
-  const model = cfg.model || 'claude-sonnet-4-6'
+  const model = cfg.model || ANTHROPIC_DEFAULT_MODEL
   return {
     id: `anthropic:${model}`,
     async *chat(req: ChatRequest): AsyncIterable<string> {
@@ -52,6 +81,7 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         signal: req.signal,
+        ...(req.image ? { redirect: 'error' } as const : {}),
         headers: {
           'content-type': 'application/json',
           'x-api-key': cfg.apiKey,
@@ -62,15 +92,21 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
           // 4096 gives a distill extraction prompt room to finish its JSON
           // instead of being clipped mid-object. TODO: a settings knob per
           // provider/model once there's a concrete need to tune it further.
-          max_tokens: 4096,
+          max_tokens: req.image ? 1200 : 4096,
           system: req.system,
-          messages: req.messages.filter((m) => m.role !== 'system'),
+          messages: withImage(req.messages.filter((m) => m.role !== 'system'), req.image, (media_type, data) => ({
+            type: 'image', source: { type: 'base64', media_type, data }
+          })),
           stream: true
         })
       })
       // The status travels with the error: a 429 or a 5xx is worth retrying, a
       // 401 never is, and distill's retry policy must not guess from the prose.
       if (!res.ok) {
+        if (req.image) {
+          await res.body?.cancel()
+          throw new Error(`Anthropic API rejected the figure (HTTP ${res.status}).`)
+        }
         const body = await res.text()
         // "Too long" is not a fault to retry — it is an instruction to send
         // less, which distill answers by splitting the window.
@@ -82,7 +118,7 @@ function anthropicChat(cfg: ProviderConfig): ChatModel {
       }
       // No `[DONE]` sentinel on this path — that's an OpenAI-ism (see
       // openaiCompatChat below). Anthropic's stream just ends.
-      for await (const data of sseData(res)) {
+      for await (const data of sseData(res, req.image ? IMAGE_RESPONSE_BYTES : undefined)) {
         try {
           const ev = JSON.parse(data) as DeltaEvent
           if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
@@ -110,16 +146,29 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
       const messages = req.system
         ? [{ role: 'system', content: req.system }, ...req.messages]
         : req.messages
+      const imageTokenLimit = cfg.kind === 'ollama' ? { max_tokens: 1200 } : { max_completion_tokens: 1200 }
       const res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         signal: req.signal,
+        ...(req.image ? { redirect: 'error' } as const : {}),
         headers: {
           'content-type': 'application/json',
           ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {})
         },
-        body: JSON.stringify({ model: cfg.model, messages, stream: true })
+        body: JSON.stringify({
+          model: cfg.model,
+          messages: withImage(messages, req.image, (mime, data) => ({
+            type: 'image_url', image_url: { url: `data:${mime};base64,${data}` }
+          })),
+          stream: true,
+          ...(req.image ? imageTokenLimit : {})
+        })
       })
       if (!res.ok) {
+        if (req.image) {
+          await res.body?.cancel()
+          throw new Error(`Chat API rejected the figure (HTTP ${res.status}).`)
+        }
         const body = await res.text()
         // Covers OpenAI's `context_length_exceeded` and Ollama's "input
         // exceeds the context" alike — both arrive on this path.
@@ -129,7 +178,7 @@ function openaiCompatChat(cfg: ProviderConfig): ChatModel {
           status: res.status
         })
       }
-      for await (const data of sseData(res)) {
+      for await (const data of sseData(res, req.image ? IMAGE_RESPONSE_BYTES : undefined)) {
         if (data === '[DONE]') break
         try {
           const ev = JSON.parse(data) as DeltaEvent
@@ -217,6 +266,10 @@ function stubChat(): ChatModel {
   return {
     id: 'stub',
     async *chat(req: ChatRequest): AsyncIterable<string> {
+      if (req.image) {
+        yield JSON.stringify({ text: 'This is a test analysis of the selected figure.' })
+        return
+      }
       const delayMs = Number(process.env.NODEBOOK_E2E_CHAT_DELAY_MS ?? 0)
       if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
       const system = req.system ?? ''
@@ -248,7 +301,7 @@ function stubChat(): ChatModel {
 }
 
 /** Ollama's default local OpenAI-compatible endpoint. */
-const OLLAMA_DEFAULT_URL = 'http://localhost:11434/v1'
+export const OLLAMA_DEFAULT_URL = 'http://localhost:11434/v1'
 
 function build(cfg: ProviderConfig): ChatModel {
   // The e2e door (NODEBOOK_E2E) also swaps in the stub, so the ordinary suite

@@ -200,6 +200,7 @@ describe('source hubs (showSources)', () => {
     expect(ids(g)).toEqual(new Set([A, B]))
     expect(g.edges).toEqual([{ source: A, target: B, relation: 'links_to' }])
     expect(g.hiddenSources).toBe(1)
+    expect(g.hasSources).toBe(true)
   })
 
   it('showSources keeps the hub and its edges; hiddenSources is 0', () => {
@@ -207,6 +208,7 @@ describe('source hubs (showSources)', () => {
     expect(ids(g)).toEqual(new Set([A, B, BOOK]))
     expect(g.edges.filter((e) => e.relation === 'source')).toHaveLength(2)
     expect(g.hiddenSources).toBe(0)
+    expect(g.hasSources).toBe(true)
   })
 
   it('with themes, a shown hub keeps only its theme edges: book → themes → notes, not a star', () => {
@@ -243,6 +245,7 @@ describe('source hubs (showSources)', () => {
     const themedTriples: TripleRow[] = [...sourceTriples, t(A, 'part_of', 'Theme'), t(T, 'source', 'Book')]
     const g = buildGraph(themedFiles, themedTriples, BOOK, { showSources: true, depth: 1 })
     expect(g.edges.filter((e) => e.relation === 'source').map((e) => e.source).sort()).toEqual([A, B, T].sort())
+    expect(g.hasSources).toBe(false)
   })
 
   it('a vault with no source triples is untouched, hiddenSources=0', () => {
@@ -262,7 +265,9 @@ describe('source hubs (showSources)', () => {
       { path: BOOK, title: 'Book', kind: 'document' }
     ]
     const docTriples: TripleRow[] = [t(A, 'mentions', 'Book'), t(B, 'mentions', 'Book')]
-    expect(ids(buildGraph(docFiles, docTriples, null))).toEqual(new Set([A, B]))
+    const hidden = buildGraph(docFiles, docTriples, null)
+    expect(ids(hidden)).toEqual(new Set([A, B]))
+    expect(hidden.hasSources).toBe(true)
     // …unless the user asked for source documents, or opened the book itself.
     expect(ids(buildGraph(docFiles, docTriples, null, { showSources: true }))).toEqual(
       new Set([A, B, BOOK])

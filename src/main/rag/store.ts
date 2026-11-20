@@ -111,6 +111,43 @@ export function dropTalkTables(db: Database.Database): void {
   `))()
 }
 
+/** Average embedded chunks per note and normalize them for cosine comparison.
+ * Use an iterator so a cold scan does not also retain every chunk vector. */
+export function readNoteVectors(
+  db: Database.Database,
+  docs: ReadonlySet<string>
+): Map<string, Float32Array> {
+  const sums = new Map<string, Float32Array>()
+  const counts = new Map<string, number>()
+  const rows = db.prepare(
+    `SELECT c.file AS file, v.embedding AS emb
+     FROM chunks c JOIN chunk_vec v ON v.rowid = c.id WHERE c.embedded = 1`
+  ).iterate() as Iterable<{ file: string; emb: Buffer }>
+
+  for (const { file, emb } of rows) {
+    if (docs.has(file)) continue
+    const vec = new Float32Array(emb.buffer.slice(emb.byteOffset, emb.byteOffset + emb.byteLength))
+    let sum = sums.get(file)
+    if (!sum) {
+      sum = new Float32Array(vec.length)
+      sums.set(file, sum)
+    }
+    for (let d = 0; d < sum.length; d++) sum[d] += vec[d]
+    counts.set(file, (counts.get(file) ?? 0) + 1)
+  }
+  for (const [file, sum] of sums) {
+    const count = counts.get(file) ?? 1
+    let norm = 0
+    for (let d = 0; d < sum.length; d++) {
+      sum[d] /= count
+      norm += sum[d] * sum[d]
+    }
+    norm = Math.sqrt(norm) || 1
+    for (let d = 0; d < sum.length; d++) sum[d] /= norm
+  }
+  return sums
+}
+
 export class VectorStore {
   private dims = 0
   private modelId = ''
@@ -307,9 +344,9 @@ export class VectorStore {
   }
 
   /** Store vectors for freshly-embedded chunks and mark them embedded. */
-  putEmbeddings(rows: { id: number; vector: Float32Array }[]): void {
+  putEmbeddings(rows: { id: number; vector: Float32Array }[]): boolean {
     if (!this.dims) throw new Error('embedding dims not set')
-    if (rows.length > 0) this.gen++
+    let changed = false
     this.db.transaction(() => {
       const insVec = this.db.prepare(`INSERT INTO chunk_vec(rowid, embedding) VALUES (?, ?)`)
       const mark = this.db.prepare(`UPDATE chunks SET embedded = 1 WHERE id = ? AND embedded = 0`)
@@ -318,8 +355,11 @@ export class VectorStore {
         if (r.vector.length !== this.dims || !r.vector.every(Number.isFinite))
           throw new Error('Invalid chunk embedding.')
         insVec.run(BigInt(r.id), f32ToBlob(r.vector))
+        changed = true
       }
     })()
+    if (changed) this.gen++
+    return changed
   }
 
   /** Per-note centroid vectors (mean of a note's chunk embeddings), L2-normalized
@@ -327,40 +367,8 @@ export class VectorStore {
    *  write bumps `gen` (see the field comment). */
   private centroids(): Map<string, Float32Array> {
     if (this.centroidCache && this.centroidCache.gen === this.gen) return this.centroidCache.map
-    const map = new Map<string, Float32Array>()
+    const map = this.dims ? readNoteVectors(this.db, this.documentPaths()) : new Map<string, Float32Array>()
     this.centroidCache = { gen: this.gen, map }
-    if (!this.dims) return map
-    const documents = this.documentPaths()
-    const rows = this.db
-      .prepare(
-        `SELECT c.file AS file, v.embedding AS emb
-         FROM chunks c JOIN chunk_vec v ON v.rowid = c.id WHERE c.embedded = 1`
-      )
-      .all() as { file: string; emb: Buffer }[]
-    const counts = new Map<string, number>()
-    for (const r of rows) {
-      if (documents.has(r.file)) continue
-      const vec = new Float32Array(
-        r.emb.buffer.slice(r.emb.byteOffset, r.emb.byteOffset + this.dims * 4)
-      )
-      let s = map.get(r.file)
-      if (!s) {
-        s = new Float32Array(this.dims)
-        map.set(r.file, s)
-      }
-      for (let i = 0; i < this.dims; i++) s[i] += vec[i]
-      counts.set(r.file, (counts.get(r.file) ?? 0) + 1)
-    }
-    for (const [file, s] of map) {
-      const c = counts.get(file) || 1
-      let norm = 0
-      for (let i = 0; i < this.dims; i++) {
-        s[i] /= c
-        norm += s[i] * s[i]
-      }
-      norm = Math.sqrt(norm) || 1
-      for (let i = 0; i < this.dims; i++) s[i] /= norm
-    }
     return map
   }
 

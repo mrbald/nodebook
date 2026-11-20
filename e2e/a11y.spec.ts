@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
@@ -20,10 +20,13 @@ test.beforeAll(async () => {
     filter: (src) => !src.split(sep).includes('.nodebook')
   })
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-a11y-userdata-'))
-  app = await electron.launch({
-    args: [projectRoot],
+  const binary = process.env.NODEBOOK_SMOKE_BINARY
+  app = await launchElectron({
+    executablePath: binary,
+    args: binary ? [] : [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
+  if (binary) expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(true)
   await app.evaluate(async ({ dialog }, dir) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] })
   }, vaultDir)
@@ -34,7 +37,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('a confirm dialog traps focus, defaults to Cancel, and Escape restores focus', async () => {
@@ -100,6 +103,24 @@ test('the status-bar selector is an accessible menu button', async () => {
   await expect(trigger).toBeFocused()
 })
 
+test('editor menus show their current choices and Tab leaves the selector in either direction', async () => {
+  const bar = page.getByRole('group', { name: 'Editor controls' })
+  const mode = bar.getByRole('button', { name: /^View:/ })
+  const map = bar.getByRole('button', { name: '⊹ Map' })
+  await mode.press('ArrowDown')
+  await expect(page.getByRole('menuitemradio', { checked: true })).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(page.getByRole('menuitemradio', { name: 'Reading' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(map).toBeFocused()
+  const theme = bar.getByRole('button', { name: /^Appearance:/ })
+  await theme.press('Enter')
+  await page.keyboard.press('Shift+Tab')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(map).toBeFocused()
+})
+
 test('list rows are focusable and open with Enter (tree + search)', async () => {
   const row = page.locator('.tree-file', { hasText: 'Graph Model' })
   await row.focus()
@@ -109,7 +130,7 @@ test('list rows are focusable and open with Enter (tree + search)', async () => 
 
   await page.locator('.search-box').fill('claim') // only welcome contains "claim"
   await expect(page.locator('.search-result-title')).toBeVisible() // a real result, not "No matches"
-  const hit = page.locator('.search-results li').first()
+  const hit = page.locator('.search-hit').first()
   await page.locator('.search-box').press('ArrowDown')
   await expect(hit).toBeFocused()
   await page.keyboard.press('Enter')

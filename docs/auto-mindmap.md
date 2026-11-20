@@ -1,120 +1,22 @@
-# Automatic structure — centers, clusters, and the semantic graph
+# How Nodebook finds related notes and themes
 
-> Companion to [mindmap-mode.md](mindmap-mode.md). That doc covers **deriving +
-> curating** the explicit link graph (triples). This one covers making it
-> **legible automatically**: where the centers are, what the clusters are, and
-> what is *related but not linked* — using graph algorithms, the talk-to-docs
-> embeddings, and (optionally, for the last mile only) an LLM.
+A line on a note map can represent a link someone wrote or a suggestion based on similar wording and meaning. Vault themes are groups you can browse. Book imports can save themes as Markdown notes.
 
-## The shape question: tree, or directed graph?
+| What do you want to find? | Where to look | What the result means |
+| --- | --- | --- |
+| Which notes connect this part of the map? | Open a note map and choose **Colour → Links**. | Notes in the same link group share a color. A larger dot means the note ranks higher based on its incoming links and the importance of the notes linking to it (PageRank). |
+| Which notes discuss a similar topic? | Enable local search by meaning. On a local vault map, use **Related**. For topic colors, choose **Colour → Meaning**. | A dashed Related line suggests an unlinked note. It writes nothing to either file. |
+| Which groups can I browse across the vault? | Open **Whole vault map**, then **Themes**. | Browse groups or **Notes without a theme**. Each group's label comes from a representative note. Vault themes are read-only. |
+| How is one imported book organized? | Open the run, choose **Scope → Standalone** and, when available, **View → Themes**. | The overview uses the book's stored theme notes and membership links. Inspect a connection between themes to see the notes and relationships behind it. |
 
-Asking is right, because the data and the idiom disagree:
+## What determines a group?
 
-- A note graph (`[[wikilinks]]` + typed `key:: value` fields) is a **general
-  directed multigraph** — it has **cycles** (A↔B), **hubs**, and is **non-planar**
-  in general. It is *not* a tree, and can't be flattened to one (or to a planar
-  graph) without throwing away the cross-links that *are* the knowledge.
-- A "mind map" is conventionally a **radial tree** (one center, branches).
+**Link colors** use label propagation. Notes take the most common group label among their neighbors until the labels settle or the iteration limit is reached. **Meaning colors** apply that grouping to nearby note vectors. A note vector is the normalized average of the vectors for its passages. The `[talk] relatedMinScore` setting controls the minimum similarity used for Related and meaning colors. Source documents are searchable but excluded from these whole-note comparisons. [Map algorithms](../src/renderer/src/graph/structure.ts) · [Note vectors](../src/main/rag/store.ts)
 
-Resolution: **the model is a graph; we render two projections of it.**
+**Vault themes** use links and any local note vectors already available. Strong links within a group help distinguish it from the rest of the vault. A single chain of weak links may leave notes ungrouped. Confirmed aliases count together. The calculation runs without a chat provider and never creates theme notes. Adding notes can change a group's members or representative title. [Vault theme calculation](../src/main/vaultThemes.ts)
 
-- **Graph view (primary)** — force-directed layout of the *real* graph. Centers
-  and clusters **emerge from the physics** (below). We don't constrain to planar —
-  force layout handles edge crossings fine; visual clutter is managed by
-  *filtering* (relation type, centrality threshold), not by flattening.
-- **Outline view (derived)** — a hierarchical tree **computed** from clustering
-  (clusters → sub-clusters → notes): the digestible "mind map." It is a lossy,
-  regenerated *summary* of the graph, never hand-built — and it is exactly what
-  "Save view → `.map.md`" serializes.
+**Distilled themes** group the run's generated notes by meaning. For a run with at least six notes, the importer can group their vectors using k-means. It asks the configured chat provider for names in a single batch, using member titles and summary excerpts. If naming fails, each unnamed group uses the title of the note closest to its center. The importer writes a theme note and a `part_of:: [[Theme]]` field in its members. A book overview derives its connections from links between those members. [Theme generation](../src/main/distill/themes.ts) · [Book overview](../src/main/distill/bookOverview.ts)
 
-So: **graph-primary, tree-derived.** One index, two lenses.
+## Design options
 
-## Two graphs we already have
-
-1. **Explicit graph** — the `triples` table: `(subject) --relation--> (object)`.
-   Always available, zero new cost.
-2. **Semantic graph** — the talk-to-docs embeddings (sqlite-vec). A per-note vector
-   is the **mean (centroid) of its chunk vectors**; cosine-kNN over those gives
-   **"related but not linked"** edges — latent structure the explicit graph misses.
-   Available when talk-to-docs is enabled; **reuses the existing vectors** (no new
-   embedding cost).
-
-The automagic layer fuses them: explicit edges = what you *wrote*; semantic edges
-= what you *meant*.
-
-Two notes on grain and timing (see [state-and-scopes.md](state-and-scopes.md)): a
-per-note centroid is fine for *clustering whole notes* here, but is **not** the
-substrate for entity *resolution* (that needs concept-grain vectors). And the
-**explicit** graph + centrality are **live/deterministic** (recompute on save, no
-churn); only the **semantic** clusters/merges are *staged* and user-confirmed — the
-stability concerns apply to that layer alone.
-
-## Naming what you described (the toolkit)
-
-| Your words | Proper term | What it is | Cost |
-|---|---|---|---|
-| "centers of gravity" | **Centrality** | degree (most-linked) → **PageRank** / eigenvector (important via important neighbors). Drives node **size**. | pure TS (power iteration) |
-| "clusters" (links) | **Community detection** | **Louvain/Leiden** (modularity) or label-propagation on the link graph. Drives node **color**. | pure TS |
-| "clusters" (meaning) | **Embedding clustering** | **k-means** / **HDBSCAN** (auto-k, density) / **spectral** (eigen-decomp of the similarity Laplacian) over note centroids. | linear algebra on vectors |
-| "attractors" | force **basins** / cluster **centroids** | a force-directed sim has gravity wells; the centroid vector is a cluster's center of mass. | d3-force |
-| "embedding-space linear algebra" | **PCA / UMAP projection** | SVD/UMAP → 2D *semantic* layout (near = similar), independent of links. | PCA pure; UMAP a lib |
-
-All of the math is **deterministic** — no LLM. PageRank, Louvain, k-means, and PCA
-are short, pure, golden-testable functions, the same ethos as the harvest parser,
-the chunker, and the telemetry histogram.
-
-## Where the LLM helps (the "mechanical last mile" — your read is exactly right)
-
-The algorithms produce *structure*; the LLM produces *labels and narrative*. It is
-**optional** (everything works unlabeled — color by community, size by centrality)
-and goes through the existing `provider.ts` abstraction (search-only / local /
-cloud):
-
-1. **Name a cluster** — its notes' titles + one representative chunk each → a 2–4
-   word theme. Batched, cheap. ✅ **Shipped for distill runs** as *themes*
-   (`src/main/distill/themes.ts`): a run's notes are grouped and **all** groups
-   are named in one call, with the group's most central note's title as the
-   fallback, so a failed naming call costs names and not notes. Each note gets a
-   `part_of:: [[Theme]]` edge, so the theme is a real note in the map, not a
-   label painted on it. Naming clusters of the *vault* map is the same machinery
-   and is still open.
-2. **Suggest missing links** — the high-value one: pairs that are **semantically
-   near (embedding-kNN) but unlinked** → "connect these?", with the LLM proposing
-   the relation label. Surfaces latent structure worth writing down. The kNN is
-   math; the LLM only *phrases* the suggestion.
-3. **Derive the outline** — turn flat clusters + centroids into a nested hierarchy.
-4. **Summarize a region** for the inspector.
-
-The split you intuited holds: **clustering = linear algebra; the LLM = the names.**
-
-## Phasing (additive to mindmap-mode's slices)
-
-- **A. Graph render** (= mindmap-mode MVP) — `index:graph` slice + force/radial
-  canvas. *Prerequisite.*
-- **B. Centrality** — degree → PageRank; size nodes by it. Pure TS, golden-tested.
-  No deps, no embeddings.
-- **C. Communities** — Louvain / label-propagation on links; color by cluster.
-  Pure TS. *Now there are "centers + clusters" with zero AI.*
-- **D. Semantic overlay** (talk-to-docs on) — per-note centroid vectors → kNN
-  "similar" edges + embedding clustering + an optional PCA/UMAP 2D "semantic
-  layout" toggle.
-- ◐ **E. LLM last-mile** (opt-in) — cluster names ✅ (shipped as distill *themes*;
-  vault-map cluster names still open), missing-link suggestions, outline.
-- **F. Derived outline → `.map.md`** — tree projection + save.
-
-**B + C deliver the automagic feel with no new dependencies and no AI**; D + E are
-the semantic/LLM enrichment the talk-to-docs investment unlocks.
-
-## Decisions to settle when we build
-
-1. **Primary view** — graph-primary + tree-derived (recommended), or tree-first?
-2. **First clustering substrate** — link communities (always available, no deps)
-   first with embeddings as an enhancement (recommended), or embedding-first?
-3. **Render / algorithm tech** — pure-TS algorithms (matches the codebase ethos,
-   golden-testable) + **d3-force** for layout on a canvas island; vs an all-in-one
-   (**graphology + sigma.js** ships Louvain / PageRank / ForceAtlas2 + WebGL, but
-   is a heavier dep). Recommended: pure-TS algos + d3-force/canvas, escalate to
-   WebGL only if vaults get large.
-
-See [ROADMAP.md](../ROADMAP.md) and [mindmap-mode.md](mindmap-mode.md) for the
-explicit-graph foundation this builds on.
+The note graph can contain cycles and several relations between the same two notes. A generated hierarchy would summarize selected paths. Any future saved hierarchy needs its own representation to preserve hand-authored outlines. Other proposals include model-suggested names for vault groups or missing links, summaries for selected regions, and a 2D layout based on vector similarity. Current map controls and storage rules are described in [Explore the knowledge map](mindmap-mode.md) and [State ownership](state-and-scopes.md).

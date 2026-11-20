@@ -1,4 +1,5 @@
 import type { PdfExtraction } from './pdfExtraction'
+import type { FigureCoverage, FigureRef } from './figures'
 /** Default local embedding model (a transformers.js/HF Hub repo id):
  *  multilingual-e5-base — ~100 languages in one vector space, so notes retrieve
  *  by meaning whatever language they (or the query) are written in. Asymmetric:
@@ -13,6 +14,9 @@ export const DEFAULT_EMBED_MODEL = 'Xenova/multilingual-e5-base'
  *  nothing worth measuring. Shared because the field that types it and the
  *  main-side check that enforces it must agree (`main/distill/extract.ts`). */
 export const DISTILL_FOCUS_MAX = 300
+
+/** Above this many content notes a themed book opens on its overview by default. */
+export const DEFAULT_THEME_OVERVIEW_THRESHOLD = 200
 
 /** A markdown file discovered inside the open vault. */
 export interface MarkdownFile {
@@ -95,13 +99,72 @@ export interface GraphData {
   total?: number
   /** Source-document "hub" nodes dropped because `showSources` was off (a note
    *  distilled from a book all carry `source:: [[book]]`, which otherwise turns
-   *  the map into a star). 0 when shown, or when the slice has none — so the UI
-   *  can show its toggle only when it would actually do something. */
+   *  the map into a star). 0 when shown, or when the graph has none. */
   hiddenSources: number
+  /** This scope has sources that can be shown or hidden. Stable across the toggle. */
+  hasSources?: boolean
   /** Distinct link targets in this slice that matched more than one note (same
    *  name in different folders). The map picked one — the count is how it admits
    *  it guessed. */
   ambiguousTargets: number
+}
+
+/** A canonical note in the whole vault's derived Themes view. */
+export interface VaultThemeNote {
+  path: string
+  title: string
+  relativePath: string
+}
+
+export interface VaultThemesData {
+  themes: { id: string; label: string; notes: VaultThemeNote[]; examples: string[] }[]
+  unmatched: VaultThemeNote[]
+  noteCount: number
+  embeddedCount: number
+}
+
+/** A real staged note, identified by its path within the selected run. */
+export interface BookNoteRef {
+  id: string
+  title: string
+}
+
+export interface BookThemeSummary {
+  id: string
+  label: string
+  count: number
+  examples: BookNoteRef[]
+}
+
+export interface BookThemeDetails {
+  subthemes: BookThemeSummary[]
+  /** Members without sufficient evidence to place in a subtheme. */
+  remainder: BookThemeSummary | null
+}
+
+export interface BookLinkEvidence {
+  pairs: {
+    /** The pair is ordered by the requested source and target themes. */
+    source: BookNoteRef
+    target: BookNoteRef
+    /** Each relationship has its own direction. Aliases retain their actual endpoints. */
+    relationships: (GraphEdge & { originalSource?: BookNoteRef; originalTarget?: BookNoteRef })[]
+  }[]
+}
+
+export interface StagedNoteRead {
+  content: string
+  themeId: string | null
+  themeLabel: string | null
+  reading?: import('./readingCopy').StagedReading
+}
+
+/** A staged book grouped by theme, with one link per pair of connected themes. */
+export interface BookOverview {
+  themes: BookThemeSummary[]
+  links: { source: string; target: string; count: number; strong: boolean }[]
+  noteCount: number
+  unassignedCount: number
 }
 
 /** A full-text search result. */
@@ -282,6 +345,8 @@ export interface Settings {
     /** Maximum model calls one run may make. A document needing more is read
      *  in evenly spaced steps, and the run says what share it read. */
     maxCalls: number
+    /** Opening preference for a themed book; both views remain available. */
+    themeOverviewThreshold: number
   }
   /** Main-process telemetry (event-loop lag + CPU/RAM). Off by default; when on,
    *  a tiny status-bar widget appears. */
@@ -349,10 +414,26 @@ export interface DistillDocument {
   id: string
   /** The document's file name, for display. */
   name: string
+  /** Choices for a standalone text document, even if its first preview fails. */
+  encodingOptions?: DistillEncodingOption[]
+}
+
+export interface DistillEncodingOption {
+  name: string
+  label: string
+}
+
+export interface DistillTextEncoding extends DistillEncodingOption {
+  uncertain: boolean
+  /** A short excerpt of the converted text the estimate uses. */
+  preview: string
+  options: DistillEncodingOption[]
 }
 
 export interface DistillRunResult {
   pdf?: PdfExtraction
+  figures?: FigureRef[]
+  figureCoverage?: FigureCoverage
   runId: string
   stats: DistillStats
 }
@@ -380,6 +461,11 @@ export interface DistillRunInfo {
 /** What a run will cost, worked out from the document before it starts. */
 export interface DistillEstimate {
   pdf?: PdfExtraction
+  figures?: FigureRef[]
+  figureCoverage?: FigureCoverage
+  encoding?: DistillTextEncoding
+  /** Opaque ID of the exact converted text prepared by main. */
+  preparedId?: string
   /** Passages the document splits into. */
   chunks: number
   /** Reading steps the run will take — one model call each. */
@@ -394,7 +480,7 @@ export interface DistillEstimate {
 }
 
 export interface DistillProgress {
-  phase: 'chunking' | 'extracting' | 'finalizing' | 'themes' | 'done'
+  phase: 'starting' | 'chunking' | 'extracting' | 'finalizing' | 'themes' | 'done'
   done: number
   total: number
 }

@@ -55,6 +55,15 @@ evidence (PRIORS §5, FINDINGS F14); the pasted line is. Gates:
     npm run test:e2e        # build + Playwright; needs 300000 ms or more
     npm run eval:distill    # only when distill quality is in question
 
+Run macOS Electron tests in a logged-in GUI session that can access
+LaunchServices and WindowServer. In a restricted agent shell, request
+GUI-capable execution before the first launch. A Mach lookup denial can
+abort Electron during AppKit startup and open a system crash dialog.
+For Electron launch or process failures, check `electron-*.log` in the
+failing test's Playwright output directory. After Crashpad starts, macOS
+test main-process crashes write local dumps to the `electron-crash-*`
+directory named in the log.
+
 Operationally: subagents run commands in the foreground with explicit
 timeouts (the 120-second default auto-backgrounds the call and parks the
 agent; the ceiling is 600000 ms — anything longer is split, or run in

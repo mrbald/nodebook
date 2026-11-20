@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, expectElectronExit } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -31,7 +31,7 @@ async function launch(autosaveOnSwitch = true, nested = false): Promise<void> {
   writeFileSync(join(otherVault, 'Second.md'), '# Second\n')
   writeFileSync(join(profile, 'settings.toml'), `[editor]\nautosaveOnSwitch = ${autosaveOnSwitch}\n`)
 
-  app = await electron.launch({
+  app = await launchElectron({
     args: [resolve(__dirname, '..')],
     env: { ...process.env, NODEBOOK_E2E: '1', NODEBOOK_USER_DATA: profile }
   })
@@ -47,6 +47,7 @@ async function launch(autosaveOnSwitch = true, nested = false): Promise<void> {
 test.afterEach(async () => {
   // A failed assertion can leave a conflict dialog open in the disposable app.
   if (app && !closeObserved) {
+    expectElectronExit(app)
     const closed = app.waitForEvent('close')
     await app.evaluate(({ app }) => setImmediate(() => app.exit())).catch(() => {})
     await closed
@@ -153,6 +154,7 @@ test('native window close and app quit share the checked save and permit cancell
 
   await app.evaluate(({ app }) => app.quit())
   await expectConflict()
+  expectElectronExit(app)
   const closed = app.waitForEvent('close')
   await options('Overwrite').click()
   await closed

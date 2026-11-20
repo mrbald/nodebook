@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
@@ -20,7 +20,7 @@ test.beforeAll(async () => {
     filter: (src) => !src.split(sep).includes('.nodebook')
   })
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-rel-userdata-'))
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -34,7 +34,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('naming a link writes a field to the note and the edge becomes typed', async () => {

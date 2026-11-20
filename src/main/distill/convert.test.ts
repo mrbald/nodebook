@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -85,8 +85,19 @@ afterEach(() => {
 })
 
 describe('pdfToMarkdown', () => {
-  // This first conversion also loads pdf.js; the cold import exceeds five seconds on hosted Intel Macs.
-  it('extracts text with a per-page heading (page = provenance)', { timeout: 30_000 }, async () => {
+  // Cold PDF.js startup includes loading its Node worker and can take tens of
+  // seconds on hosted runners. Give that setup its own budget.
+  beforeAll(async () => {
+    const { PDFWorker } = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const worker = new PDFWorker()
+    try {
+      await worker.promise
+    } finally {
+      worker.destroy()
+    }
+  }, 90_000)
+
+  it('extracts text with a per-page heading (page = provenance)', async () => {
     const md = await pdfToMarkdown(enc(PDF))
     expect(md).toContain('## Page 1')
     expect(md).toContain('Hello Faction world')
@@ -344,6 +355,26 @@ describe('epubToMarkdown', () => {
     expect(md).not.toContain('## Section 1')
   })
 
+  it('decodes EPUB entries independently and preserves their chapter titles', async () => {
+    const epub = zipSync({
+      'META-INF/container.xml': strToU8('<container><rootfile full-path="content.opf"/></container>'),
+      'content.opf': strToU8(
+        '<package><manifest><item id="chapter" href="chapter.xhtml"/></manifest>' +
+        '<spine><itemref idref="chapter"/></spine></package>'
+      ),
+      'toc.ncx': Buffer.from(
+        '<?xml version="1.0" encoding="windows-1251"?>' +
+        '<navPoint><navLabel><text>\xC3\xEB\xE0\xE2\xE0</text></navLabel><content src="chapter.xhtml"/></navPoint>',
+        'latin1'
+      ),
+      'chapter.xhtml': Buffer.concat([
+        Buffer.from([0xfe, 0xff]),
+        Buffer.from('<html><body><p>Книга на русском.</p></body></html>', 'utf16le').swap16()
+      ])
+    })
+    expect(await epubToMarkdown(epub)).toBe('## Глава\n\nКнига на русском.')
+  })
+
   it('falls back to Section N for a chapter the contents does not name', async () => {
     const md = await epubToMarkdown(makeEpub({ withNav: true, namedChapters: 1 }))
     expect(md).toContain('## Of Faction')
@@ -353,6 +384,32 @@ describe('epubToMarkdown', () => {
   it('throws on a non-EPUB zip', async () => {
     const notEpub = zipSync({ 'hello.txt': strToU8('hi') })
     await expect(epubToMarkdown(notEpub)).rejects.toThrow(/EPUB/i)
+  })
+})
+
+describe('standalone text encodings', () => {
+  it('reads UTF-16 Markdown as text and keeps the original bytes', async () => {
+    tmp = mkdtempSync(join(tmpdir(), 'encoded-markdown-'))
+    const file = join(tmp, 'notes.md')
+    const text = '# Глава\r\n\r\nКнига на русском.\r\n'
+    const bytes = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')])
+    writeFileSync(file, bytes)
+    const decoded = await convertDocumentWithCoverage(file)
+    expect(decoded.text).toBe(text)
+    expect(decoded.encoding).toEqual({ name: 'utf-16le', uncertain: false })
+    expect(readFileSync(file)).toEqual(bytes)
+  })
+
+  it('honors an XHTML XML declaration before converting markup', async () => {
+    tmp = mkdtempSync(join(tmpdir(), 'encoded-xhtml-'))
+    const file = join(tmp, 'chapter.xhtml')
+    writeFileSync(file, Buffer.from(
+      '<?xml version="1.0" encoding="windows-1251"?><html><body><h1>\xCA\xED\xE8\xE3\xE0</h1></body></html>',
+      'latin1'
+    ))
+    const decoded = await convertDocumentWithCoverage(file)
+    expect(decoded.text).toBe('# Книга')
+    expect(decoded.encoding).toEqual({ name: 'windows-1251', uncertain: false })
   })
 })
 

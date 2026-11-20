@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
@@ -14,7 +14,7 @@ let page: Page
 test.beforeAll(async () => {
   const vaultDir = mkdtempSync(join(tmpdir(), 'nodebook-empty-')) // a vault with no .md
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-empty-userdata-'))
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -27,7 +27,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('an empty vault shows a friendly, instructive empty state', async () => {

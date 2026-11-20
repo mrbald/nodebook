@@ -1,8 +1,14 @@
+import type { FigureSearchHit } from '../shared/figureSearch'
 import { contextBridge, ipcRenderer } from 'electron'
+import type { FigureAnalysis, FigureAnalysisStatus, FigureContext, FigureRef } from '../shared/figures'
+import type { ReadingCopy, ReadingCopyPreview } from '../shared/readingCopy'
 import type {
   AskRequest,
   AskResult,
   Backlink,
+  BookLinkEvidence,
+  BookOverview,
+  BookThemeDetails,
   DistillDocument,
   DistillEstimate,
   DistillMergePlan,
@@ -19,16 +25,22 @@ import type {
   SaveFileResult,
   SearchHit,
   Settings,
+  StagedNoteRead,
   TalkChunk,
   TalkNeighbor,
   TalkStatus,
   TelemetrySnapshot,
-  VaultListing
+  VaultListing,
+  VaultThemesData
 } from '../shared/types'
 
 const askRequestIds = new Set<string>()
 
 const api = {
+  noteFigures: (path: string, runId?: string): Promise<FigureRef[]> =>
+    ipcRenderer.invoke('distill:figures', path, runId),
+  figureBytes: (path: string, id: string, runId?: string): Promise<{ bytes: Uint8Array; mime: string } | null> =>
+    ipcRenderer.invoke('distill:figureBytes', path, id, runId),
   pickVault: (): Promise<string | null> => ipcRenderer.invoke('vault:pick'),
   createVault: (): Promise<string | null> => ipcRenderer.invoke('vault:create'),
   openVault: (root: string): Promise<VaultListing> => ipcRenderer.invoke('vault:open', root),
@@ -60,12 +72,23 @@ const api = {
     ipcRenderer.invoke('index:outbound', sourceFile),
   /** The notes a confirmed `same_as::` made one thing with this one. */
   sameAs: (path: string): Promise<SameAsTwin[]> => ipcRenderer.invoke('index:sameAs', path),
+  searchFigures: (query: string): Promise<FigureSearchHit[]> => ipcRenderer.invoke('index:searchFigures', query),
   search: (query: string): Promise<SearchHit[]> => ipcRenderer.invoke('index:search', query),
   noteNames: (): Promise<string[]> => ipcRenderer.invoke('index:noteNames'),
+  notePreview: (path: string, runId?: string): Promise<string> =>
+    ipcRenderer.invoke('index:notePreview', path, runId),
   graph: (
     focusPath: string | null,
     opts?: { depth?: number; cap?: number; showSources?: boolean }
   ): Promise<GraphData> => ipcRenderer.invoke('index:graph', focusPath, opts),
+  vaultThemes: (root: string, id: string): Promise<VaultThemesData | null> =>
+    ipcRenderer.invoke('index:vaultThemes', root, id),
+  cancelVaultThemes: (id: string): void => ipcRenderer.send('index:vaultThemes:cancel', id),
+  onVaultThemesChanged: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('index:vaultThemes:changed', listener)
+    return () => ipcRenderer.removeListener('index:vaultThemes:changed', listener)
+  },
   // Name an untyped link: append `relation:: [[target]]` to the source note + re-index.
   typeRelation: (sourcePath: string, relation: string, target: string): Promise<boolean> =>
     ipcRenderer.invoke('index:typeRelation', sourcePath, relation, target),
@@ -148,17 +171,18 @@ const api = {
   // Distill a document → a staged, cited run of notes + its own map.
   /** Pick a document; main returns an opaque id (never the path) + a name to show. */
   distillPick: (): Promise<DistillDocument | null> => ipcRenderer.invoke('distill:pick'),
+  distillDiscardPick: (docId: string): Promise<void> => ipcRenderer.invoke('distill:discardPick', docId),
   /** e2e only (main refuses unless NODEBOOK_E2E): register a path, get its id. */
   distillRegisterPath: (absPath: string): Promise<string> =>
     ipcRenderer.invoke('distill:registerPath', absPath),
   /** Distil a picked document. `focus` is what this reading is for, in the
    *  user's words — omitted or empty means the reading has no focus. */
-  distillRun: (docId: string, focus?: string): Promise<DistillRunResult> =>
-    ipcRenderer.invoke('distill:run', docId, focus),
-  /** What a run would cost, before starting it (no model calls). The focus is
-   *  passed too: it rides in every prompt, so it costs window room. */
-  distillEstimate: (docId: string, focus?: string): Promise<DistillEstimate> =>
-    ipcRenderer.invoke('distill:estimate', docId, focus),
+  distillRun: (docId: string, focus?: string, encoding?: string, preparedId?: string): Promise<DistillRunResult> =>
+    ipcRenderer.invoke('distill:run', docId, focus, encoding, preparedId),
+  /** Price a run without model calls. Pass the previous prepared ID to price
+   *  the same decoded text for a different focus. */
+  distillEstimate: (docId: string, focus?: string, encoding?: string, fromPreparedId?: string): Promise<DistillEstimate> =>
+    ipcRenderer.invoke('distill:estimate', docId, focus, encoding, fromPreparedId),
   /** Continue a run that was cancelled or interrupted, from its checkpoint. */
   distillResume: (runId: string): Promise<DistillRunResult> =>
     ipcRenderer.invoke('distill:resume', runId),
@@ -168,6 +192,14 @@ const api = {
     focus?: string | null,
     opts?: { depth?: number; cap?: number; showSources?: boolean }
   ): Promise<GraphData> => ipcRenderer.invoke('distill:graph', runId, focus ?? null, opts),
+  distillBookOverview: (runId: string): Promise<BookOverview | null> =>
+    ipcRenderer.invoke('distill:bookOverview', runId),
+  distillBookTheme: (runId: string, themeId: string | null): Promise<BookThemeDetails | null> =>
+    ipcRenderer.invoke('distill:bookTheme', runId, themeId),
+  distillBookLink: (runId: string, source: string, target: string): Promise<BookLinkEvidence | null> =>
+    ipcRenderer.invoke('distill:bookLink', runId, source, target),
+  distillThemeGraph: (runId: string, themeId: string | null, cap?: number): Promise<GraphData> =>
+    ipcRenderer.invoke('distill:themeGraph', runId, themeId, cap),
   /** The vault + this run unioned live (overlay view; no writes). */
   distillOverlayGraph: (
     runId: string,
@@ -178,9 +210,17 @@ const api = {
   distillListRuns: (): Promise<DistillRunInfo[]> => ipcRenderer.invoke('distill:listRuns'),
   distillRemove: (runId: string): Promise<void> => ipcRenderer.invoke('distill:remove', runId),
   /** Merge a run into the vault (reversible). */
-  /** One staged note's text, for the read-only pane (main path-checks the name). */
-  distillReadNote: (runId: string, name: string): Promise<{ content: string } | null> =>
-    ipcRenderer.invoke('distill:readNote', runId, name),
+  /** One staged note by name or exact graph path, with its book theme if present. */
+  distillReadNote: (runId: string, note: string): Promise<StagedNoteRead | null> =>
+    ipcRenderer.invoke('distill:readNote', runId, note),
+  distillLocateReadingCopy: (runId: string, note: string): Promise<ReadingCopyPreview | null> =>
+    ipcRenderer.invoke('distill:locateReadingCopy', runId, note),
+  distillChooseReadingCopy: (id: string, encoding?: string): Promise<ReadingCopyPreview> =>
+    ipcRenderer.invoke('distill:chooseReadingCopy', id, encoding),
+  distillSaveReadingCopy: (id: string): Promise<ReadingCopy> =>
+    ipcRenderer.invoke('distill:saveReadingCopy', id),
+  distillDiscardReadingCopy: (id: string): Promise<void> =>
+    ipcRenderer.invoke('distill:discardReadingCopy', id),
   /** What merging this run would do, before anything is written. */
   distillMergePlan: (runId: string): Promise<DistillMergePlan> =>
     ipcRenderer.invoke('distill:mergePlan', runId),
@@ -197,6 +237,10 @@ const api = {
    *  Resolves to an error message, or null when it opened. */
   distillOpenOriginal: (hash: string): Promise<string | null> =>
     ipcRenderer.invoke('distill:openOriginal', hash),
+  figureAnalysisStatus: (path: string, id: string, runId?: string, context?: FigureContext): Promise<FigureAnalysisStatus> =>
+    ipcRenderer.invoke('figure:analysisStatus', path, id, runId, context),
+  analyzeFigure: (path: string, id: string, runId?: string, context?: FigureContext): Promise<FigureAnalysis> =>
+    ipcRenderer.invoke('figure:analyze', path, id, runId, context),
   /** Subscribe to a distill run's progress. */
   onDistillProgress: (cb: (runId: string, p: DistillProgress) => void): (() => void) => {
     const listener = (_e: unknown, runId: string, p: DistillProgress): void => cb(runId, p)

@@ -5,11 +5,11 @@ directories:
 # Ad-hoc signs unsigned macOS builds so arm64 isn't rejected as "damaged".
 afterPack: build/afterPack.cjs
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintrc,.prettierrc,tsconfig.*.json,tsconfig.json}'
-  - '!{.github,e2e,playwright.config.ts,vitest.config.*}'
+  # electron-builder also includes package.json and production dependencies.
+  - 'out/main/**'
+  - 'out/preload/**'
+  - 'out/renderer/**'
+  - 'LICENSE'
 # Native addons (better-sqlite3) must live outside the asar so their .node
 # binaries can be dlopen'd at runtime. sqlite-vec ships a loadable extension
 # (.dylib/.so/.dll, not .node) that's likewise dlopen'd, so unpack it too.

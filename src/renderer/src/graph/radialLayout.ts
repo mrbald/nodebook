@@ -67,7 +67,13 @@ export function radialLayout(
     else rings.set(d, [id])
   }
   const maxRing = Math.max(...rings.keys())
-  const ringGap = (Math.min(W, H) * 0.42) / Math.max(1, maxRing)
+  // A wide first generation needs enough circumference for its notes. Keep
+  // at least three node spacings between generations, then fit all rings together.
+  const radii = [0]
+  for (let d = 1; d <= maxRing; d++) {
+    radii.push(Math.max(radii[d - 1] + 3, rings.get(d)!.length / (2 * Math.PI)))
+  }
+  const scale = Math.min(W, H) * 0.42 / radii[maxRing]
 
   for (const [d, ringIds] of rings) {
     if (d === 0) {
@@ -75,7 +81,7 @@ export function radialLayout(
       continue
     }
     const sorted = [...ringIds].sort()
-    const r = d * ringGap
+    const r = radii[d] * scale
     sorted.forEach((id, i) => {
       const a = (2 * Math.PI * i) / sorted.length - Math.PI / 2 // start at the top
       pos.set(id, { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r })

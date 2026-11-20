@@ -1,3 +1,5 @@
+import { parseFigurePath } from '@shared/figures'
+import { figureUrl } from '@shared/figureUrl'
 import MarkdownIt from 'markdown-it'
 // markdown-it 15 exports the instance as a TYPE named like the default export
 // (a callable), so the type is imported under its own name.
@@ -48,8 +50,50 @@ function wikilink(md: MarkdownItInstance): void {
 const md = new MarkdownIt({ html: false, linkify: true, breaks: false })
 md.use(wikilink)
 
-export function renderMarkdown(content: string): string {
-  return md.render(content)
+// A linked picture opens the local figure viewer. Suppress the enclosing
+// hyperlink as well as its keyboard target when rendering that picture alone.
+md.core.ruler.after('inline', 'managed-figure-links', (state) => {
+  if (!state.env?.figureScope) return
+  for (const block of state.tokens) {
+    const children = block.children ?? []
+    for (let i = 1; i + 1 < children.length; i++) {
+      const image = children[i]
+      if (image.type !== 'image' || children[i - 1].type !== 'link_open' || children[i + 1].type !== 'link_close') continue
+      if (parseFigurePath(String(image.attrGet('src') ?? ''))) {
+        children[i - 1].hidden = true
+        children[i + 1].hidden = true
+      }
+    }
+  }
+})
+
+const renderImage = md.renderer.rules.image!
+md.renderer.rules.image = (tokens, index, options, env, self) => {
+  const token = tokens[index]
+  const scope = env?.figureScope as { path: string; runId?: string; print?: boolean } | undefined
+  const src = String(token.attrGet('src') ?? '')
+  // Author Markdown uses relative links. Only the current reader supplies
+  // the scoped application URL used to display them.
+  if (/^nodebook-figure:/i.test(src)) return md.utils.escapeHtml(token.content)
+  const figure = parseFigurePath(src)
+  if (scope && figure) {
+    token.attrSet('src', figureUrl(scope.path, figure.id, scope.runId))
+    if (!scope.print) {
+      const counts = env?.figureCounts as Map<string, number>
+      const occurrence = counts.get(figure.id) ?? 0
+      counts.set(figure.id, occurrence + 1)
+      token.attrSet('data-figure-id', figure.id)
+      token.attrSet('data-occurrence', String(occurrence))
+      token.attrSet('role', 'button')
+      token.attrSet('tabindex', '0')
+      token.attrSet('loading', 'lazy')
+    }
+  }
+  return renderImage(tokens, index, options, env, self)
+}
+
+export function renderMarkdown(content: string, figureScope?: { path: string; runId?: string; print?: boolean }): string {
+  return md.render(content, { figureScope, figureCounts: new Map<string, number>() })
 }
 
 export function renderAskMarkdown(content: string, citations: Citation[]): {

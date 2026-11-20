@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -55,7 +55,7 @@ test.beforeAll(async () => {
   bookPath = join(userDataDir, 'on-government.md')
   writeFileSync(bookPath, BOOK)
 
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -72,7 +72,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 /** The distill flow asks what to focus on before it spends anything. These

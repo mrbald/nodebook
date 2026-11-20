@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, utimesSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, utimesSync, symlinkSync, renameSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -13,8 +13,12 @@ import {
   originalPathOf,
   putSource,
   cachedSource,
-  convertSource
+  prepareSource,
+  publishSource,
+  bindPickedSource,
+  readPickedSource
 } from './sources'
+import { convertDocumentWithCoverage } from './convert'
 
 let root = ''
 afterEach(() => {
@@ -28,12 +32,16 @@ function tmpVault(): string {
 }
 
 /** A document file in the vault's parent, as if the user had picked it. */
-function document(vault: string, name: string, bytes = 'the original bytes'): string {
+function document(vault: string, name: string, bytes: string | Uint8Array = 'the original bytes'): string {
   const dir = join(vault, 'originals')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, name)
   writeFileSync(path, bytes)
   return path
+}
+
+async function approveSource(...args: Parameters<typeof prepareSource>): ReturnType<typeof prepareSource> {
+  return publishSource(args[0], await prepareSource(...args))
 }
 
 describe('sha1 / assertSourceHash', () => {
@@ -117,18 +125,18 @@ describe('cachedSource', () => {
   })
 })
 
-describe('convertSource', () => {
+describe('prepare and publish source', () => {
   it('converts once and reuses the result for an unchanged file', async () => {
     const v = tmpVault()
-    const original = document(v, 'Book.md')
+    const original = document(v, 'Book.docx')
     let calls = 0
     const convert = async () => {
       calls++
       return { text: 'converted text' }
     }
 
-    const first = await convertSource(v, original, convert)
-    const second = await convertSource(v, original, convert)
+    const first = await approveSource(v, original, convert)
+    const second = await approveSource(v, original, convert)
     expect(calls).toBe(1)
     expect(first.cached).toBe(false)
     expect(second.cached).toBe(true)
@@ -141,20 +149,80 @@ describe('convertSource', () => {
     putSource(v, original, 'old text')
     const pdf = { pages: 3, missing: [2] }
     const convert = async () => ({ text: 'new text', pdf })
-    expect((await convertSource(v, original, convert)).cached).toBe(false)
-    const again = await convertSource(v, original, convert)
+    expect((await approveSource(v, original, convert)).cached).toBe(false)
+    const again = await approveSource(v, original, convert)
     expect(again.cached).toBe(true)
     expect(again.record.pdf).toEqual(pdf)
   })
 
+  it('refreshes a legacy text conversion and keeps historical citation text for both encodings', async () => {
+    const v = tmpVault()
+    const bytes = Buffer.from('<meta charset="windows-1251"><body><h1>\xCA\xED\xE8\xE3\xE0</h1></body>', 'latin1')
+    const original = document(v, 'Book.html', bytes)
+    const { hash: oldHash } = putSource(v, original, '# �����')
+
+    const detected = await approveSource(v, original, convertDocumentWithCoverage)
+    expect(detected.cached).toBe(false)
+    expect(detected.text).toBe('# Книга')
+    expect(detected.record.encoding).toEqual({ name: 'windows-1251', uncertain: false })
+
+    const override = await approveSource(v, original, convertDocumentWithCoverage, { encoding: 'windows-1252' })
+    expect(override.cached).toBe(false)
+    expect(override.text).toBe('# Êíèãà')
+    expect(override.hash).not.toBe(detected.hash)
+    expect(override.record.encoding?.name).toBe('windows-1252')
+
+    const autoAgain = await approveSource(v, original, convertDocumentWithCoverage)
+    expect(autoAgain.cached).toBe(true)
+    expect(autoAgain.hash).toBe(detected.hash)
+    expect(readFileSync(original)).toEqual(bytes)
+    expect(readSourceText(v, oldHash)).toBe('# �����')
+    expect(readSourceText(v, detected.hash)).toBe('# Книга')
+    expect(readSourceText(v, override.hash)).toBe('# Êíèãà')
+  })
+
+  it('keeps all preview choices out of the store and leaves matching historical provenance alone', async () => {
+    const v = tmpVault()
+    const previous = document(v, 'Previous.html')
+    const old = putSource(v, previous, '# Книга')
+    const index = join(v, '.distill', 'sources.json')
+    const storedIndex = readFileSync(index, 'utf8')
+    const bytes = Buffer.from('<meta charset="windows-1251"><body><h1>\xCA\xED\xE8\xE3\xE0</h1></body>', 'latin1')
+    const original = document(v, 'Candidate.html', bytes)
+
+    const automatic = await prepareSource(v, original, convertDocumentWithCoverage)
+    const override = await prepareSource(v, original, convertDocumentWithCoverage, { encoding: 'windows-1252' })
+    expect(automatic.hash).toBe(old.hash)
+    expect(automatic.record.originalPath).toBe(original)
+    expect(readFileSync(index, 'utf8')).toBe(storedIndex)
+    expect(readSourceText(v, override.hash)).toBeNull()
+    expect(originalPathOf(v, old.hash)).toBe(previous)
+
+    publishSource(v, override)
+    expect(readSourceText(v, override.hash)).toBe('# Êíèãà')
+    expect(originalPathOf(v, override.hash)).toBe(original)
+    expect(originalPathOf(v, old.hash)).toBe(previous)
+  })
+
+  it.each([
+    ['empty', ''],
+    ['BOM-only', Buffer.from([0xef, 0xbb, 0xbf])],
+    ['whitespace-only', ' \t\r\n']
+  ])('rejects a %s document before making any vault files', async (_label, bytes) => {
+    const v = tmpVault()
+    const original = document(v, 'Blank.md', bytes)
+    await expect(prepareSource(v, original, convertDocumentWithCoverage)).rejects.toThrow('no readable text')
+    expect(existsSync(join(v, '.distill'))).toBe(false)
+  })
+
   it('recovers from an edited or corrupt cached document when picked again', async () => {
     const v = tmpVault()
-    const original = document(v, 'Book.md')
+    const original = document(v, 'Book.docx')
     const convert = async () => ({ text: 'original text' })
-    const stored = await convertSource(v, original, convert)
+    const stored = await approveSource(v, original, convert)
     writeFileSync(sourceTextPath(v, stored.hash), 'incorrect text')
     expect(cachedSource(v, original)).toBeNull()
-    expect((await convertSource(v, original, convert)).cached).toBe(false)
+    expect((await approveSource(v, original, convert)).cached).toBe(false)
     expect(cachedSource(v, original)?.text).toBe('original text')
   })
 
@@ -165,13 +233,13 @@ describe('convertSource', () => {
       writeFileSync(original, 'replacement document with different pages')
       return { text: 'previous document', pdf: { pages: 1, missing: [] } }
     }
-    await expect(convertSource(v, original, convert)).rejects.toThrow('changed during conversion')
+    await expect(prepareSource(v, original, convert)).rejects.toThrow('changed during conversion')
     expect(cachedSource(v, original)).toBeNull()
   })
 
   it('converts again once the file changes', async () => {
     const v = tmpVault()
-    const original = document(v, 'Book.md')
+    const original = document(v, 'Book.docx')
     let text = 'first conversion'
     let calls = 0
     const convert = async () => {
@@ -179,16 +247,42 @@ describe('convertSource', () => {
       return { text }
     }
 
-    const first = await convertSource(v, original, convert)
+    const first = await approveSource(v, original, convert)
     writeFileSync(original, 'the original bytes, edited')
     text = 'second conversion'
-    const second = await convertSource(v, original, convert)
+    const second = await approveSource(v, original, convert)
 
     expect(calls).toBe(2)
     expect(second.hash).not.toBe(first.hash)
     expect(second.text).toBe('second conversion')
     // Both texts stay in the store — an older run still refers to the first.
     expect(existsSync(sourceTextPath(v, first.hash))).toBe(true)
+  })
+})
+
+describe('picked source identity', () => {
+  it('rejects a symlink retargeted after pick, even with a matching cache entry', async () => {
+    const v = tmpVault()
+    const first = document(v, 'First.txt')
+    const second = document(v, 'Second.txt', 'a different file')
+    const alias = join(v, 'Picked.txt')
+    symlinkSync(first, alias)
+    const picked = bindPickedSource(alias)!
+    expect(readPickedSource(picked).toString()).toBe('the original bytes')
+
+    rmSync(alias)
+    symlinkSync(second, alias)
+    await approveSource(v, alias, convertDocumentWithCoverage)
+    await expect(prepareSource(v, alias, convertDocumentWithCoverage, { picked })).rejects.toThrow('replaced')
+  })
+
+  it('refuses a replacement at the previously selected real path', () => {
+    const v = tmpVault()
+    const original = document(v, 'Original.txt')
+    const replacement = document(v, 'Replacement.txt')
+    const picked = bindPickedSource(original)!
+    renameSync(replacement, original)
+    expect(() => readPickedSource(picked)).toThrow('replaced')
   })
 })
 

@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
@@ -16,7 +16,7 @@ test.beforeAll(async () => {
   writeFileSync(join(vaultDir, 'Alpha.md'), '# Alpha\n\ngraph theory nodes edges clustering centrality\n')
   writeFileSync(join(vaultDir, 'Beta.md'), '# Beta\n\ngraph nodes clustering theory centrality\n')
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-talkgraph-userdata-'))
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -33,7 +33,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('enable talk-to-docs and embed the vault', async () => {
@@ -48,18 +48,35 @@ test('the map overlays a "related but not linked" dashed edge to a similar note'
   await expect(page.locator('.graph-view')).toBeVisible()
 
   // Related is on by default once talk is ready: Beta (similar, unlinked) appears.
+  const related = page.getByRole('button', { name: 'Related', exact: true })
+  await expect(related).toHaveAttribute('aria-pressed', 'true')
+  await expect(related).toHaveText('Related: on')
   await expect(page.locator('.graph-node', { hasText: 'Beta' })).toBeVisible()
   await expect(page.locator('.graph-edge-related')).toHaveCount(1)
 
   // Toggling the overlay off removes it.
-  await page.locator('.graph-ctl', { hasText: 'Related' }).click()
+  await related.press('Enter')
+  await expect(related).toHaveAttribute('aria-pressed', 'false')
+  await expect(related).toHaveText('Related: off')
+  await expect(related).toBeFocused()
   await expect(page.locator('.graph-edge-related')).toHaveCount(0)
+  await page.getByTitle('Map scope').click()
+  await page.getByRole('menuitemradio', { name: 'Whole vault', exact: true }).click()
+  await expect(related).toHaveCount(0)
+  await page.getByTitle('Map scope').click()
+  await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click()
+  await expect(related).toHaveAttribute('aria-pressed', 'false')
 })
 
-test('colour-by-meaning is available with talk on and renders', async () => {
-  const sel = page.locator('.status-select-colour')
-  await sel.locator('.status-btn').click()
-  await sel.locator('.status-menu-item', { hasText: 'meaning' }).click() // talk-only option
-  await expect(sel.locator('.status-btn')).toContainText('meaning')
+test('colour-by-meaning follows semantic search availability', async () => {
+  const colour = page.getByTitle('Colour the dots by…')
+  await colour.click()
+  await page.getByRole('menuitemradio', { name: 'Meaning', exact: true }).click()
+  await expect(colour).toHaveAccessibleName('Colour: Meaning')
   await expect(page.locator('.graph-node', { hasText: 'Alpha' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Turn off', exact: true }).click()
+  await expect(colour).toHaveAccessibleName('Colour: Links')
+  await colour.click()
+  await expect(page.getByRole('menuitemradio', { name: 'Meaning', exact: true })).toHaveCount(0)
 })

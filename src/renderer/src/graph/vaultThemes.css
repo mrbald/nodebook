@@ -1,0 +1,124 @@
+.vault-themes:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.vault-themes-header {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.vault-themes-header h1 {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.vault-themes-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.vault-themes-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vault-theme-action {
+  padding: 6px 9px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.vault-themes-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.vault-themes-body > p {
+  max-width: 72ch;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.vault-theme-grid,
+.vault-theme-notes {
+  padding: 0;
+  margin: 0 0 12px;
+  list-style: none;
+}
+
+.vault-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 8px;
+  max-width: 72rem;
+}
+
+.vault-theme-grid button,
+.vault-theme-notes button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.vault-theme-grid button {
+  height: 100%;
+}
+
+.vault-theme-grid button:hover,
+.vault-theme-notes button:hover {
+  border-color: var(--accent);
+}
+
+.vault-themes button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.vault-theme-card-title {
+  font-weight: 600;
+}
+
+.vault-theme-grid button small,
+.vault-theme-notes button small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.vault-theme-notes {
+  display: grid;
+  gap: 5px;
+  max-width: 52rem;
+}
+
+.vault-theme-search {
+  width: min(100%, 28rem);
+  margin: 0 0 10px;
+}

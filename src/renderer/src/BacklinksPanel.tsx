@@ -1,3 +1,4 @@
+import { FigureSources } from './Figures'
 import { useEffect, useRef, useState } from 'react'
 import type { MarkdownFile, Backlink, Outbound } from '@shared/types'
 import { parseCitations, type NoteCitation, type NoteDocument } from './citations'
@@ -11,7 +12,7 @@ interface Props {
   /** Provenance citations from the note's frontmatter (distilled notes). */
   citations?: NoteCitation[]
   /** Open a citation's source note at the cited span. */
-  onOpenCitation?: (c: NoteCitation) => void
+  onOpenCitation?: (c: NoteCitation, index: number) => void
   /** Set when this note IS a converted document — drives "Open original". */
   document?: NoteDocument | null
   /** Open the file the document was converted from (main resolves the path). */
@@ -136,6 +137,7 @@ export function BacklinksPanel({
           )}
         </section>
       )}
+      <FigureSources key={active.path} path={active.path} revision={reloadKey} />
       {twins.length > 0 && (
         <section className="same-as">
           <h2>Same as</h2>
@@ -179,11 +181,11 @@ export function BacklinksPanel({
               role="button"
               tabIndex={0}
               title={`Open ${c.source} at characters ${c.start}–${c.end}`}
-              onClick={() => onOpenCitation?.(c)}
+              onClick={() => onOpenCitation?.(c, i)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  onOpenCitation?.(c)
+                  onOpenCitation?.(c, i)
                 }
               }}
             >

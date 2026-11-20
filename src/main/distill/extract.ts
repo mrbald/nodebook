@@ -432,7 +432,8 @@ function fold(s: string): Folded {
 function locateAllIn(
   h: Folded,
   quote: string,
-  limit = 2
+  limit = 2,
+  allowSpan?: (start: number, end: number) => boolean
 ): { start: number; end: number }[] {
   const search = (qNorm: string): { start: number; end: number }[] => {
     const out: { start: number; end: number }[] = []
@@ -440,7 +441,9 @@ function locateAllIn(
     while (out.length < limit) {
       const at = h.norm.indexOf(qNorm, from)
       if (at < 0) break
-      out.push({ start: h.chars[at].origStart, end: h.chars[at + qNorm.length - 1].origEnd })
+      const start = h.chars[at].origStart
+      const end = h.chars[at + qNorm.length - 1].origEnd
+      if (!allowSpan || allowSpan(start, end)) out.push({ start, end })
       from = at + 1 // overlapping matches count too: err towards "ambiguous"
     }
     return out
@@ -487,6 +490,8 @@ export interface GroundOptions {
   /** The whole source text: the last resort, and the strictest test — the
    *  quote must occur exactly once in the entire document. */
   fullText?: string
+  /** Whether the full-source fallback may cite this exact range. */
+  allowSpan?: (start: number, end: number) => boolean
 }
 
 export interface GroundingResult {
@@ -599,7 +604,7 @@ export function groundItems(
     //    resolves a quote straddling a chunk boundary.
     const full = foldedFull()
     if (!full) return { ok: false, reason: ambiguous ? 'ambiguous' : 'notFound' }
-    const found = locateAllIn(full, ev.quote)
+    const found = locateAllIn(full, ev.quote, 2, opts.allowSpan)
     if (found.length !== 1)
       return { ok: false, reason: found.length > 1 || ambiguous ? 'ambiguous' : 'notFound' }
     const owner = chunkHolding(found[0].start)

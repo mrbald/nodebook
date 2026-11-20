@@ -1,4 +1,4 @@
-import { test, expect, _electron as electron } from '@playwright/test'
+import { test, expect, launchElectron, closeElectron } from './electron'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { cpSync, mkdtempSync, writeFileSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
@@ -25,7 +25,7 @@ test.beforeAll(async () => {
   // config dir routed to a throwaway temp folder so the test never touches the
   // real user settings.
   const userDataDir = mkdtempSync(join(tmpdir(), 'nodebook-e2e-userdata-'))
-  app = await electron.launch({
+  app = await launchElectron({
     args: [projectRoot],
     env: { ...process.env, NODEBOOK_USER_DATA: userDataDir, NODEBOOK_E2E: '1' }
   })
@@ -51,7 +51,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
-  await app?.close()
+  await closeElectron(app)
 })
 
 test('opens a vault and lists its markdown recursively', async () => {
@@ -159,7 +159,7 @@ test('the sidebar search box finds a note and opens it', async () => {
   await expect(page.locator('.search-results li')).toHaveCount(1)
   await expect(page.locator('.search-result-title')).toHaveText('Welcome to Nodebook')
 
-  await page.locator('.search-results li').first().click()
+  await page.locator('.search-hit').first().click()
   await expect(page.locator('.cm-content')).toContainText('claim')
 
   await page.locator('.search-box').fill('') // restore the file tree

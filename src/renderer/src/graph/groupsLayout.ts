@@ -4,8 +4,7 @@ import { community } from './structure'
 /**
  * A community-region layout (a pragmatic, "min-cut-flavoured" engine): partition
  * the graph into communities (the same deterministic label-propagation used for
- * colour), give each community its own region on a ring, and ring each
- * community's notes around that region's centre. Weakly-connected groups end up
+ * colour), and give each community its own region on a ring. Weakly-connected groups end up
  * in separate areas — the structure you can't see in a force hairball. Pure and
  * deterministic (community ids + sorted node ids + index-based angles), so it is
  * golden-testable.
@@ -41,11 +40,16 @@ export function groupsLayout(
   const k = ordered.length
 
   const ringR = Math.min(W, H) * 0.32
-  // Keep a group's local radius small enough that adjacent regions don't collide.
-  const maxLocal = k > 1 ? 0.8 * ringR * Math.sin(Math.PI / k) : Math.min(W, H) * 0.38
-
-  ordered.forEach(([, ids], gi) => {
-    const a0 = (2 * Math.PI * gi) / k - Math.PI / 2
+  // Allocate more of the circumference to groups that need a larger area.
+  // Each disk fits within its own angular sector, even for unequal neighbours.
+  const totalWeight = ordered.reduce((sum, [, ids]) => sum + Math.sqrt(ids.length), 0)
+  const firstSector = 2 * Math.PI * Math.sqrt(ordered[0][1].length) / totalWeight
+  let angle = -Math.PI / 2 - firstSector / 2
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+  ordered.forEach(([, ids]) => {
+    const sector = 2 * Math.PI * Math.sqrt(ids.length) / totalWeight
+    const a0 = angle + sector / 2
+    angle += sector
     const gcx = k === 1 ? cx : cx + Math.cos(a0) * ringR
     const gcy = k === 1 ? cy : cy + Math.sin(a0) * ringR
     const m = ids.length
@@ -53,10 +57,14 @@ export function groupsLayout(
       pos.set(ids[0], { x: gcx, y: gcy })
       return
     }
+    const maxLocal = k === 1 ? Math.min(W, H) * 0.38 : 0.8 * ringR * Math.sin(Math.min(Math.PI, sector) / 2)
     const localR = Math.min(maxLocal, Math.min(W, H) * 0.05 * Math.sqrt(m))
     ids.forEach((id, j) => {
-      const a = (2 * Math.PI * j) / m - Math.PI / 2
-      pos.set(id, { x: gcx + Math.cos(a) * localR, y: gcy + Math.sin(a) * localR })
+      // A few notes read well as a ring. Use the interior of a larger group
+      // so every additional member doesn't squeeze two neighbours together.
+      const a = (m <= 8 ? 2 * Math.PI * j / m : j * goldenAngle) - Math.PI / 2
+      const r = m <= 8 ? localR : localR * Math.sqrt((j + 0.5) / m)
+      pos.set(id, { x: gcx + Math.cos(a) * r, y: gcy + Math.sin(a) * r })
     })
   })
   return pos

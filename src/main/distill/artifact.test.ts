@@ -455,12 +455,21 @@ describe('readRunNotes / readStagedNote (readable staging)', () => {
   it('reads one note by name, and refuses to escape the run\'s notes dir', () => {
     const v = tmpVault()
     writeRunArtifact(v, 'r1', { file: 'Federalist.md', text: 'the book' }, emitNotes(grounded()))
+    writeRunArtifact(v, 'r2', { file: 'Federalist.md', text: 'different contents' }, emitNotes(grounded()))
     const book = renderDocumentNote({ text: 'the book' }).content
     expect(readStagedNote(v, 'r1', 'Federalist')).toBe(book)
     expect(readStagedNote(v, 'r1', 'Federalist.md')).toBe(book)
+    expect(readStagedNote(v, 'r1', join(runDir(v, 'r1'), 'notes', 'Federalist.md'))).toBe(book)
     expect(readStagedNote(v, 'r1', 'nope')).toBeNull()
-    for (const evil of [join('..', '..', 'secret'), '/etc/passwd', '../../../etc/passwd'])
+    for (const evil of [
+      join('..', '..', 'secret'),
+      '/etc/passwd',
+      '../../../etc/passwd',
+      join(runDir(v, 'r2'), 'notes', 'Federalist.md'),
+      `${runDir(v, 'r1')}/notes/../notes/Federalist.md`
+    ])
       expect(readStagedNote(v, 'r1', evil)).toBeNull()
+    expect(readStagedNote(v, '../r1', 'Federalist')).toBeNull()
   })
 })
 

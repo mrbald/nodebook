@@ -1,3 +1,5 @@
+import { parseFigurePath } from '@shared/figures'
+import { figureUrl } from '@shared/figureUrl'
 import { RangeSetBuilder, type EditorState, type Extension } from '@codemirror/state'
 import {
   Decoration,
@@ -31,6 +33,7 @@ export type OpenUrl = (url: string) => void
 
 export type SpanKind =
   | 'pill'
+  | 'figure'
   | 'link'
   | 'hide'
   | 'fenceline'
@@ -110,7 +113,7 @@ function hideFences(state: EditorState, node: SyntaxNode, out: DecoSpan[]): void
 
 /** Extract display text + URL from a Link / Autolink / bare URL node. */
 function linkInfo(state: EditorState, node: SyntaxNode): { label: string; url: string } | null {
-  if (node.name === 'Link') {
+  if (node.name === 'Link' || node.name === 'Image') {
     const urlNode = node.getChild('URL')
     if (!urlNode) return null // reference-style link, leave raw
     const url = state.doc.sliceString(urlNode.from, urlNode.to)
@@ -156,6 +159,17 @@ export function computeSpans(
           return false
         }
 
+        const image = name === 'Image' ? ref.node : name === 'Link' ? ref.node.getChild('Image') : null
+        if (image) {
+          if (reveal && selectionTouches(state, ref.from, ref.to)) return false
+          const info = linkInfo(state, image)
+          const figure = info && parseFigurePath(info.url)
+          if (info && figure) {
+            out.push({ from: ref.from, to: ref.to, kind: 'figure', target: figure.id, label: info.label })
+            return false
+          }
+          if (name === 'Image') return false
+        }
         if (name === 'Link' || name === 'Autolink' || name === 'URL') {
           if (reveal && selectionTouches(state, ref.from, ref.to)) return false
           const info = linkInfo(state, ref.node)
@@ -275,6 +289,40 @@ class LinkWidget extends WidgetType {
   }
 }
 
+export interface EditorFigures {
+  path: string
+  open: (id: string, label: string, occurrence: number) => void
+}
+
+class FigureWidget extends WidgetType {
+  constructor(readonly id: string, readonly label: string, readonly scope: EditorFigures, readonly from: number) { super() }
+  eq(other: FigureWidget): boolean {
+    return this.id === other.id && this.label === other.label && this.scope.path === other.scope.path && this.from === other.from
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'cm-source-figure'
+    button.setAttribute('aria-label', `View figure · ${this.label}`)
+    const image = document.createElement('img')
+    image.alt = this.label
+    image.loading = 'lazy'
+    image.addEventListener('load', () => view.requestMeasure(), { once: true })
+    image.src = figureUrl(this.scope.path, this.id)
+    button.append(image)
+    button.addEventListener('click', () => {
+      let occurrence = 0
+      syntaxTree(view.state).iterate({ to: this.from, enter: (node) => {
+        if (node.from >= this.from || node.name !== 'Image') return
+        const info = linkInfo(view.state, node.node)
+        if (info && parseFigurePath(info.url)?.id === this.id) occurrence++
+      } })
+      this.scope.open(this.id, this.label, occurrence)
+    })
+    return button
+  }
+}
+
 const HIDE = Decoration.replace({})
 const FENCE_LINE = Decoration.line({ class: 'cm-fence-hidden' })
 const MARK_BOLD = Decoration.mark({ class: 'cm-md-bold' })
@@ -290,9 +338,12 @@ function spanToDecoration(
   s: DecoSpan,
   onOpen?: OpenLink,
   onOpenUrl?: OpenUrl,
-  linkExists?: (target: string) => boolean
-): Decoration {
+  linkExists?: (target: string) => boolean,
+  figures?: EditorFigures
+): Decoration | null {
   switch (s.kind) {
+    case 'figure':
+      return figures ? Decoration.replace({ widget: new FigureWidget(s.target!, s.label || 'Figure', figures, s.from) }) : null
     case 'pill': {
       const target = s.target ?? ''
       const ghost = linkExists ? !linkExists(target) : false
@@ -317,7 +368,7 @@ function spanToDecoration(
   }
 }
 
-const ATOMIC: ReadonlySet<SpanKind> = new Set<SpanKind>(['pill', 'link', 'hide'])
+const ATOMIC: ReadonlySet<SpanKind> = new Set<SpanKind>(['pill', 'link', 'figure', 'hide'])
 
 interface Built {
   decorations: DecorationSet
@@ -329,13 +380,15 @@ function build(
   onOpen?: OpenLink,
   onOpenUrl?: OpenUrl,
   reveal = true,
-  linkExists?: (target: string) => boolean
+  linkExists?: (target: string) => boolean,
+  figures?: EditorFigures
 ): Built {
   const spans = computeSpans(view.state, view.visibleRanges, reveal)
   const decoBuilder = new RangeSetBuilder<Decoration>()
   const atomicBuilder = new RangeSetBuilder<Decoration>()
   for (const s of spans) {
-    const deco = spanToDecoration(s, onOpen, onOpenUrl, linkExists)
+    const deco = spanToDecoration(s, onOpen, onOpenUrl, linkExists, figures)
+    if (!deco) continue
     decoBuilder.add(s.from, s.to, deco)
     if (ATOMIC.has(s.kind)) atomicBuilder.add(s.from, s.to, deco)
   }
@@ -351,14 +404,15 @@ export function livePreview(
   onOpen?: OpenLink,
   onOpenUrl?: OpenUrl,
   reveal = true,
-  linkExists?: (target: string) => boolean
+  linkExists?: (target: string) => boolean,
+  figures?: EditorFigures
 ): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet
       atomic: DecorationSet
       constructor(view: EditorView) {
-        const built = build(view, onOpen, onOpenUrl, reveal, linkExists)
+        const built = build(view, onOpen, onOpenUrl, reveal, linkExists, figures)
         this.decorations = built.decorations
         this.atomic = built.atomic
       }
@@ -372,7 +426,7 @@ export function livePreview(
           (reveal && u.selectionSet) ||
           syntaxTree(u.startState) !== syntaxTree(u.state)
         ) {
-          const built = build(u.view, onOpen, onOpenUrl, reveal, linkExists)
+          const built = build(u.view, onOpen, onOpenUrl, reveal, linkExists, figures)
           this.decorations = built.decorations
           this.atomic = built.atomic
         }

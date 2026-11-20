@@ -105,3 +105,14 @@ describe('computeSpans', () => {
     expect(spans.some((s) => s.kind === 'hide')).toBe(false)
   })
 })
+
+
+it('reads a linked managed figure as a figure, and keeps an ordinary external link intact', () => {
+  const id = '9'.repeat(64)
+  expect(spansFor(`[![Chart](figures/${id}.png)](https://example.org/)`, 0, false)).toMatchObject([
+    { kind: 'figure', target: id, label: 'Chart' }
+  ])
+  expect(spansFor('[![Logo](logo.png)](https://example.org/)', 0, false)).toMatchObject([
+    { kind: 'link', target: 'https://example.org/' }
+  ])
+})
