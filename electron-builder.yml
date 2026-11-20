@@ -38,6 +38,13 @@ linux:
   target:
     - AppImage
     - deb
+deb:
+  # Append to electron-builder's default dependencies.
+  fpm:
+    - --depends
+    - libgbm1
+    - --depends
+    - 'libasound2t64 | libasound2'
 # The release workflow stages and verifies the GitHub Release draft.
 publish:
   provider: github

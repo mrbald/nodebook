@@ -134,6 +134,20 @@ jobs:
           else
             npx --no-install electron-builder --publish never
           fi
+      - name: Check the Debian runtime dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # An empty dpkg status file prevents runner-installed libraries from hiding missing dependencies.
+          status="$RUNNER_TEMP/empty-dpkg-status"
+          plan="$RUNNER_TEMP/nodebook-apt-plan"
+          : > "$status"
+          sudo apt-get -o Acquire::Retries=3 update -qq
+          LC_ALL=C apt-get -s -o "Dir::State::status=$status" --no-install-recommends \
+            install "./dist/nodebook_${RELEASE_VERSION}_amd64.deb" > "$plan"
+          grep -E '^Inst libgbm1(:amd64)? ' "$plan"
+          grep -E '^Inst libasound2(t64)?(:amd64)? ' "$plan"
+
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.os }}
