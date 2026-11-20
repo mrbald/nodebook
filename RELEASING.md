@@ -45,3 +45,9 @@ loads the real SQLite extension using an isolated profile and fixture vault.
 ```sh
 NODEBOOK_SMOKE_BINARY="$PWD/dist/mac-arm64/Nodebook.app/Contents/MacOS/Nodebook" npx playwright test e2e/talk.spec.ts
 ```
+
+## Dependency updates
+
+Dependabot checks npm, GitHub Actions and the pre-commit hook every day at 05:00 UTC. New versions must be at least five days old. Security fixes can appear as PRs sooner. CI checks publication dates before npm installs from the lockfile, including indirect dependencies.
+
+GitHub can squash-merge a Dependabot PR when it is up to date with `main` and passes the tests, security scans and native package builds. Review a failing check on the PR. Local npm updates use the same release-age setting with npm 11.10 or later.
