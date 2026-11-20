@@ -8,7 +8,7 @@ Write in Markdown, link your notes, and turn a book into a map of ideas. Each no
 
 Risk measures in Sheldon Natenberg’s *Option Volatility & Pricing Workbook*. Select a note to read its summary. Hover over a neighbour to trace its connections.
 
-The screenshots and guide describe Nodebook 0.2.0. [Latest published release](https://github.com/mrbald/nodebook/releases/latest)
+The screenshots and guide describe Nodebook 0.2. [Latest published release](https://github.com/mrbald/nodebook/releases/latest)
 
 ## Install Nodebook
 
@@ -20,6 +20,8 @@ The Electron 45 build requires macOS 13 (Ventura) or later on both Apple silicon
 | Mac with an Intel processor | The DMG ending in `-x64.dmg` |
 | Windows | `-setup.exe` for the installer, or `-portable.exe` to run without installing |
 | Linux on x86-64 | The `.AppImage` or the `amd64.deb` package for Debian-based systems |
+
+On Debian or Ubuntu, open a terminal in the download folder and run `sudo apt install ./nodebook_0.2.1_amd64.deb`. APT installs the audio and graphics libraries Nodebook needs. The AppImage uses those system libraries too.
 
 On a Mac, open the DMG, drag **Nodebook** to **Applications**, then open it there. The GitHub downloads are ad-hoc signed. If macOS says it cannot verify Nodebook, dismiss the message. For a copy you trust, choose **System Settings → Privacy & Security → Open Anyway** and confirm. [Apple’s first-launch instructions](https://support.apple.com/en-us/102445)
 
