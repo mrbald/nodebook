@@ -190,6 +190,8 @@ jobs:
               cat > "$notes" <<'NOTES'
           ## Install on macOS
 
+          Requires macOS 13 (Ventura) or later.
+
           1. Download the `arm64` DMG for Apple silicon or the `x64` DMG for Intel.
           2. Open the DMG, drag Nodebook to Applications, then open it from Applications.
           3. Nodebook is ad-hoc signed and Apple has not notarized it. If macOS says it can't verify Nodebook, dismiss the alert. In **System Settings → Privacy & Security**, click **Open Anyway** for Nodebook and confirm. macOS remembers the exception for that copy.
