@@ -64,7 +64,7 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.65.1",
     "@resvg/resvg-js": "^2.6.2",
-    "@types/better-sqlite3": "^7.6.13",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
