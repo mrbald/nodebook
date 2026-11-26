@@ -45,7 +45,7 @@
     "@huggingface/transformers": "^4.3.2",
     "@lezer/highlight": "^1.2.5",
     "@lezer/markdown": "^1.8.1",
-    "@napi-rs/canvas": "^1.0.1",
+    "@napi-rs/canvas": "^1.2.0",
     "better-sqlite3": "^13.2.0",
     "chokidar": "^6.0.0",
     "elkjs": "^0.12.1",
